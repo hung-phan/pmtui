@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>agent-manager Decider Architecture</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f5f7f8;
+      --surface: #ffffff;
+      --surface-2: #eef2f3;
+      --ink: #172126;
+      --muted: #59686f;
+      --line: #cbd4d8;
+      --strong: #101719;
+      --green: #16794b;
+      --yellow: #a76700;
+      --red: #b4232f;
+      --blue: #1769aa;
+      --code: #20292d;
+      --code-ink: #eef5f6;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #121719;
+        --surface: #1a2225;
+        --surface-2: #222c30;
+        --ink: #edf3f4;
+        --muted: #a9b8bd;
+        --line: #3a494f;
+        --strong: #ffffff;
+        --green: #55c98a;
+        --yellow: #f0b64e;
+        --red: #ff7883;
+        --blue: #70b7ee;
+        --code: #0d1113;
+        --code-ink: #edf3f4;
+      }
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+      letter-spacing: 0;
+    }
+    a { color: var(--blue); }
+    code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+    code { overflow-wrap: anywhere; }
+    .shell { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 100vh; }
+    aside {
+      position: sticky;
+      top: 0;
+      align-self: start;
+      height: 100vh;
+      padding: 24px 18px;
+      background: var(--surface);
+      border-right: 1px solid var(--line);
+      overflow-y: auto;
+    }
+    .brand { font-size: 18px; font-weight: 800; color: var(--strong); margin-bottom: 4px; }
+    .edition { color: var(--muted); font-size: 12px; margin-bottom: 22px; }
+    nav a {
+      display: block;
+      padding: 7px 9px;
+      margin: 2px 0;
+      border-left: 3px solid transparent;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 13px;
+    }
+    nav a:hover { border-left-color: var(--yellow); color: var(--strong); background: var(--surface-2); }
+    main { width: min(1180px, 100%); padding: 36px 42px 80px; min-width: 0; }
+    header {
+      border-top: 5px solid var(--yellow);
+      border-bottom: 1px solid var(--line);
+      padding: 26px 0 28px;
+      margin-bottom: 30px;
+    }
+    h1 { font-size: 38px; line-height: 1.08; margin: 0 0 12px; letter-spacing: 0; }
+    h2 { font-size: 25px; margin: 48px 0 16px; padding-top: 10px; border-top: 1px solid var(--line); }
+    h3 { font-size: 17px; margin: 26px 0 10px; }
+    p, li, td, th, figcaption { overflow-wrap: anywhere; }
+    .lead { max-width: 820px; color: var(--muted); font-size: 17px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+    .chip {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      padding: 4px 8px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 16px;
+      min-width: 0;
+    }
+    .panel h3 { margin-top: 0; }
+    .metric { font-size: 24px; font-weight: 800; }
+    .muted { color: var(--muted); }
+    .ok { color: var(--green); }
+    .warn { color: var(--yellow); }
+    .danger { color: var(--red); }
+    .figure {
+      margin: 18px 0 26px;
+      padding: 12px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow-x: auto;
+    }
+    .figure svg { display: block; width: 100%; min-width: 720px; height: auto; color: var(--ink); }
+    figcaption { color: var(--muted); font-size: 13px; padding: 10px 4px 2px; }
+    .node { fill: var(--surface-2); stroke: var(--line); stroke-width: 2; }
+    .node-strong { fill: var(--strong); stroke: var(--strong); stroke-width: 2; }
+    .node-green { fill: color-mix(in srgb, var(--green) 16%, var(--surface)); stroke: var(--green); stroke-width: 2; }
+    .node-yellow { fill: color-mix(in srgb, var(--yellow) 16%, var(--surface)); stroke: var(--yellow); stroke-width: 2; }
+    .node-red { fill: color-mix(in srgb, var(--red) 13%, var(--surface)); stroke: var(--red); stroke-width: 2; }
+    .svg-label { fill: var(--ink); font: 700 15px ui-sans-serif, system-ui, sans-serif; }
+    .svg-small { fill: var(--muted); font: 12px ui-sans-serif, system-ui, sans-serif; }
+    .svg-invert { fill: var(--page); font: 700 15px ui-sans-serif, system-ui, sans-serif; }
+    .edge { stroke: var(--muted); stroke-width: 2; fill: none; marker-end: url(#arrow); }
+    .edge-green { stroke: var(--green); stroke-width: 3; fill: none; marker-end: url(#arrow-green); }
+    .edge-red { stroke: var(--red); stroke-width: 2; fill: none; marker-end: url(#arrow-red); stroke-dasharray: 6 5; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+    table { width: 100%; border-collapse: collapse; min-width: 760px; font-size: 13px; }
+    th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+    th { background: var(--surface-2); color: var(--strong); font-size: 12px; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    pre {
+      background: var(--code);
+      color: var(--code-ink);
+      padding: 14px;
+      border-radius: 5px;
+      overflow-x: auto;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .invariant {
+      border-left: 4px solid var(--green);
+      padding: 9px 12px;
+      margin: 8px 0;
+      background: var(--surface);
+    }
+    .invariant strong { color: var(--strong); }
+    details { background: var(--surface); border: 1px solid var(--line); border-radius: 5px; margin: 8px 0; }
+    summary { cursor: pointer; padding: 11px 13px; font-weight: 750; }
+    details > div { padding: 0 13px 13px; color: var(--muted); }
+    footer { margin-top: 54px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+    @media (max-width: 900px) {
+      .shell { display: block; }
+      aside { position: static; width: auto; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      nav { display: flex; overflow-x: auto; }
+      nav a { white-space: nowrap; border-left: 0; border-bottom: 3px solid transparent; }
+      main { padding: 24px 18px 60px; }
+      .grid { grid-template-columns: 1fr; }
+      h1 { font-size: 31px; }
+    }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <aside>
+    <div class="brand">Autopilot decisions</div>
+    <div class="edition">Behavior guide · 2026-08-30</div>
+    <nav aria-label="Document sections">
+      <a href="#contract">Contract</a>
+      <a href="#topology">Topology</a>
+      <a href="#decision-flow">Decision flow</a>
+      <a href="#state-machine">State machine</a>
+      <a href="#durability">Memory</a>
+      <a href="#interfaces">Decision context</a>
+      <a href="#failure-matrix">Failure matrix</a>
+      <a href="#invariants">Invariants</a>
+      <a href="#observability">Observability</a>
+    </nav>
+  </aside>
+  <main>
+    <header>
+      <h1>How the Autopilot Decider Works</h1>
+      <p class="lead">Autopilot keeps the worker moving toward the goal. When the worker asks for a decision, a read-only decider may answer one ordinary, low-stakes question; anything that genuinely needs human authority still reaches you.</p>
+      <div class="chips">
+        <span class="chip">Read-only model call</span>
+        <span class="chip">One stop at a time</span>
+        <span class="chip">Recorded before action</span>
+        <span class="chip">Validated verdict required</span>
+        <span class="chip">Human owns completion</span>
+      </div>
+    </header>
+
+    <section id="contract">
+      <h2>1. Contract</h2>
+      <div class="grid">
+        <article class="panel"><div class="metric ok">May</div><p>Choose one listed option or provide a bounded answer when typed policy and the goal make that action ordinary, local, and reversible.</p></article>
+        <article class="panel"><div class="metric danger">May not</div><p>Write files, call external systems, invent options, approve hard-risk work, decide project completion, or bypass a live human attachment.</p></article>
+        <article class="panel"><div class="metric warn">Must prove</div><p>The reply belongs to this consult, uses the same nonce and grant, stays within size/control-byte limits, and names only harness-owned options.</p></article>
+      </div>
+      <p>The decider is above Claude/Codex permission modes, not a replacement for them. Agent permissions control tool execution. The decider controls whether Autopilot can answer a worker-authored decision without escalating to the human.</p>
+    </section>
+
+    <section id="topology">
+      <h2>2. Component topology</h2>
+      <figure class="figure">
+        <svg viewBox="0 0 1080 390" role="img" aria-labelledby="topology-title topology-desc">
+          <title id="topology-title">Decider component topology</title>
+          <desc id="topology-desc">Worker marker enters deterministic policy, then a read-only consult, validation, durable ledger, and either the worker pane or human dashboard.</desc>
+          <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="var(--muted)"/></marker>
+            <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="var(--green)"/></marker>
+            <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="var(--red)"/></marker>
+          </defs>
+          <g id="worker-marker"><title>Worker asks</title><rect class="node" x="20" y="132" width="145" height="78" rx="5"/><text class="svg-label" x="92" y="162" text-anchor="middle">Worker asks</text><text class="svg-small" x="92" y="184" text-anchor="middle">question + choices</text></g>
+          <g id="policy-gate"><title>Deterministic policy gate</title><rect class="node-yellow" x="205" y="112" width="180" height="118" rx="5"/><text class="svg-label" x="295" y="147" text-anchor="middle">Typed preflight</text><text class="svg-small" x="295" y="171" text-anchor="middle">tier · kind · risk</text><text class="svg-small" x="295" y="191" text-anchor="middle">effect axes · hard floor</text></g>
+          <g id="consult-builder"><title>Consult builder</title><rect class="node" x="425" y="55" width="180" height="95" rx="5"/><text class="svg-label" x="515" y="88" text-anchor="middle">Consult builder</text><text class="svg-small" x="515" y="112" text-anchor="middle">goal + situation + nonce</text></g>
+          <g id="detached-decider"><title>Read-only decider</title><rect class="node-strong" x="650" y="42" width="190" height="120" rx="5"/><text class="svg-invert" x="745" y="78" text-anchor="middle">Read-only decider</text><text class="svg-small" x="745" y="104" text-anchor="middle" style="fill:var(--page)">checks project evidence</text><text class="svg-small" x="745" y="124" text-anchor="middle" style="fill:var(--page)">cannot modify the project</text></g>
+          <g id="validator"><title>Reply validator</title><rect class="node-green" x="885" y="55" width="170" height="95" rx="5"/><text class="svg-label" x="970" y="88" text-anchor="middle">Validator</text><text class="svg-small" x="970" y="112" text-anchor="middle">nonce · grant · bounds</text></g>
+          <g id="ledger"><title>Decision audit</title><rect class="node" x="425" y="255" width="180" height="85" rx="5"/><text class="svg-label" x="515" y="286" text-anchor="middle">Decision audit</text><text class="svg-small" x="515" y="310" text-anchor="middle">inputs + outcome</text></g>
+          <g id="worker-output"><title>Worker continuation</title><rect class="node-green" x="690" y="255" width="160" height="85" rx="5"/><text class="svg-label" x="770" y="286" text-anchor="middle">Worker continues</text><text class="svg-small" x="770" y="310" text-anchor="middle">answer on next turn</text></g>
+          <g id="human-output"><title>Human escalation</title><rect class="node-red" x="895" y="255" width="160" height="85" rx="5"/><text class="svg-label" x="975" y="286" text-anchor="middle">Human owns it</text><text class="svg-small" x="975" y="310" text-anchor="middle">dashboard + notification</text></g>
+          <path class="edge" d="M165 171 H205"/><path class="edge" d="M385 146 C405 130 410 105 425 105"/>
+          <path class="edge" d="M605 102 H650"/><path class="edge-green" d="M840 102 H885"/>
+          <path class="edge" d="M515 150 V255"/><path class="edge" d="M970 150 C970 200 835 210 780 255"/>
+          <path class="edge-red" d="M385 205 C545 245 790 225 895 286"/><path class="edge-red" d="M970 150 V255"/>
+          <path class="edge-green" d="M605 298 H690"/>
+        </svg>
+        <figcaption>Topology separates deterministic eligibility from probabilistic reasoning. The model never receives authority merely because policy labelled the stop low risk.</figcaption>
+      </figure>
+      <p>The important split is simple: fixed policy decides whether Autopilot is allowed to ask the decider; the decider then uses the goal and current evidence to choose. Neither layer alone can approve an action.</p>
+    </section>
+
+    <section id="decision-flow">
+      <h2>3. Decision sequence</h2>
+      <figure class="figure">
+        <svg viewBox="0 0 1080 500" role="img" aria-labelledby="sequence-title">
+          <title id="sequence-title">One decider consult from marker to continuation</title>
+          <defs><marker id="seq-arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="var(--muted)"/></marker></defs>
+          <g class="svg-small">
+            <text x="90" y="28" text-anchor="middle">Worker</text><text x="315" y="28" text-anchor="middle">Scheduler</text>
+            <text x="550" y="28" text-anchor="middle">Ledger</text><text x="775" y="28" text-anchor="middle">tmux decider</text><text x="990" y="28" text-anchor="middle">Validator</text>
+          </g>
+          <g stroke="var(--line)" stroke-width="2"><line x1="90" y1="42" x2="90" y2="470"/><line x1="315" y1="42" x2="315" y2="470"/><line x1="550" y1="42" x2="550" y2="470"/><line x1="775" y1="42" x2="775" y2="470"/><line x1="990" y1="42" x2="990" y2="470"/></g>
+          <g class="svg-small">
+            <text x="195" y="78" text-anchor="middle">blocked marker</text><line x1="90" y1="86" x2="305" y2="86" stroke="var(--muted)" marker-end="url(#seq-arrow)"/>
+            <text x="430" y="126" text-anchor="middle">record the question as consulting</text><line x1="315" y1="134" x2="540" y2="134" stroke="var(--green)" marker-end="url(#seq-arrow)"/>
+            <text x="545" y="174" text-anchor="middle">start an isolated read-only decision</text><line x1="315" y1="182" x2="765" y2="182" stroke="var(--muted)" marker-end="url(#seq-arrow)"/>
+            <text x="655" y="222" text-anchor="middle">wait without blocking other projects</text><line x1="775" y1="230" x2="325" y2="230" stroke="var(--muted)" marker-end="url(#seq-arrow)"/>
+            <text x="655" y="270" text-anchor="middle">collect the final answer</text><line x1="315" y1="278" x2="980" y2="278" stroke="var(--muted)" marker-end="url(#seq-arrow)"/>
+            <text x="650" y="318" text-anchor="middle">validated verdict or refusal</text><line x1="990" y1="326" x2="325" y2="326" stroke="var(--green)" marker-end="url(#seq-arrow)"/>
+            <text x="430" y="366" text-anchor="middle">record the outcome</text><line x1="315" y1="374" x2="540" y2="374" stroke="var(--green)" marker-end="url(#seq-arrow)"/>
+            <text x="195" y="414" text-anchor="middle">next nudge carries answer</text><line x1="315" y1="422" x2="100" y2="422" stroke="var(--green)" marker-end="url(#seq-arrow)"/>
+          </g>
+        </svg>
+        <figcaption>Ownership is durable before process spawn. Every path that clears ownership first terminates the deterministic tmux session, then records the final audit.</figcaption>
+      </figure>
+    </section>
+
+    <section id="state-machine">
+      <h2>4. Scheduler state machine</h2>
+      <figure class="figure">
+        <svg viewBox="0 0 1080 430" role="img" aria-labelledby="state-title">
+          <title id="state-title">Decider state machine</title>
+          <defs><marker id="state-arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="var(--muted)"/></marker></defs>
+          <g id="state-none"><title>No consult</title><rect class="node" x="30" y="155" width="150" height="70" rx="5"/><text class="svg-label" x="105" y="196" text-anchor="middle">No consult</text></g>
+          <g id="state-skipped"><title>Preflight skipped</title><rect class="node-red" x="240" y="30" width="170" height="75" rx="5"/><text class="svg-label" x="325" y="61" text-anchor="middle">Not called</text><text class="svg-small" x="325" y="82" text-anchor="middle">audit skip reason</text></g>
+          <g id="state-owned"><title>Decision recorded</title><rect class="node-yellow" x="240" y="155" width="170" height="75" rx="5"/><text class="svg-label" x="325" y="186" text-anchor="middle">Recorded</text><text class="svg-small" x="325" y="207" text-anchor="middle">before work starts</text></g>
+          <g id="state-running"><title>Consult running</title><rect class="node" x="475" y="155" width="170" height="75" rx="5"/><text class="svg-label" x="560" y="186" text-anchor="middle">Consulting</text><text class="svg-small" x="560" y="207" text-anchor="middle">short poll cadence</text></g>
+          <g id="state-resolved"><title>Resolved</title><rect class="node-green" x="720" y="45" width="160" height="75" rx="5"/><text class="svg-label" x="800" y="77" text-anchor="middle">Resolved</text><text class="svg-small" x="800" y="98" text-anchor="middle">apply once</text></g>
+          <g id="state-refused"><title>Refused or failed</title><rect class="node-red" x="720" y="165" width="160" height="75" rx="5"/><text class="svg-label" x="800" y="197" text-anchor="middle">Refused / failed</text><text class="svg-small" x="800" y="218" text-anchor="middle">human stop</text></g>
+          <g id="state-interrupted"><title>Interrupted</title><rect class="node-yellow" x="720" y="285" width="160" height="75" rx="5"/><text class="svg-label" x="800" y="317" text-anchor="middle">Interrupted</text><text class="svg-small" x="800" y="338" text-anchor="middle">transition / restart</text></g>
+          <path class="edge-red" d="M180 175 C205 120 210 72 240 68"/><path class="edge" d="M180 190 H240"/>
+          <path class="edge" d="M410 192 H475"/><path class="edge-green" d="M645 175 C685 145 690 85 720 83"/>
+          <path class="edge-red" d="M645 195 H720"/><path class="edge" d="M645 215 C680 260 690 320 720 322"/>
+          <path class="edge" d="M800 120 C800 390 150 390 105 225"/><path class="edge" d="M800 240 C800 400 160 410 105 225"/>
+          <path class="edge" d="M720 322 C530 370 240 360 105 225"/>
+        </svg>
+        <figcaption>The durable audit distinguishes “not called,” “consulting,” “resolved,” “refused,” “failed,” and “interrupted.” “Eligible” is never represented as “approved.”</figcaption>
+      </figure>
+    </section>
+
+    <section id="durability">
+      <h2>5. What Autopilot remembers</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Memory</th><th>Why it matters</th><th>When it changes</th></tr></thead>
+          <tbody>
+            <tr><td>Current question</td><td>A restart must not lose an in-progress decision or apply it to a different question.</td><td>Recorded before the decider starts; cleared only after a final outcome.</td></tr>
+            <tr><td>Decision audit</td><td>You can see why the decider was called, skipped, accepted, or refused.</td><td>Appended when policy evaluates the stop and finalized when the outcome is known.</td></tr>
+            <tr><td>Pending answer</td><td>A valid answer survives until the worker is idle and ready to receive it.</td><td>Removed only after delivery to the worker.</td></tr>
+            <tr><td>Recent progress</td><td>The decider can compare the question with the goal, latest accepted worker result, next step, and recent outcomes.</td><td>Projected fresh for each decision, kept bounded, and separated from supervisor-authored status.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="invariant"><strong>No stale replay:</strong> an answer is bound to the exact question that produced it and cannot silently carry into later work.</div>
+    </section>
+
+    <section id="interfaces">
+      <h2>6. What the decider considers</h2>
+      <div class="grid">
+        <article class="panel"><div class="metric">Goal</div><p>What outcome the human asked the project to achieve.</p></article>
+        <article class="panel"><div class="metric">Situation</div><p>The worker's current plan, recent decisions, and still-open blockers.</p></article>
+        <article class="panel"><div class="metric">Question</div><p>The concrete choice, bounded options, and reported effect.</p></article>
+        <article class="panel"><div class="metric">Directive</div><p>Standing human constraints that may restrict a decision but never grant extra authority.</p></article>
+      </div>
+      <p><strong>Worker question:</strong> a validated answer is held until the ordinary idle-gated heartbeat can deliver it safely.</p>
+      <p><strong>Terminal choice:</strong> Autopilot re-checks the live prompt, proves it can move the selection, verifies no human attached, and sends only the minimum navigation needed.</p>
+    </section>
+
+    <section id="failure-matrix">
+      <h2>7. Failure matrix</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Failure</th><th>Required response</th><th>Human-visible result</th></tr></thead>
+          <tbody>
+            <tr><td>Hard floor or incomplete effect metadata</td><td>Do not spawn. Record <em>Skipped</em>.</td><td>Original stop remains human-owned.</td></tr>
+            <tr><td>Spawn failure</td><td>Clear pre-spawn debt via durable failed audit; latch transport as unavailable.</td><td>Capability escalation.</td></tr>
+            <tr><td>Timeout, orphan, unreadable done signal</td><td>Terminate first; retain ownership if termination fails; otherwise record failed audit.</td><td>Capability escalation with original question.</td></tr>
+            <tr><td>Wrong nonce, invalid action, control byte, oversized text</td><td>Refuse reply; never apply partial content.</td><td>Capability escalation and refusal reason.</td></tr>
+            <tr><td>Human attaches or prompt changes</td><td>Cancel or freeze once; never race terminal input.</td><td>Human answers live prompt.</td></tr>
+            <tr><td>New marker, worker relaunch, Standard/pause/root change</td><td>Terminate decider and persist Interrupted before transition.</td><td>No stale advice reaches new work.</td></tr>
+            <tr><td>Ledger save fails after termination</td><td>Restore in-memory ownership for retry.</td><td>No false completion; next sweep retries.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="invariants">
+      <h2>8. Non-negotiable invariants</h2>
+      <div class="invariant"><strong>Deterministic gate first.</strong> Model judgment cannot weaken typed policy or hard floors.</div>
+      <div class="invariant"><strong>One validated verdict.</strong> Exactly one stop may flow automatically, and only after validation.</div>
+      <div class="invariant"><strong>Goal-aware, not precedent-driven.</strong> The consult receives current goal, directive, bounded situation, question, and harness-owned options.</div>
+      <div class="invariant"><strong>Two writers remain two writers.</strong> The decider is read-only; worker and pmd retain their file ownership boundaries.</div>
+      <div class="invariant"><strong>Record before acting.</strong> The question is durable before the decider starts.</div>
+      <div class="invariant"><strong>Termination precedes release.</strong> A failed kill keeps the debt and blocks the lifecycle transition.</div>
+      <div class="invariant"><strong>Human attachment wins.</strong> No automated terminal selection occurs while a human owns the pane.</div>
+      <div class="invariant"><strong>No machine completion.</strong> The decider cannot mark the project done.</div>
+    </section>
+
+    <section id="observability">
+      <h2>9. Observability</h2>
+      <p>The <code>v</code> decisions view shows the durable audit. Each row should answer:</p>
+      <ul>
+        <li>Was the decider called? If not, which deterministic rule stopped it?</li>
+        <li>Which engine/model and target were selected?</li>
+        <li>What typed policy and effect metadata governed the call?</li>
+        <li>Was the result resolved, refused, failed, skipped, or interrupted?</li>
+        <li>What exact answer or refusal reason was recorded?</li>
+      </ul>
+      <p>The audit is the source of truth and remains available after temporary decision work is cleaned up.</p>
+      <p>Durable consult debt appears as review pending. While its matching decider terminal is live, the primary session view shows reviewing, how long the consult has been open, and how many sibling decisions remain. Human-owned attention takes precedence; detailed evidence and outcomes stay in the audit.</p>
+    </section>
+
+    <footer>
+      This guide explains Autopilot decision behavior: keep ordinary goal-directed work moving, escalate human-owned choices, and make every automated decision reviewable.
+    </footer>
+  </main>
+</div>
+</body>
+</html>

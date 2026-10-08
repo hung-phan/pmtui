@@ -1,0 +1,16 @@
+{
+  "data": [
+    {
+      "files": [
+        {
+          "filename": "/repo/src/lib.rs",
+          "summary": {
+            "lines": { "percent": 94 },
+            "functions": { "percent": 100 },
+            "regions": { "percent": 100 }
+          }
+        }
+      ]
+    }
+  ]
+}

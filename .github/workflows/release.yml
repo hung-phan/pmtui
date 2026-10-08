@@ -1,0 +1,224 @@
+name: release
+
+# THIS WORKFLOW VERIFIES THE RELEASE, NOT THE CODE.
+#
+# It used to re-run fmt, clippy, audit, the coverage suite and the real-tmux suite in one serial,
+# uncached job — about twenty minutes of work that `ci` had already done, in parallel and cached, on
+# the very commit being tagged. Re-running a suite is not a second opinion: it is the same suite. So
+# the gate is now the actual question, "did ci pass on THIS commit?", answered from the commit's own
+# check runs, plus the three things only a release can check — that the tag names this commit, that
+# the version the binaries will report is the version being tagged, and that the commit came through
+# main. The artifacts are then smoke-tested before they are published, which is the one failure mode
+# neither workflow used to catch.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to build (for example v0.1.0)'
+        required: true
+
+# Never cancel a release in flight: a half-uploaded set of assets is worse than a queued run.
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+  # How long to wait for ci's `verify` check to CONCLUDE on the tagged commit. Tagging straight after
+  # a merge is the normal flow, so the gate waits for a run that is still going rather than failing a
+  # release that would have passed a minute later. It never waits for a run that has already failed.
+  CI_WAIT_SECONDS: '1200'
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_REF }}
+          # Full history: the "did this come through main?" check needs a merge base.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: The tag names this commit, this version, and a commit from main
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+          test "$(git describe --tags --exact-match HEAD)" = "$RELEASE_TAG"
+          # The version the BINARIES will report must be the version being tagged. Without this a
+          # `v0.2.0` release can ship binaries that answer `0.1.0`, and the tarball name — built from
+          # the tag — would disagree with its own contents.
+          manifest="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          test "$manifest" = "${RELEASE_TAG#v}"
+          # …and the commit must be one that came through main. A tag can be pushed to any commit on
+          # any branch; without this, a branch that never passed ci is shippable.
+          git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          git merge-base --is-ancestor HEAD refs/remotes/origin/main
+      - name: ci passed on this commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          deadline=$(( $(date +%s) + CI_WAIT_SECONDS ))
+          # `verify` is ci's own fan-in job: it is green only when build-lint, tests, audit and
+          # real-tmux all were, so this one check answers for the whole suite.
+          while :; do
+            runs="$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha/check-runs?per_page=100" \
+              -q '.check_runs[] | select(.name == "verify") | "\(.status):\(.conclusion)"')"
+            if grep -qx 'completed:success' <<<"$runs"; then
+              echo "ci verify passed on $sha"
+              break
+            fi
+            if [[ -n "$runs" ]] && ! grep -qE '^(queued|in_progress):' <<<"$runs"; then
+              echo "ci verify did not pass on $sha: $runs" >&2
+              exit 1
+            fi
+            if (( $(date +%s) >= deadline )); then
+              echo "ci verify has not concluded on $sha within ${CI_WAIT_SECONDS}s: ${runs:-<no run>}" >&2
+              exit 1
+            fi
+            sleep 30
+          done
+
+  build:
+    name: build ${{ matrix.asset_os }}/${{ matrix.asset_arch }}
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # LINUX SHIPS STATIC MUSL, NOT GLIBC. A glibc build carries the glibc of the runner that
+          # made it as a FLOOR: `ubuntu-latest` is 24.04 (glibc 2.39), so v0.1.0's binaries refused
+          # to start on Amazon Linux 2023, Debian 12 and RHEL 9 with `version GLIBC_2.39 not found`
+          # — and the installer reported success before they failed. musl links the C library in, so
+          # one artifact runs on every Linux rather than only on distributions no older than the
+          # builder.
+          #
+          # Cheap here, specifically: `Cargo.lock` carries no C dependencies (no openssl-sys, ring,
+          # libz-sys, cc, bindgen), so there is nothing to cross-compile, and neither binary opens a
+          # socket, so static musl's one real limitation — NSS lookups needing a dynamic libc —
+          # cannot bite. musl's slower allocator is irrelevant to a dashboard that redraws for a
+          # human and a daemon that stats files every 500ms.
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            asset_os: linux
+            asset_arch: amd64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            asset_os: linux
+            asset_arch: arm64
+          # `macos_min` is unset for the Linux entries above, which leaves
+          # MACOSX_DEPLOYMENT_TARGET empty there — nothing on Linux reads it.
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            asset_os: darwin
+            asset_arch: amd64
+            macos_min: '10.12'
+          - os: macos-14
+            target: aarch64-apple-darwin
+            asset_os: darwin
+            asset_arch: arm64
+            macos_min: '11.0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_REF }}
+          persist-credentials: false
+      # NO `musl-tools` STEP, DELIBERATELY. rustc ships a self-contained musl libc for these
+      # targets and links them itself, so a dependency tree with no C in it needs no `musl-gcc`:
+      # measured on a host that has none, where `cargo build --target x86_64-unknown-linux-musl`
+      # produced a working static binary in 16 seconds.
+      #
+      # An `apt-get install musl-tools` step was added here anyway, as insurance against a runner
+      # image that might not carry one — and it HUNG for 25 minutes on the x86 runner while every
+      # other leg passed, which is the only thing that has ever failed this workflow. Speculative
+      # insurance against a disproven failure mode is just a new failure mode.
+      - name: Install Rust target
+        run: rustup target add "${{ matrix.target }}"
+      # DELIBERATELY UNCACHED. Every other job in this repository restores `Swatinem/rust-cache`;
+      # these four build the artifacts a human will download, and a clean build is worth more than
+      # the minutes a warm `target/` would save.
+      # PINS the macOS floor rather than lowering it: rustc's apple defaults are already old (10.12
+      # for x86_64, and 11.0 is the oldest Apple Silicon can be), so these binaries do not have the
+      # portability problem the Linux ones had. Stated explicitly so a future toolchain that raises
+      # its default cannot quietly strand older macOS the way `ubuntu-latest` stranded older glibc.
+      - name: Build
+        env:
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_min }}
+        run: cargo build --release --locked --target "${{ matrix.target }}"
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+          ver="${RELEASE_TAG#v}"
+          name="agent-manager_${ver}_${{ matrix.asset_os }}_${{ matrix.asset_arch }}"
+          echo "ASSET_NAME=$name" >>"$GITHUB_ENV"
+          mkdir -p "dist/$name"
+          cp "target/${{ matrix.target }}/release/pmd" "dist/$name/"
+          cp "target/${{ matrix.target }}/release/pmtui" "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+      # THE TARBALL, not the build tree. Every matrix entry builds natively, so what ships can be run
+      # where it was made: extract it exactly as a human would and ask both binaries to speak. A
+      # release whose archive is missing a binary, or holds one that cannot start, or whose `pmd`
+      # reports a different version than the tag, is what this catches — and nothing else in either
+      # workflow looks at the artifact at all.
+      - name: Smoke-test the packaged binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          tar -C "$work" -xzf "dist/$ASSET_NAME.tar.gz"
+          test "$("$work/$ASSET_NAME/pmd" --version)" = "pmd ${RELEASE_TAG#v}"
+          "$work/$ASSET_NAME/pmtui" --help >/dev/null
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ matrix.asset_os }}-${{ matrix.asset_arch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Generate checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum *.tar.gz > checksums.txt
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/*.tar.gz dist/checksums.txt \
+              --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" dist/*.tar.gz dist/checksums.txt \
+              --verify-tag --generate-notes --repo "$GITHUB_REPOSITORY"
+          fi

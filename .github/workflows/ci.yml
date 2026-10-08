@@ -1,0 +1,127 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build_lint:
+    name: build-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: project-build
+          add-job-id-key: "false"
+          cache-bin: "false"
+          cache-on-failure: "true"
+      - name: Build and lint
+        run: |
+          cargo build --locked
+          cargo fmt --all -- --check
+          cargo clippy --all-targets -- -D warnings
+
+  audit:
+    name: audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: cargo-bin-v1 # bump when refreshing the unpinned tool cache
+          cache-bin: "true"
+          cache-on-failure: "true"
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit dependencies
+        run: cargo audit
+
+  tests:
+    name: tests
+    needs: [build_lint, audit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install tmux
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: cargo-bin-v1 # bump when refreshing the unpinned tool cache
+          cache-bin: "true"
+          cache-on-failure: "true"
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+      # One job runs the suite, because `coverage_test.sh` IS the suite: `--all-targets` under
+      # instrumentation, plus the two real-tmux profiles it aggregates and the per-file gate. The
+      # separate plain-`cargo test` job this replaces only ran the same tests a second time.
+      # The shell checks go first so a workflow or installer mistake fails in seconds rather than
+      # after the instrumented build.
+      - name: Run the shell contracts, then the suite under coverage
+        run: |
+          bash tests/repo_contract_test.sh
+          bash tests/install_sh_test.sh
+          bash tests/coverage_test.sh
+
+  real_tmux:
+    name: real-tmux
+    needs: [build_lint, audit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install tmux
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: project-build
+          add-job-id-key: "false"
+          cache-bin: "false"
+          cache-on-failure: "true"
+      - name: Run real-tmux acceptance
+        run: cargo test --test integration -- --ignored --test-threads=1
+
+  verify:
+    name: verify
+    if: ${{ always() }}
+    needs: [build_lint, tests, audit, real_tmux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all checks
+        env:
+          BUILD_LINT_RESULT: ${{ needs.build_lint.result }}
+          TESTS_RESULT: ${{ needs.tests.result }}
+          AUDIT_RESULT: ${{ needs.audit.result }}
+          REAL_TMUX_RESULT: ${{ needs.real_tmux.result }}
+        run: |
+          test "$BUILD_LINT_RESULT" = success
+          test "$TESTS_RESULT" = success
+          test "$AUDIT_RESULT" = success
+          test "$REAL_TMUX_RESULT" = success

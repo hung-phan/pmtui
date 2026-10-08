@@ -1,0 +1,36 @@
+[package]
+name = "agent-manager"
+version = "0.1.2"
+edition = "2024"
+rust-version = "1.94"
+description = "A tmux-backed supervisor and dashboard for persistent AI coding sessions"
+repository = "https://github.com/hung-phan/pmtui"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0.104"
+crossterm = "0.29.0"
+ratatui = "0.30.2"
+# Advisory flock for the cross-process per-project driver lease (already in the
+# dependency tree transitively). The kernel releases it on process exit, so a
+# crashed daemon leaves no stale lock.
+rustix = { version = "1", features = ["fs", "process"] }
+# SIGTERM/SIGINT handling in pmd, so a graceful stop reaps the tmux sessions it owns
+# instead of leaving them running headless. Already in the tree transitively (crossterm);
+# pinned direct here because pmd now depends on it. Delivered on a normal thread
+# (self-pipe), so the reap can safely shell out to tmux — not an async-signal context.
+signal-hook = "0.3"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.10.9"
+# Grapheme clusters, so a label is cut where ratatui's buffer draws a cell boundary and never
+# inside an emoji sequence. Already in the tree through ratatui.
+unicode-segmentation = "1.13.3"
+# Terminal-column width of user-chosen labels (CJK and emoji take two cells). Already in the
+# tree through ratatui; direct so pmtui measures text the way ratatui draws it.
+unicode-width = "0.2.2"
+opaline = { version = "0.4.2", features = ["global-state"] }
+ratatui-textarea = "0.9.2"
+
+[dev-dependencies]
+tempfile = "3.27.0"
