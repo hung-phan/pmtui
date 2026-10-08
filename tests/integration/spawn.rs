@@ -696,7 +696,7 @@ fn spawn_from_a_live_session_runs_one_job_the_dashboard_shows_then_retires() {
     );
 
     // Task view: the child's card carries its title and the same lineage.
-    assert!(send_key(&rig.fx.host_socket, &rig.fx.host_session, "Tab"));
+    assert!(send_key(&rig.fx.host_socket, &rig.fx.host_session, "2"));
     assert!(
         wait_until(Duration::from_secs(10), || card_shows(
             &rig.dashboard(),

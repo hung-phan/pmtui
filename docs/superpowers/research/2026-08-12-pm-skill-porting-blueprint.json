@@ -1,0 +1,434 @@
+{
+  "phase_machine": [
+    {
+      "state": "Intake",
+      "purpose": "One-time user interview: confirm goal, package scope, comms destinations, cadences, and explicit external-action approvals. Writes config.json + brief.md + channel_state[] + approvals[]. Harness-owned interactive flow, NOT a code worker.",
+      "advances_when": "config.json validated (exactly one primary channel, every slack target non-empty, channel_state covers configured channels), brief.md written, approvals recorded, and the config was echoed back to the user. Runs on first-start only; never re-entered.",
+      "transitions_to": [
+        "Research"
+      ],
+      "stop_kinds": [
+        "ambiguity"
+      ]
+    },
+    {
+      "state": "Research",
+      "purpose": "Fan out read-only workers per topic; persist one raw source-attributed file per topic under research/, digest into CURRENT.md. Package + capability detection runs here (after intake).",
+      "advances_when": "no research topics remain outstanding (findings for every unknown design needs are written with sources).",
+      "transitions_to": [
+        "Design"
+      ],
+      "stop_kinds": [
+        "capability"
+      ]
+    },
+    {
+      "state": "Design",
+      "purpose": "Produce an approved design grounded in brief.md + research/. Worker embeds the brainstorming brain; harness copies the approved artifact to .project-state/design.md and links it in CURRENT.md. Gate auto-waived.",
+      "advances_when": "design.md landed at .project-state/design.md and linked from CURRENT.md; no open ambiguity/hard/stuck stop.",
+      "transitions_to": [
+        "Plan"
+      ],
+      "stop_kinds": [
+        "ambiguity",
+        "publish",
+        "stuck"
+      ]
+    },
+    {
+      "state": "Plan",
+      "purpose": "Turn design into a task list defining task_cursors[] source-of-truth AND CR slice boundaries (vertical slices, program design before code). Copies plan.md into .project-state/. Gate auto-waived.",
+      "advances_when": "plan.md landed AND task_cursors == [] (implement owns reservation). No open hard/ambiguity/stuck stop.",
+      "transitions_to": [
+        "Implement"
+      ],
+      "stop_kinds": [
+        "ambiguity",
+        "publish",
+        "stuck"
+      ]
+    },
+    {
+      "state": "Implement",
+      "purpose": "Per task/slice, dispatch a TDD code worker on the slice branch; verify repository evidence; write a completion digest; manage task_cursors[] reservation queue and slice branches.",
+      "advances_when": "current slice complete (every task in the slice has an accepted+digested cursor) -> Review. Reverse recovery edge -> Plan when no plan/cursor exists. Otherwise seed next dependency-ready task and stay.",
+      "transitions_to": [
+        "Review",
+        "Plan"
+      ],
+      "stop_kinds": [
+        "worker_stuck",
+        "ambiguity",
+        "capability"
+      ]
+    },
+    {
+      "state": "Review",
+      "purpose": "Verification gate (verification-before-completion; conditional adversarial verify on risky surface). On FAIL, bounded fix loop counting review_state.attempts against stuck_threshold.",
+      "advances_when": "verification PASS with evidence -> Cr (clear review_state). At attempts>=stuck_threshold raise a stuck stop WITHOUT leaving Review.",
+      "transitions_to": [
+        "Cr"
+      ],
+      "stop_kinds": [
+        "stuck",
+        "capability",
+        "worker_stuck"
+      ]
+    },
+    {
+      "state": "Cr",
+      "purpose": "Partition slice into review units (one Brazil multi-pkg CR; one PR per GitHub repo), create drafts idempotently, babysit (read-only poll), run serialized fix loop, and gate publish + merge/land as two separate hard stops. NEVER sets done.",
+      "advances_when": "plan exhausted (task_cursors empty, no slice pending) AND every crs[] element status in {landed,abandoned} -> Confirming. If another slice remains -> Implement (cut its branch). Otherwise stay while any review unit open.",
+      "transitions_to": [
+        "Implement",
+        "Confirming"
+      ],
+      "stop_kinds": [
+        "publish",
+        "merge",
+        "ambiguity",
+        "worker_stuck",
+        "stuck"
+      ]
+    },
+    {
+      "state": "Confirming",
+      "purpose": "Always-on human hard-stop that alone declares the project done. Recomputes fire-condition on entry; posts confirm-done recap with [A]/[B]/[C]; never infers acceptance from silence.",
+      "advances_when": "[A] accept -> Done; [B] new direction -> Research (append brief.md Addendum, archive plan.md, clear task_cursors); [C]/no-reply -> stay. Fire-condition false on entry self-corrects back to Cr/Implement/Plan.",
+      "transitions_to": [
+        "Done",
+        "Research",
+        "Cr",
+        "Implement",
+        "Plan"
+      ],
+      "stop_kinds": [
+        "confirm_done"
+      ]
+    },
+    {
+      "state": "Done",
+      "purpose": "Terminal idle. Coupled to posture Done: work-track forced false, no routine posts, lease released, harness heartbeat off.",
+      "advances_when": "never advances on its own; only a fresh user ask reopens it.",
+      "transitions_to": [
+        "Research"
+      ],
+      "stop_kinds": []
+    }
+  ],
+  "state_model": [
+    {
+      "field": "phase",
+      "rust_type": "enum Phase { Intake, Research, Design, Plan, Implement, Review, Cr, Confirming, Done } (serde rename_all=\"lowercase\", with Cr->\"cr\")",
+      "purpose": "The WHAT of work. Orthogonal to run.posture. Enforce phase==Done <=> posture==Done in validate()."
+    },
+    {
+      "field": "run",
+      "rust_type": "struct Run { active: bool, posture: Posture, owner: Option<String>, wake_condition: Option<String>, next_check: Option<Epoch>, updated_at: Epoch, session_id: Option<String>, continuations: u32, max_continuations: u32 } where enum Posture { Working, Monitoring, NeedsYou, Done }",
+      "purpose": "Scheduling stance. Supersedes today's Step.status. Enforce: active=>owner/wake/session non-empty; monitoring/needs_you require next_check; working requires next_check==None; needs_you.owner must be an open_stops[].id; posture Done => active=false and all handles null. max_continuations==0 means unlimited."
+    },
+    {
+      "field": "task_cursors",
+      "rust_type": "Vec<TaskId> (TaskId=String), unique",
+      "purpose": "Reservation queue of plan.md task ids reserved for dispatch or returned-but-not-yet-digested. []=at plan->implement handoff and at done. len 1=sequential; len>=2=one Parallel-with group. Completion proven by a digest, never a bool."
+    },
+    {
+      "field": "timers",
+      "rust_type": "struct Timers { work: Option<Epoch> }",
+      "purpose": "Last work-cycle epoch. Record only, NOT a gate: work track is due on every wake regardless (false only when phase==Done)."
+    },
+    {
+      "field": "crs",
+      "rust_type": "Vec<Cr { id: Option<NonEmptyString>, slice_id: String, kind: CrKind, branch: String, base: String, status: CrStatus, tasks: Vec<String>, packages: Vec<String>, last_polled: Option<Epoch>, poll_cadence: Option<Duration> }>",
+      "purpose": "Code-review registry. enum CrKind{Brazil,Github}; enum CrStatus{Draft,InReview,ChangesRequested,Approved,Landed,Abandoned}. 'open' = status not in {Landed,Abandoned} (load-bearing). Invariants: id==None => Draft + last_polled==None + matching pending draft-cr op; terminal => last_polled==None cleared in same write."
+    },
+    {
+      "field": "toolchain",
+      "rust_type": "Option<Toolchain { packages: Vec<Package>, capabilities: Capabilities }>",
+      "purpose": "None until detection (which runs after intake). Package{name,kind,cr,workspace:Option,path,verify:Option,active_branch:Option} with kind<->cr<->workspace coupling. Capabilities{detected_at, jq, git, claude, codex, gh, cr_babysit, slack, builder_mcp, tmux}. path is the worker cwd (activates per-package CLAUDE.md/AGENTS.md)."
+    },
+    {
+      "field": "open_stops",
+      "rust_type": "Vec<OpenStop { id, kind: StopKind, channel, context_ref: Option, authorized_responders: Vec<String>, message_id: Option, first_posted: Epoch, last_polled: Option, last_seen_reply_ts: Option, last_edited: Option, status: StopStatus }>",
+      "purpose": "Unanswered stop questions. enum StopKind{Publish,ConfirmDone,Ambiguity,Stuck,ExpertNeeded,WorkerStuck}; StopStatus{AwaitingReply,Held}. message_id==None <=> last_seen_reply_ts==None. Removed (not flagged) on resolution. Supersedes today's flat Stop but keeps its risk_class-derivable mapping."
+    },
+    {
+      "field": "review_state",
+      "rust_type": "Option<ReviewState { slice_id: String, signature: String, attempts: u32 (>=1), updated_at: Epoch }>",
+      "purpose": "THE single verification-retry counter, shared by Review AND Cr fix loops (exactly one active failure). attempts keyed on (slice_id,signature); different slice/signature resets to 1. Stuck stop fires at attempts>=config.stuck_threshold. No per-worker/per-CR counter exists."
+    },
+    {
+      "field": "operations",
+      "rust_type": "Vec<Operation { id, type_: String (serde rename=\"type\"), key: String, status: OpStatus, started_at: Epoch, completed_at: Option, remote_id: Option, detail: Option }>",
+      "purpose": "Idempotency journal for every external mutation. enum OpStatus{Pending,Completed,Failed}. Deterministic unique key per intended effect. pending=>completed_at/remote_id None; completed=>completed_at Some. Retry resets same key to pending (never dup)."
+    },
+    {
+      "field": "approvals",
+      "rust_type": "Vec<Approval { id, action: String, scope: String, granted_by: String, granted_at: Epoch, expires_at: Option<Epoch> }>",
+      "purpose": "Explicit named external-action grants. Enforce 'named action+scope' matching in the grant-check path; denylist (publish/merge/deploy/credentials/payments/destructive) can never be blanket-approved."
+    },
+    {
+      "field": "expert_asks",
+      "rust_type": "Vec<ExpertAsk { id, question, channel: Option, context_ref: Option, policy: ExpertOutreach, poc: Poc, dm_channel, thread_ts, asked_at, last_polled: Option, last_seen_reply_ts: String, status: ExpertStatus }>",
+      "purpose": "Approved expert DM threads. policy is a frozen snapshot of config.comms.expert_outreach. Poll cadence hardcoded (1h for 24h then 6h), NOT config. Appended only after the DM post succeeds."
+    },
+    {
+      "field": "channel_state",
+      "rust_type": "Vec<ChannelState { name: String, last_posted: Option<Epoch> }>",
+      "purpose": "Runtime status-post cursors, disjoint from config channels; join by name. Post-intake, names must equal configured channel names exactly."
+    },
+    {
+      "field": "async_workers",
+      "rust_type": "Vec<AsyncWorker { id, task_id, agent: AsyncAgent, tmux_session, workdir, branch, started_at, deadline, last_polled: Option, poll_cadence: Option<Duration>, status: AsyncStatus, done_signal, log }>",
+      "purpose": "Opt-in detached codex workers (only route producing posture Monitoring). deadline frozen at launch = started_at+async_timeout_s, enforced at poll granularity. Reuses tmux Driver + done-signal machinery already in tmux.rs."
+    },
+    {
+      "field": "session",
+      "rust_type": "Option<Session { kind, protocol (const \"project-manager-heartbeat-v2\"), engine: HeartbeatEngine, job_id, cron, registered_at, cancel_handle }>",
+      "purpose": "Heartbeat identity. In the harness this maps to the daemon's own sweep timer; keep the fields/const for interop and integrity but likely unused at runtime (harness owns scheduling)."
+    },
+    {
+      "field": "config",
+      "rust_type": "struct Config { autonomy: Tier, comms: Comms, cr: CrConfig, heartbeat: Duration, stuck_threshold: u32, coordinator_lease_s: u32, multi_agent: MultiAgent }",
+      "purpose": "Extends today's Config. cr.publish_approval locked to PerCr. Cross-field: coordinator_lease_s >= multi_agent.timeout_s+60. autonomy is the agent-manager Tier already present. Duration newtype matches ^[1-9][0-9]*[smhd]$ everywhere a cadence appears."
+    }
+  ],
+  "worker_contract": "Model: WORKER PROPOSES, HARNESS DISPOSES. The Rust harness is the deterministic coordinator; each phase's 'brain' is a stateless one-shot LLM worker. Reuse the EXISTING detached-tmux+done-signal substrate (tmux.rs Driver::spawn_step / observe): the daemon sweep stays single-threaded and NEVER blocks on a worker.\n\nPer phase-unit tick the harness: (1) builds the phase prompt = borrowed playbook text (verbatim, compiled in via include_str!) + injected context (state facts, CURRENT.md-linked file pointers, acceptance criteria, binding decisions, principles.md block) + a strict REQUIRED-OUTPUT contract; (2) resolves worker route from plan annotations + capabilities (claude default, codex for mechanical, Package:->cwd, Parallel-with->Workflow fan-out capped at multi_agent.max_parallel); (3) spawns the worker detached via the existing wrapper, extended so the pane runs `env -u CLAUDECODE claude -p --permission-mode <plan|acceptEdits> --no-session-persistence --output-format stream-json --verbose --forward-subagent-text [--add-dir ...] -- <prompt>` (or `codex -a never -s workspace-write exec --ephemeral [--add-dir ...] -- <prompt>`), with stdout(=stream-json trace) -> steps/<seq>.log, exit code -> done-signal, and the worker instructed to write its machine result to steps/<seq>.result.json as its final action; bounded by GNU timeout (multi_agent.timeout_s) < renewed lease.\n\nOn done-signal, the harness parses a WorkerResult { proposed_transition: Option<Phase>, stay: bool, stops: Vec<StopDraft{kind,question,options,context_ref,risk_class}>, artifacts_written: Vec<Path>, operations: Vec<OpIntent>, digest: Option<CompletionDigest{task_ids,commit_ref,tests,files}>, notes } and VERIFIES rather than trusts it: for code phases, repository evidence (git diff scope, tests added+pass, commit exists) is the acceptance gate — exit 0 / self-claim is never acceptance; for claude code workers, the stream-json trace must prove an ordered chain (successful superpowers:test-driven-development Skill result in a strictly-earlier assistant record than a successful Agent/Workflow result, matched by tool_use_id, name==req || endswith(\\\"__\\\"+req)); codex/async workers have NO trace validator (repo evidence only). The harness then validates the proposed transition against can_transition(from,to,guards) (hard-reject cr->done), applies integrity (checkpoint seal, operations reconcile), and commits ALL control-state itself via write_json_atomic — the worker only ever writes artifacts (design.md/plan.md/research-*/code) and the result descriptor, never state.json/checkpoint. Missing/unparseable result, failed proof, timeout (exit 124/137), or repo contradiction => keep the cursor and raise worker_stuck (posture NeedsYou); a proposed illegal transition => ambiguity/stuck stop, never silent obey.",
+  "stop_risk_table": [
+    {
+      "kind": "publish",
+      "risk_class": "Hard",
+      "rationale": "Reviewer-visible external mutation (cr --publish / gh pr ready). Already in ALWAYS_HARD_KINDS. Per-CR authorization required; never auto-flowed at any tier."
+    },
+    {
+      "kind": "merge",
+      "risk_class": "Hard",
+      "rationale": "Land/merge is irreversible and a SEPARATE hard stop from publish. Always escalate; per-review-unit explicit approval."
+    },
+    {
+      "kind": "confirm_done",
+      "risk_class": "Hard",
+      "rationale": "Project-boundary gate — plan-exhausted is the coordinator's signal, not the user's. Never infer acceptance from silence/timeout; escalate on every tier including autopilot."
+    },
+    {
+      "kind": "stuck",
+      "risk_class": "Hard",
+      "rationale": "Verification failed stuck_threshold times (verify-don't-assume never waives). Auto-flowing would ship unverified/broken code, so it must always halt — classify Hard (add to the forced-hard floor), diverging from a naive Medium mapping."
+    },
+    {
+      "kind": "capability",
+      "risk_class": "Hard",
+      "rationale": "Missing required CLI/tmux/tool or exhausted worker-route fallbacks. No human answer proceeds without fixing the environment; escalate always, never implement inline."
+    },
+    {
+      "kind": "worker_stuck",
+      "risk_class": "Medium",
+      "rationale": "A blocking worker timed out/failed or an async worker was reaped. Autopilot may auto-flow = auto-retry with a fresh worker (bounded) before escalating; Standard/Guardian escalate. Options [A]retry/[B]alt-surface/[C]show/[D]skip carried as data ([D] needs a sourced decisions.md entry)."
+    },
+    {
+      "kind": "ambiguity",
+      "risk_class": "Medium",
+      "rationale": "Genuine fork with >1 defensible answer (design/plan/implement/cr mapping). Autopilot auto-flows with a recorded default decision; Standard/Guardian escalate with lettered options. This is the deliberate tier divergence from the skill's single-tier always-halt."
+    },
+    {
+      "kind": "expert_needed",
+      "risk_class": "Medium",
+      "rationale": "Pre-contact domain outreach question. Autopilot can auto-flow (search-first/skip per frozen policy); higher tiers escalate. Migrates to expert_asks[] only after an approved DM."
+    }
+  ],
+  "tier_gating": "Keep the existing 3-tier model (config.autonomy: Autopilot|Standard|Guardian) and the existing policy.rs machinery, layering the skill's stop semantics as the safety floor. Decision pipeline per raised stop: effective_risk(stop) = if kind in ALWAYS_HARD_KINDS (publish, merge, land, deploy, confirm_done, credentials, payment, destructive, PLUS newly-added stuck & capability) -> Hard, else the coordinator-labelled risk_class. Then decide(tier, risk): Hard => Escalate at EVERY tier; Autopilot auto-flows Medium+Low; Standard/Guardian escalate Medium, auto-flow Low. Auto-flow = the harness synthesizes an 'auto' answer into answers.json (answered_by=\\\"auto_flow\\\"), records a source-attributed decisions.md note, and the next phase-worker dispatch consumes it — this reuses on_needs_you/stops_requiring_human exactly as coded today. The daemon also re-derives the hard floor as a belt-and-suspenders safety net even if a worker mislabels risk_class.\n\nCrucially, PHASE GATES are always auto-waived at every tier (design/plan approval is NEVER a stop) — matching the skill's max-autonomy; tier gating governs ONLY the soft stops (ambiguity, worker_stuck, expert_needed). The stop-vs-autoflow decision is per-action and binary: does a stop trigger fire and survive the tier/risk gate? If yes -> append open_stops[] + set posture NeedsYou (only after all independent runnable work is exhausted; independent work keeps posture Working); if no -> auto-flow and continue. Guardian currently equals Standard for the soft stops (an open question: should Guardian also escalate Low, or add a per-phase confirmation?).",
+  "integrity_mechanisms": [
+    {
+      "name": "Atomic durable writes",
+      "guarantee": "No reader ever sees a torn/partial JSON; a rename is durable across crash.",
+      "rust_approach": "Reuse state::write_json_atomic verbatim (temp+fsync+rename+dir fsync, pretty JSON). Route every control-state write through it; one writer (the harness) per control file."
+    },
+    {
+      "name": "Worker-proposes / harness-disposes",
+      "guarantee": "Control state (phase, run, cursors, crs, ops) is never mutated by an untrusted LLM; illegal states are unrepresentable from a worker.",
+      "rust_approach": "Workers write only artifacts + steps/<seq>.result.json; the harness alone writes state.json after validating the proposal against the transition table and integrity gates."
+    },
+    {
+      "name": "Transition allowlist + guards",
+      "guarantee": "Only the state-machine.md legal transitions occur; cr->done can never happen.",
+      "rust_approach": "fn can_transition(from,to,guards)->bool as an explicit allowlist; hard-code the cr->done rejection; guards = topics_remain, slice_boundary_reached, plan_exhausted, all_crs_terminal, another_slice_remains, confirm_decision, attempts>=stuck_threshold, etc."
+    },
+    {
+      "name": "Checkpoint sealing (3 canonical hashes)",
+      "guarantee": "A validated ledger cannot be silently mutated between seal and resume; distinguishes material change vs poll/journal bookkeeping.",
+      "rust_approach": "checkpoint.rs: Checkpoint{control_state,material_state,journal_guard: sha256 over sorted-key canonical JSON with the documented deletions/nullings} + enum SealKind{Baseline,Material,NoChange,Journal} + seal()/verify(); seal requires pm-validate pass + lease-held; verify compares the durable subset (excludes state.json raw hash + poll bookkeeping)."
+    },
+    {
+      "name": "Operations idempotency journal",
+      "guarantee": "Every external mutation (branch, push, draft-cr, publish, merge, post) happens at most once even across crashes.",
+      "rust_approach": "ops.rs: Vec<Operation> keyed by deterministic unique key (e.g. draft-cr:<review-unit>:<slice_id> where review-unit=sorted,%-encoded packages joined '+'); begin_operation persists pending BEFORE the network call; reconcile-before-retry; retry resets same key to pending (never duplicate). Monotonic transitions pending->{completed,failed}, failed->{pending(new started_at),completed}."
+    },
+    {
+      "name": "Repository-evidence acceptance",
+      "guarantee": "A worker's success claim / exit 0 is never task acceptance; hallucinated completions are rejected.",
+      "rust_approach": "verify.rs: inspect git diff scope, changed-files-within-task, required tests added+pass, commit ref exists; identical gate for blocking and async returns. Cursor kept and worker_stuck raised on any mismatch."
+    },
+    {
+      "name": "Claude trace proof",
+      "guarantee": "A claude code worker actually invoked TDD before delegating and its orchestration call succeeded.",
+      "rust_approach": "Parse steps/<seq>.log (stream-json, slurped as complete records): require a successful superpowers:test-driven-development Skill tool_use/result in a strictly-earlier assistant record than a successful Agent/Workflow result, matched by tool_use_id, with name==req || name.ends_with(\"__\"+req). Read-only routes drop the Skill requirement (permission-mode plan)."
+    },
+    {
+      "name": "Coordinator lease + identity",
+      "guarantee": "Exactly one driver per project; a stale/foreign session can't drive.",
+      "rust_approach": "Reuse lease.rs flock ProjectLease (kernel auto-release on crash). Extend the owner record with (run_id, session_id) to reproduce the skill's continuation gate and the coordinator_lease_s>=timeout_s+60 renewal-before-dispatch rule."
+    },
+    {
+      "name": "Poll-cursor monotonicity",
+      "guarantee": "Poll cursors never move backward and never exceed the seal time (except a CR going terminal nulls its cursor).",
+      "rust_approach": "cursor_forward(before,after) check applied to timers.work + all last_polled during seal; excluded from material_state so poll-only advances re-seal as no-change."
+    },
+    {
+      "name": "Never-blanket-approval denylist",
+      "guarantee": "No silent broad approval for publish/merge/deploy/credentials/payments/destructive.",
+      "rust_approach": "Enforce in the approval-grant code path (not just prompt): reject any Approval whose action is on the denylist unless scoped per-action; belt-and-suspenders with ALWAYS_HARD_KINDS at the stop gate."
+    },
+    {
+      "name": "Phase-aware schema validation",
+      "guarantee": "Ledger invariants beyond serde shape hold (lease>=timeout+60, channel coverage, CR branch-chain, id uniqueness, terminal-CR cursor null).",
+      "rust_approach": "validate.rs returning {valid,errors[]}; serde deny_unknown_fields for keys_exact; extra checks ported from pm-validate.sh; a phase-aware mode tolerates the partially-invalid intake scaffold."
+    }
+  ],
+  "prompt_reuse": [
+    {
+      "phase": "intake",
+      "disposition": "adapt",
+      "note": "Borrow the interview table (prompt->field->default) and the never-blanket-approval question verbatim as UI text, but the flow is a harness-owned interactive loop (via pmtui or a needs_you comms round-trip), not a dispatched code worker. Reuse config.schema.json/state.schema.json shapes verbatim as serde structs."
+    },
+    {
+      "phase": "research",
+      "disposition": "adapt",
+      "note": "Borrow-verbatim: RESULT_SCHEMA {summary,findings[],sources[]} as the worker output contract, and the source-line markdown convention (*Source: <tool> — <query> · <date>*) + inference marker. Reimplement the count-driven fan-out (1-2=Agent-per-topic, 3+=Workflow parallel, sequential fallback then capability stop) in the Rust dispatcher."
+    },
+    {
+      "phase": "design",
+      "disposition": "adapt",
+      "note": "Embed the brainstorming brain (clarify intent -> approaches+trade-offs -> present design) as worker prompt text since there is ZERO skill runtime dependency; looser adapt. Load-bearing: the harness must copy the approved artifact to .project-state/design.md and link CURRENT.md regardless of where the worker wrote it; hard-stop trigger list (auth/secrets/payments/deletes/deploy) verbatim."
+    },
+    {
+      "phase": "plan",
+      "disposition": "borrow_verbatim",
+      "note": "The two Step-2 bullet blocks — VERTICAL SLICES NOT STACK-ORDER LAYERS and PROGRAM DESIGN BEFORE CODE (with the mock-API->wire-UI->... and call-stack/file-tree/type-signature examples) — are the highest-value verbatim borrow into the plan worker prompt. Task annotation grammar (Agent/Isolate/Parallel with/Package/Async) borrowed as a parsed struct spec."
+    },
+    {
+      "phase": "implement",
+      "disposition": "adapt",
+      "note": "Assemble prompt from brief/plan/decisions (adapt). Load-bearing verbatim: the instruction that the worker's FIRST action invokes superpowers:test-driven-development via the Skill tool (trace-enforced), and the 6-section worker prompt structure (goal/links/skill/orchestration/prelude-read/response-contract) from multi-agent.md. Forbid background jobs/daemonization verbatim."
+    },
+    {
+      "phase": "review",
+      "disposition": "adapt",
+      "note": "Borrow near-verbatim the per-verifier instruction string 'Try to refute: <summary>. Lens: <correctness|security|repro>. Default refuted=true if uncertain.' and VERDICT_SCHEMA. Write-fresh the pipeline()/parallel()/agent() DSL — reimplement as N one-shot verifier dispatches per finding with a >50%-refute drop rule; risky-surface predicate (auth|session|token|crypto|payment|migration|public-API) ported as regex over the slice diff."
+    },
+    {
+      "phase": "cr",
+      "disposition": "adapt",
+      "note": "Borrow-verbatim the operation-key formats (draft-cr/push/publish/merge/post/branch/task-worktree/merge-task) and the review-unit derivation (sorted,%-encoded packages joined '+'). Reimplement cr-babysit's analyzer/reviewer polling in Rust (no skill dependency); gh/git/cr are subprocesses. publish and merge are two distinct hard stops."
+    },
+    {
+      "phase": "confirming",
+      "disposition": "borrow_verbatim",
+      "note": "The [A] confirm done / [B] more work - describe the ask / [C] hold - decide later letter semantics and their required recap contents (what shipped, landed review units, out-of-scope) are verbatim/load-bearing (they drive the branch). Adapt only the surrounding recap prose. Never-assume-[A] and Slack-unreachable-pauses-blocking-question rules verbatim."
+    },
+    {
+      "phase": "principles+comms (cross-cutting)",
+      "disposition": "borrow_verbatim",
+      "note": "principles.md (engineering principles + red flags) is explicitly targeted at 'every dispatched subagent' — inject verbatim into every worker prompt. comms.md routing table (5 content classes), lettered-options message format, and the operation-before-post ordering are borrowed verbatim into the comms module + stop-composition prompts."
+    }
+  ],
+  "proposed_rust_modules": [
+    {
+      "module": "phase.rs",
+      "responsibility": "Phase enum, ConfirmDecision{Accept,NewDirection,NotYet,RepairTo(Phase)}, and the transition allowlist can_transition(from,to,&Guards)->bool with the hard cr->done rejection and per-transition guard predicates."
+    },
+    {
+      "module": "pmstate.rs (or grow state.rs)",
+      "responsibility": "Full state.json model: Run/Posture, task_cursors, crs, toolchain/packages/capabilities, open_stops, expert_asks, review_state, approvals, operations, async_workers, session; serde with deny_unknown_fields + a validate() reproducing the if/then invariants."
+    },
+    {
+      "module": "config.rs",
+      "responsibility": "Config (comms/cr/heartbeat/stuck_threshold/coordinator_lease_s/multi_agent/autonomy), Duration newtype (^[1-9][0-9]*[smhd]$ FromStr/Display), serde defaults matching the intake table, cross-field validation (lease>=timeout+60)."
+    },
+    {
+      "module": "validate.rs",
+      "responsibility": "Phase-aware ledger validator returning {valid,errors[]}; ports pm-validate.sh extra checks (CR branch-chain, id uniqueness, channel coverage, terminal-CR cursor null, draft-cr null-id<->pending-op coupling)."
+    },
+    {
+      "module": "checkpoint.rs",
+      "responsibility": "Checkpoint struct + 3 canonical sha256 hashes, SealKind, seal()/verify()/check-seal, monotonic operation/bookkeeping transitions; the review-unit key fn (shared with ops.rs)."
+    },
+    {
+      "module": "worker.rs",
+      "responsibility": "Phase-worker dispatch primitive: route selection, claude -p/codex exec command construction (exact flags), extend tmux wrapper to capture stream-json + result file, timeout, stream-json trace-proof validator, WorkerResult parse. Reuses tmux.rs spawn/observe."
+    },
+    {
+      "module": "prompt.rs",
+      "responsibility": "Per-phase prompt assembly: include_str! the borrowed playbook text + inject state context (CURRENT.md-linked pointers, acceptance criteria, principles block) + the required WorkerResult output contract."
+    },
+    {
+      "module": "phase_engine.rs",
+      "responsibility": "Per-phase glue: given (phase,state,verified WorkerResult), compute the proposed transition/stops/artifacts and drive the durable-checkpoint gate; this is where the loop advances at most one unit."
+    },
+    {
+      "module": "stops.rs",
+      "responsibility": "StopKind enum, stop lifecycle (create/update/resolve/hold), risk mapping; grows policy.rs (effective_risk/ALWAYS_HARD_KINDS incl. new stuck+capability, decide, stops_requiring_human)."
+    },
+    {
+      "module": "comms.rs",
+      "responsibility": "Content-class routing, Slack/file/terminal transports, lettered-question composition, authorized-responder reply polling, quiet hours, only_on_material_change; grows escalation.rs (Notifier/Composite become one transport)."
+    },
+    {
+      "module": "due.rs",
+      "responsibility": "pm-due scheduler: due_crs/due_stops/due_expert_asks/due_async_workers/due_channels, stop_backoff ladder, expert 1h/6h fixed cadence, quiet-hours wraparound, posting_allowed; single cadence authority."
+    },
+    {
+      "module": "verify.rs",
+      "responsibility": "Repository-evidence acceptance (git diff scope, tests, commit ref), review signature computation, risky-surface predicate over a slice diff."
+    },
+    {
+      "module": "ops.rs",
+      "responsibility": "Operations idempotency journal helpers (begin/complete/fail by unique key), deterministic key builders, reconcile-before-retry."
+    }
+  ],
+  "reuse_from_agent_manager": [
+    "scheduler.rs: the whole per-project drive loop (RunState, tick, double-spawn guard keyed off in-memory state, exponential backoff, restore_from_disk crash recovery, abort). Extend RunState to carry Phase and to spawn a phase worker instead of the reference coordinator; the StepStatus{AwaitingNext,Monitoring,NeedsYou,Done} contract already mirrors posture.",
+    "tmux.rs: Driver trait + TmuxDriver + done-signal observe() (done-always-wins race, corrupt/pending handling) + FakeDriver + interactive-session launch/attach. This IS the non-blocking worker substrate — reuse verbatim for both phase workers and async codex workers; extend wrapper_script to also emit the stream-json trace + result file.",
+    "state.rs: write_json_atomic / read_json / read_json_or / read_json_opt / ProjectPaths / append_answer. Reuse verbatim; add new file paths (brief.md, design.md, plan.md, research/, decisions.md, .checkpoint.json, worker result files).",
+    "lease.rs: flock ProjectLease with kernel auto-release. Reuse verbatim; extend the owner record with run_id+session_id for continuation/identity gating.",
+    "daemon.rs: sweep/reconcile_one/prune/rebuild-on-change/poison-after-threshold/one-lease-per-project/interactive-abort. Reuse verbatim; it already gates driving on the lease and routes escalations via Notifier.",
+    "policy.rs: decide/effective_risk/ALWAYS_HARD_KINDS/decide_stop/stops_requiring_human and the auto-flow-vs-escalate model. Reuse and extend the kind list + StopKind enum; the tier gating is essentially done.",
+    "escalation.rs: Notifier/Severity/Escalation/Composite/LogNotifier/DesktopNotifier and severity-from-loudest-stop. Reuse as the base comms transport layer; add a Slack transport implementing Notifier.",
+    "registry.rs: Registry/ProjectEntry/Mode{Auto,Interactive}/Engine{Claude,Codex}. Reuse verbatim; coordinator_cmd becomes the worker base argv.",
+    "clock.rs: Clock trait + FakeClock. Reuse for deterministic phase-machine + due-scheduler tests.",
+    "answers.json/stops.json/step.json single-writer-per-file protocol + the auto_flow answer mechanism: reuse as the escalation<->resume channel between daemon and phase workers.",
+    "view.rs / pmtui.rs (bin): the TUI already renders rows, sessions, and drives interactive mode — extend it to run the intake interview and to render phase/posture/stops."
+  ],
+  "open_questions": [
+    "Tier reconciliation: the skill is single-tier 'max autonomy' where ambiguity/stuck ALWAYS halt; agent-manager has 3 tiers where Autopilot auto-flows Medium. I classified stuck+capability as Hard (always halt) and ambiguity/worker_stuck/expert_needed as Medium (autopilot auto-flows). Confirm this divergence is acceptable, and define what Guardian adds over Standard (escalate Low too? per-phase confirmation?).",
+    "Coordinator model: confirm worker-proposes/harness-disposes with a per-phase one-shot worker (vs a long-lived LLM coordinator). Research and Implement fan-out sub-agents inside their worker — is that acceptable, or should the harness itself own the fan-out and dispatch each sub-task as its own tmux worker?",
+    "Intake in a headless daemon: how is the interactive interview conducted — driven by pmtui, or by a needs_you comms round-trip where the daemon parks and the user answers via Slack/answers.json? This is the one phase that isn't a code worker.",
+    "Comms transport: reuse the Slack MCP through a worker, or build a native Slack client in Rust? Authorized-responder resolution needs authenticated sender identity — where does that come from without the MCP?",
+    "Async/tmux codex worker route (posture Monitoring): keep it in v1 or ship blocking-only first and add detached async later? It is the only source of Monitoring and adds real complexity.",
+    "Checkpoint sealing depth for v1: full 3-hash parity (control/material/journal) or a simplified single control-state hash? The current agent-manager has no checkpoint at all, and its atomic-write + one-writer model already covers most crash safety.",
+    "Hook/session/heartbeat parity: since the harness owns scheduling natively (daemon sweep), do we drop the Stop/UserPromptSubmit hooks, session.protocol sentinel, and cron entirely, keeping only lease+posture+due? Recommend yes, but confirm no interop need.",
+    "Playbook text storage: compile borrowed prompts in via include_str! (drift-frozen, zero runtime dependency — matches the ask) vs a data dir the operator can edit? And how to track upstream skill drift.",
+    "Package detection + brazil-vs-github worktree isolation asymmetry: port fully in v1 (needed for real Amazon projects) or defer and support single-package github first?",
+    "Multi-phase-per-wake: the skill chains research->design->plan in one entry. Do we run multiple phase transitions per sweep tick (until a stop/wait), or one transition per tick? One-per-tick is simpler and the daemon sweeps frequently; confirm latency is acceptable."
+  ],
+  "biggest_risks": [
+    "Conflating phase (intake..done) with posture (working/monitoring/needs_you/done) — they share the token 'done' but are orthogonal; only confirming->[A] flips both. Modeling them as one field would corrupt the machine. Today's code has only posture (StepStatus) and no phase; adding phase without keeping them distinct is the top risk.",
+    "cr->done leak / premature confirming: forgetting the (plan_exhausted && all_crs_terminal) guard, or not hard-rejecting cr->done in the validator, lets the project declare itself done with open reviews. The confirming fire-condition recompute-on-entry is the safety net and must run first.",
+    "Trusting worker self-claims instead of repository evidence — an LLM worker reporting success without a real commit/tests would let hallucinated or unverified work advance the phase and eventually ship. The repo-evidence gate + claude trace proof are load-bearing and easy to under-implement.",
+    "Incomplete integrity port: a partial operations journal or missing checkpoint reconcile => double external actions after a crash (double draft-CR, double publish/push, double Slack post). Operation-key exactness (esp. the review-unit derivation: sorted, %-encoded, '+'-joined) is fragile and breaks dedup silently if wrong.",
+    "Worker prompt/result-contract drift: if the borrowed playbook text and the required WorkerResult schema diverge, workers return unparseable results and the loop wedges. Needs a strict result schema, a parse-failure -> worker_stuck fallback, and prompt/contract co-versioning.",
+    "Safety regression vs the skill from tiering: auto-flowing on Autopilot a stop the skill says must always halt (I mapped stuck+capability to Hard precisely to avoid this, but ambiguity auto-flow on Autopilot means the harness picks a default fork silently — this can quietly diverge from user intent and must be logged + bounded).",
+    "Single-threaded daemon blocking: if a phase worker were run synchronously it would freeze scheduling for every project. Mitigated ONLY by reusing the existing detached-tmux+observe substrate — a synchronous claude -p (as pm-worker.sh does) must NOT be ported literally.",
+    "Authorized-responder spoofing: resolving a hard stop (esp. publish/merge/confirm_done) on an unauthenticated or spoofable Slack reply. Identity must be verified against authorized_responders by authenticated sender id, and silence must never auto-resolve.",
+    "Scope explosion: the skill is ~5 slices of deep behavior (comms, expert outreach, async workers, adversarial verify, brazil/github isolation, checkpoint sealing). Attempting full parity in one pass risks a stalled port; the biggest project risk is not sequencing an MVP (phase machine + blocking claude worker + repo-evidence + basic stops/tiers) before the integrity/comms depth."
+  ]
+}

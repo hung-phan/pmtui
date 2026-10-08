@@ -373,11 +373,11 @@ pub(crate) fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) {
         match code {
             // The numbered views SELECT, they do not toggle: `2` here is already-there, and `1` is
             // the way back — including out of an open card detail, where the board's own movement
-            // keys are inert. `Tab` keeps toggling for muscle memory.
+            // keys are inert. `Tab` is not bound: `1`, `q` and `Esc` all already leave.
             KeyCode::Char('1') => app.close_board(),
             KeyCode::Char('2') => {}
             KeyCode::Char('0') => app.open_settings(),
-            KeyCode::Tab | KeyCode::BackTab | KeyCode::Char('q') => app.close_board(),
+            KeyCode::Char('q') => app.close_board(),
             KeyCode::Esc if app.board_detail_open => app.close_board_detail(),
             KeyCode::Esc => app.close_board(),
             KeyCode::Enter if app.board_detail_open => app.request_attach(),
@@ -664,9 +664,11 @@ pub(crate) fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) {
         // controls carry, so what the header advertises is what the keyboard does. Pressing the
         // number of the view you are already on is deliberately a silent no-op, not a toggle:
         // "show me the Session view" is already satisfied, so there is no dead end to report.
-        // Tab/Shift+Tab still toggle between them.
+        // Tab is deliberately NOT bound here. It duplicated `2`, and a key that every other
+        // terminal program spends on focus or completion is worth more held in reserve than
+        // spent on a second way to do what a labelled number key already does.
         KeyCode::Char('1') => {}
-        KeyCode::Char('2') | KeyCode::Tab | KeyCode::BackTab => app.open_board(),
+        KeyCode::Char('2') => app.open_board(),
         KeyCode::Char('0') => app.open_settings(),
         KeyCode::Char('j') | KeyCode::Down => app.move_sel(1),
         KeyCode::Char('k') | KeyCode::Up => app.move_sel(-1),

@@ -98,7 +98,7 @@ session list.
 | Key | Action | Key | Action |
 |---|---|---|---|
 | `j` / `k` | move selection | `/` | find and switch session |
-| `1` / `2` / `0` | select the Session, Task or Settings view (`tab` toggles the first two) | `n` | new session |
+| `1` / `2` / `0` | select the Session, Task or Settings view | `n` | new session |
 | `enter` | attach (or **resume** a paused row) | `s` | message, or answer an open stop |
 | `ctrl+q` | leave an attached session, back to the dashboard (the agent keeps running) | | |
 | in the message, goal and directive fields: `^J` new line (`alt+enter` too), `alt+b`/`alt+f` word, `^w` kill word, `^x^e` $EDITOR | | | |

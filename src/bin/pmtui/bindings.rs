@@ -179,12 +179,12 @@ pub(crate) const BINDINGS: &[Binding] = &[
         rank: 2,
     },
     // ONE KEY PER VIEW. The status bar leads with the `1 Sessions` / `2 Tasks` TABS, so the keys
-    // that switch views are the numbers on screen; `Tab`/`Shift+Tab` still toggle between them for
-    // muscle memory, and are named here rather than given a tab of their own.
+    // that switch views are exactly the numbers on screen. `Tab` is not among them: it used to
+    // toggle the first two, which only duplicated `2` and `1`.
     Binding {
-        key: "1/2/0/Tab",
+        key: "1/2/0",
         label: "Views",
-        help: "Select a view: 1 Sessions, 2 Tasks, 0 Settings; Tab toggles the first two",
+        help: "Select a view: 1 Sessions, 2 Tasks, 0 Settings",
         group: KeyGroup::Navigation,
         scope: Scope::HelpOnly,
         applies: Applies::Always,

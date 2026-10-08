@@ -57,7 +57,8 @@ fn laptop_ui_gallery_renders_real_main_interaction_states() {
         });
         g.frame("main");
 
-        g.key("Tab");
+        // `2` selects the Task view; Tab no longer toggles it.
+        g.key("2");
         // The Task lane title. The Session rail spells its group `NEEDS YOU (2)`, and its
         // `PAUSED / OFFLINE` group shows at larger sizes, so neither word alone proves Tasks.
         g.await_text("tasks", "NEEDS YOU 2");
@@ -122,7 +123,7 @@ fn laptop_ui_gallery_renders_real_main_interaction_states() {
             pane.lines().any(|line| selected_card(line, "hands-on"))
         });
         g.frame("tasks-pending");
-        g.key("Tab");
+        g.key("1");
         g.await_text("the Session view", "SESSIONS");
 
         g.select_session("needs-review");

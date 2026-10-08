@@ -768,7 +768,7 @@ fn the_view_tabs_lead_the_header_and_underline_the_active_view() {
 }
 
 #[test]
-fn the_view_numbers_switch_views_by_key_and_by_click_while_tab_still_toggles() {
+fn the_view_numbers_switch_views_by_key_and_by_click_while_tab_is_inert() {
     // `1`/`2` carry the affordance now, so they must SELECT a view — pressing the number of the
     // view you are already on is a no-op, not a toggle. Tab stays for muscle memory.
     let mut app = app_with(vec![view("bot", Posture::Working, vec![])], UiMode::Normal);
@@ -777,9 +777,13 @@ fn the_view_numbers_switch_views_by_key_and_by_click_while_tab_still_toggles() {
         (KeyCode::Char('2'), true),
         (KeyCode::Char('2'), true), // already in Tasks
         (KeyCode::Char('1'), false),
+        // Tab and Shift+Tab are INERT here. They used to toggle, which only duplicated the
+        // numbers; the view stays wherever `1`/`2` last put it.
+        (KeyCode::Char('2'), true),
         (KeyCode::Tab, true),
-        (KeyCode::Tab, false),
         (KeyCode::BackTab, true),
+        (KeyCode::Char('1'), false),
+        (KeyCode::Tab, false),
         (KeyCode::BackTab, false),
     ] {
         handle_key(&mut app, code, KeyModifiers::NONE);

@@ -114,12 +114,17 @@ fn the_keyboard_moves_the_session_selection() {
         "the transcript never scrolled from a key"
     );
 
-    // Tab switches the top-level projection without moving the selected session;
-    // Shift+Tab returns to the Session workbench.
+    // The NUMBERS switch the top-level projection without moving the selected session.
+    // Tab does not: it was removed for duplicating `2`, so the key is free.
     let before = app.selected;
     handle_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
+    assert!(
+        matches!(app.mode, UiMode::Normal),
+        "Tab is inert on the dashboard"
+    );
+    handle_key(&mut app, KeyCode::Char('2'), KeyModifiers::NONE);
     assert!(matches!(app.mode, UiMode::Board));
-    handle_key(&mut app, KeyCode::BackTab, KeyModifiers::SHIFT);
+    handle_key(&mut app, KeyCode::Char('1'), KeyModifiers::NONE);
     assert!(matches!(app.mode, UiMode::Normal));
     assert_eq!(app.selected, before, "view switching preserves selection");
 }
