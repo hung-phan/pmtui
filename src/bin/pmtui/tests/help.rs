@@ -158,7 +158,8 @@ fn every_bound_normal_key_is_documented_in_the_help() {
     //   '2' — SELECT the Task view (the numbered view controls the status bar draws). '1' selects
     //         the Session view, which is where the probe already is, so pressing it there changes
     //         nothing by design and the probe cannot see it; both are documented by the same
-    //         `1/2/0/Tab` row, and Tab is checked below.
+    //         `1/2/0` row. Tab is NOT checked here: it is no longer a Normal-mode key, and
+    //         the create form documents its own Tab in `Scope::Create`.
     let mut expected = vec![
         '/', '0', '2', '?', 'R', 'a', 'c', 'd', 'e', 'f', 'g', 'i', 'j', 'k', 'm', 'n', 'p', 'q',
         'r', 's', 'v', 'w',
@@ -170,7 +171,6 @@ fn every_bound_normal_key_is_documented_in_the_help() {
     // The non-character bindings are documented too: Enter as a key, the arrows in
     // the `↑↓/jk` chip, and Esc in the quit row's description.
     assert!(documented.contains("Enter"));
-    assert!(documented.contains("Tab"));
     assert!(documented.contains('↑') && documented.contains('↓'));
     let rendered: String = help_lines(60).iter().map(line_text).collect();
     assert!(

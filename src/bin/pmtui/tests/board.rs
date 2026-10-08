@@ -1389,7 +1389,7 @@ fn task_pointer_routes_detail_preview_and_composer_regions() {
 #[test]
 fn board_keys_open_close_and_reuse_the_existing_create_surface() {
     let mut app = board_app();
-    handle_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
+    handle_key(&mut app, KeyCode::Char('2'), KeyModifiers::NONE);
     assert!(matches!(app.mode, UiMode::Board));
     handle_key(&mut app, KeyCode::Char('n'), KeyModifiers::NONE);
     let UiMode::Creating(form) = &app.mode else {
