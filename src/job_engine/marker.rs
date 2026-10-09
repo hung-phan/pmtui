@@ -20,6 +20,7 @@ use crate::job::{
 };
 use crate::pmstate::{OpenStop, StopKind};
 use crate::policy::{self, Decision};
+use crate::registry::Engine;
 use crate::state::{self, Config};
 use crate::tmux::Driver;
 
@@ -328,8 +329,20 @@ impl JobScheduler {
         // FO-2 (Milestone D): any accepted marker bump means the agent reported — a
         // marker-less finish is over, so the recheck counter resets on every valid bump.
         next.marker_less_rechecks = 0;
-        // OQ6: capture the agent-reported conversation id when the ledger has none.
-        if next.conversation_id.is_none()
+        // OQ6: capture the agent-reported conversation id when the ledger has none — EXCEPT on
+        // codex, where the engine itself is now the authority.
+        //
+        // OQ6 existed *for* codex: it had no harness-pinned id, so the agent was asked to report
+        // its own rollout id. The turn hook now reports that id as a FACT, which makes the agent's
+        // self-declaration both redundant and dangerous — a worker could name any conversation,
+        // including another session's, and because `resolve_conversation_id` consults the ledger
+        // first it would outrank the engine's own answer. The claim also used to arrive FIRST: the
+        // hook was read only at relaunch, so a report landing mid-session won permanently.
+        //
+        // Claude keeps the path: there the ledger is filled by mint or seed before any report, so
+        // an agent echoing its id corroborates a value pmtui chose rather than making a new claim.
+        if self.engine != Engine::Codex
+            && next.conversation_id.is_none()
             && let Some(cid) = report.conversation_id.as_ref()
         {
             next.conversation_id = Some(cid.clone());

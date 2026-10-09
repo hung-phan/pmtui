@@ -9,6 +9,7 @@
 
 mod audit_tabs;
 mod autopilot_dial;
+mod codex_identity;
 mod conversation_fork;
 mod create_form;
 mod decider_bench;

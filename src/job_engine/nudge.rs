@@ -519,10 +519,13 @@ pub fn loop_nudge_prompt_for_engine(input: LoopNudgePromptInput<'_>, engine: Eng
          - For slow work, detach only lifecycle-safe, non-interactive work with durable output that \
          is independently observable through a revalidatable handle and enforced hard deadline; \
          write the checkpoint plus a monitoring marker, end the turn, and reconcile on the next \
-         wake.\n\
-         - codex only: on your FIRST marker also include a `conversation_id` (your session/\
-         rollout id) so the harness can resume the SAME conversation across a restart."
+         wake."
             .to_string()
+        // The codex line that used to close this block — "on your FIRST marker also include a
+        // `conversation_id`" — is GONE. It asked the worker to declare its own identity because
+        // nothing else could learn it; codex's turn hook now reports that id as a fact and pmd
+        // ignores a worker-authored one. Keeping the instruction would ask an agent for something
+        // discarded on arrival, which is how a prompt and a policy start disagreeing.
     };
 
     // The deterministic "Since last wake" block: a FIXED line per whitelisted signal, and the

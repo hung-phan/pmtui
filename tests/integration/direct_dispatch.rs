@@ -33,6 +33,10 @@ fn run_engine_case(engine: Engine) {
     })
     .expect("canonical root");
     let registry = dir.path().join("registry.json");
+    // ONE ARGUMENT PER LINE. The echo used to join every arg on a single line, which the pane then
+    // wrapped mid-token — so a `contains` for the initial message failed the moment the injected
+    // `-c notify=…` config grew long enough to push it across a line boundary. The product was
+    // fine; the probe was measuring its own formatting.
     let bin = dir.path().join("bin");
     std::fs::create_dir(&bin).expect("stub bin");
     for name in ["claude", "codex"] {
@@ -41,9 +45,8 @@ fn run_engine_case(engine: Engine) {
             &stub,
             r#"#!/bin/sh
 if [ "$1" = "debug" ] && [ "$2" = "models" ]; then exit 0; fi
-printf 'DIRECT_READY'
-for arg in "$@"; do printf '<%s>' "$arg"; done
-printf '\n'
+printf 'DIRECT_READY\n'
+for arg in "$@"; do printf '<%s>\n' "$arg"; done
 case "$(basename "$0")" in
   claude) prompt='❯  ' ;;
   *) prompt='› Ready' ;;

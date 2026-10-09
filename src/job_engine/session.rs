@@ -291,25 +291,14 @@ impl JobScheduler {
                     session_id: Some(id),
                 }
             }
-            // Codex cannot be HANDED an id, but it REPORTS one: its turn hook writes the
-            // `thread_id` from `agent-turn-complete` beside the turn signal. Adopting that is the
-            // difference between resuming this session and starting it over — without it every
-            // relaunch of a codex row (a crash, a restart, `r`) silently opened a NEW conversation
-            // and orphaned the history, because the comment here promised an id "captured later"
-            // that nothing ever captured.
-            //
-            // Marked UNCONFIRMED like an adopted seed: the id is real, but the thread it names can
-            // be archived or deleted between turns, and for codex the one-shot fallback degrades to
-            // a plain fresh session (`build_standard_command` resumes only on `Continue`) — exactly
-            // the right retreat when a resume cannot work.
-            Engine::Codex => match crate::state::codex_identity::read(&self.paths) {
-                Some(id) => {
-                    next.conversation_id = Some(id.clone());
-                    next.resume_unconfirmed = true;
-                    Resume::Continue(id)
-                }
-                None => Resume::Fresh { session_id: None },
-            },
+            // Codex cannot be HANDED an id, and is not given one here either: by the time
+            // `ensure_session` runs, `JobScheduler::tick` has already reconciled whatever its turn
+            // hook reported into the ledger, so a session with a known conversation takes the
+            // ledger branch above and never arrives here. Reaching this arm means no id has been
+            // reported yet — no turn has completed — and a fresh interactive session is the only
+            // honest answer. ONE adoption point; a second one here was unreachable, which is
+            // exactly what a mutation test showed.
+            Engine::Codex => Resume::Fresh { session_id: None },
         }
     }
 

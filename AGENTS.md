@@ -55,6 +55,14 @@ For nudge or worker-procedure changes, also run the LLM nudge judge:
 PM_NUDGE_JUDGE=1 cargo test --test integration nudge_judge -- --ignored --test-threads=1
 ```
 
+For changes to the codex turn hook or conversation identity, run the real-codex gate. Codex's wire
+contract cannot be verified against a fixture — that is how a pattern the real hook never matched
+shipped green:
+
+```bash
+PM_CODEX_IDENTITY=1 cargo test --test integration codex_identity -- --ignored --nocapture
+```
+
 For decider, policy, or situation-projection changes, run the decider benchmark:
 
 ```bash
@@ -153,11 +161,19 @@ server and daemon when the test ends.
   the candidate instead of submitting and `Esc` drops the pick instead of cancelling, so neither reaches
   the form, and the keybar says which keys are live. A recomputed list drops the pick too.
 - Codex is told no conversation id and REPORTS one instead: its `notify` hook's
-  `agent-turn-complete` payload carries `thread_id`, which the launch writes to
-  `ProjectPaths::codex_conversation_id` beside the turn signal. `src/state/codex_identity.rs` is the one
-  rule with two readers — pmd adopts it into its ledger so a relaunch resumes, pmtui reads it so `Enter`
-  resumes. Never read a running engine's own files to guess an identity; `/proc` scraping is Linux-only
-  and races the engine's startup. An id arrives only after the first completed turn, and one that does not
+  `agent-turn-complete` payload carries the id, which the launch writes to
+  `ProjectPaths::codex_conversation_id` beside the turn signal. THE WIRE KEY IS KEBAB-CASE
+  (`thread-id`): the legacy notify payload is re-serialized as `UserNotification` with
+  `rename_all = "kebab-case"`, NOT the snake_case internal `HookEventAfterAgent` — a fixture written
+  from the wrong struct once pinned a pattern the real hook could never match. `src/state/codex_identity.rs`
+  owns the one UUID contract (`UUID_ERE`, shared with the hook's `grep` so the writer and the reader
+  cannot drift) and has two readers: pmd adopts the id, pmtui reads it for `Enter`.
+- THE ENGINE IS THE AUTHORITY on a codex conversation, not the worker: a worker-authored
+  `conversation_id` is ignored on codex (it would outrank the engine and could name another session's
+  conversation), and nothing asks an agent for one. pmd reconciles the hook's id on EVERY tick, not only
+  at relaunch — one adoption point, so a live session is never left with an empty ledger for a claim to
+  win. Never read a running engine's own files to guess an identity; `/proc` scraping is Linux-only and
+  races the engine's startup. An id arrives only after the first completed turn, and one that does not
   parse is "not known yet" — never an argument.
 - No machine declares a project done. The human closes the session.
 

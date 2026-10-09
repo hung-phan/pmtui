@@ -622,14 +622,26 @@ fn session_id_hook_shell(identity_sink: &Path) -> String {
 /// launcher can learn one without reading the live process's open files out of `/proc` — Linux-only,
 /// and racing codex's own startup. codex runs `sh -c '<cmd>' '<event-json>'`, so the payload is `$0`.
 ///
-/// Three things make reading that payload with `grep` safe, given it also carries `input_messages`
-/// and `last_assistant_message` — text the AGENT controls:
+/// THE WIRE KEY IS KEBAB-CASE. The legacy notify payload is a DIFFERENT type from the internal
+/// event: `codex-rs/hooks/src/legacy_notify.rs` re-serializes it as `UserNotification` with
+/// `#[serde(rename_all = "kebab-case")]`, so codex's own fixture reads
+/// `{"type":"agent-turn-complete","thread-id":"…","turn-id":"…","last-assistant-message":"…"}`.
+/// The internal `HookEventAfterAgent` in `hooks/src/types.rs` is snake_case, and writing a test
+/// fixture from THAT is how a first version of this shipped matching `"thread_id"` — a pattern the
+/// real hook could never satisfy, pinned by a test that agreed with it. Both spellings are accepted
+/// now: kebab is today's contract, and upstream marks the legacy payload for removal
+/// (`TODO: Remove this hook … when legacy notify support is removed`) in favour of the snake_case
+/// one, so this survives that migration rather than breaking on it.
 ///
-/// 1. The pattern matches a UUIDv7 SHAPE (`…-7xxx-…`), not merely `"thread_id":"…"`, so prose that
-///    just mentions the field name cannot match.
-/// 2. `head -n1` takes the FIRST match. `thread_id` serializes before both agent-controlled fields,
-///    so the real id comes first — a shape-matching forgery would have to appear earlier, which
-///    needs serde to reorder the payload.
+/// Three things make reading that payload with `grep` safe, given it also carries `input-messages`
+/// and `last-assistant-message` — text the AGENT controls:
+///
+/// 1. The pattern matches a whole UUID LAYOUT ([`crate::state::codex_identity::UUID_ERE`], shared
+///    with the validator that reads the file back), not merely `"thread-id":"…"`, so prose that
+///    happens to mention the field name cannot match.
+/// 2. `head -n1` takes the FIRST match, and `thread-id` serializes before both agent-controlled
+///    fields — so a forgery would have to appear EARLIER than the real id, which needs serde to
+///    reorder the payload.
 /// 3. The capture is sequenced with `;`, not `&&`, and guarded on a non-empty result. A payload
 ///    that yields nothing leaves any previous id in place and NEVER breaks the turn byte, which is
 ///    the load-bearing half; the id is the additive one.
@@ -641,8 +653,9 @@ fn codex_turn_hook_shell(turn_signal: &Path) -> String {
     let sink = sink.to_string_lossy();
     let temp = format!("{sink}.tmp");
     format!(
-        "{}; id=$(printf '%s' \"$0\" | grep -oE '\"thread_id\":\"[0-9a-f]{{8}}-[0-9a-f]{{4}}-7[0-9a-f]{{3}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}\"' | head -n1 | cut -d'\"' -f4); [ -n \"$id\" ] && printf '%s' \"$id\" > {} && mv {} {}",
+        "{}; id=$(printf '%s' \"$0\" | grep -oE '\"thread[-_]id\":\"{}\"' | head -n1 | cut -d'\"' -f4); [ -n \"$id\" ] && printf '%s' \"$id\" > {} && mv {} {}",
         turn_hook_shell(turn_signal),
+        crate::state::codex_identity::UUID_ERE,
         crate::tmux::shq(&temp),
         crate::tmux::shq(&temp),
         crate::tmux::shq(&sink),

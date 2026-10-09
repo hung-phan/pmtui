@@ -966,6 +966,10 @@ happen again. A restart MUST NOT do any of these:
     yet". The product then starts one conversation, and never passes an unusable value to the engine.
   - An engine reports its identity only after its first turn of work ends. Until then the session has no
     identity, and the product says so rather than inventing one.
+  - The identity comes from the engine. The product MUST NOT take it from the worker's own report, and
+    MUST NOT ask a worker for it: a worker could name the conversation of another session.
+  - The product MUST reconcile the identity it learns during its ordinary work, not only when it starts a
+    terminal. A session that is running MUST NOT be left without the identity the engine has reported.
 - At most one supervisor drives one fleet. At most one dashboard changes it at a time.
 - A second interactive dashboard MAY replace the current one only after the person confirms. It asks the
   current one to exit, and takes the released lock before it draws. To force an exit needs a separate

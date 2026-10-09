@@ -1332,18 +1332,32 @@ fn a_pending_context_without_a_human_answer_still_gets_a_handle_first_pointer() 
 }
 
 #[test]
-fn the_degrade_block_tells_codex_to_carry_conversation_id_on_the_first_marker() {
-    // codex has no caller-chosen id; its ONLY resume path is the id it writes on its first
-    // marker. The skill-less DEGRADE path must name that so a pmd restart can resume it.
+fn no_nudge_asks_codex_to_declare_its_own_conversation_id() {
+    // It used to. codex had no caller-chosen id, so the degrade block asked the worker to report
+    // its own rollout id on the first marker and pmd believed it. The turn hook now reports that id
+    // as a FACT and pmd ignores a worker-authored one, so the instruction would be asking an agent
+    // for something discarded on arrival — a prompt disagreeing with the policy behind it.
+    //
+    // Checked on BOTH paths and BOTH engines, because the ask only ever appeared on one of the four
+    // and a revival would be easy to miss.
     let marker = std::path::Path::new("/tmp/proj/.project-state/sessions/s/needs-you.json");
     let since = SinceLastWake::default();
     let input =
         |available| LoopNudgePromptInput::new("goal", "", "", "", &since, available, marker);
+    for engine in [Engine::Codex, Engine::Claude] {
+        for skill_available in [false, true] {
+            let prompt = loop_nudge_prompt_for_engine(input(skill_available), engine);
+            assert!(
+                !prompt.contains("conversation_id"),
+                "{engine:?} (skill_available={skill_available}) still asks for a conversation_id:\n{prompt}"
+            );
+        }
+    }
+    // The rest of the degrade block is untouched — removing the ask must not take the finite-wake
+    // instructions with it.
     let degraded = loop_nudge_prompt_for_engine(input(false), Engine::Codex);
-    assert!(degraded.contains("conversation_id"));
-    assert!(degraded.contains("codex only"));
-    let native = loop_nudge_prompt_for_engine(input(true), Engine::Codex);
-    assert!(!native.contains("conversation_id"));
+    assert!(degraded.contains("work in finite wakes"), "{degraded}");
+    assert!(degraded.contains("bump seq"), "{degraded}");
 }
 
 #[test]

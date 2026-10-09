@@ -227,10 +227,79 @@ fn codex_adopts_the_id_its_own_turn_hook_reported_and_resumes_it() {
     // Adopted onto the ledger pmd alone writes, so the NEXT relaunch takes the ledger branch
     // instead of reading the file again.
     assert_eq!(ledger(&fx).conversation_id.as_deref(), Some(captured));
-    // UNCONFIRMED, because the thread can be archived or deleted between turns: for codex the
-    // one-shot fallback degrades to a plain fresh session, which is the right retreat when a
-    // resume cannot work.
-    assert!(ledger(&fx).resume_unconfirmed);
+    // CONFIRMED, left at its default. Marking a hook-reported id unconfirmed (as an adopted seed
+    // is) would make a later relaunch CREATE instead of resume, and for codex a create is a
+    // brand-new conversation — the very orphaning this change exists to prevent. The evidence is
+    // stronger than a seed's, too: the id comes from a turn this session COMPLETED, where a seed is
+    // only a human's claim that a conversation exists.
+    assert!(!ledger(&fx).resume_unconfirmed);
+}
+
+#[test]
+fn a_second_relaunch_still_resumes_the_same_codex_conversation() {
+    // Restart twice. A relaunch that quietly starts a new conversation reads as success in every
+    // other assertion — the session is up, it has just lost everything it knew.
+    //
+    // Each round asserts a NEW launch happened before reading its argv. `launched_argv` returns the
+    // LAST launch for the session, so a round that failed to relaunch would otherwise re-inspect
+    // the previous round's command and pass. A first version of this test did exactly that, and a
+    // mutation run is what exposed it.
+    let captured = "0199dddd-1111-7aaa-8bbb-ccccdddddddd";
+    let mut fx = setup(Tier::Standard, Engine::Codex, Some(300));
+    let sess = loop_session(&fx);
+    std::fs::create_dir_all(fx.paths.codex_conversation_id().parent().unwrap()).unwrap();
+    std::fs::write(fx.paths.codex_conversation_id(), captured).unwrap();
+
+    for round in 1..=2i64 {
+        fx.driver.set_alive(&sess, false);
+        fx.clock.set(START + LAUNCH_GRACE_S * round);
+        fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+        assert_eq!(
+            fx.driver.launched().len(),
+            round as usize,
+            "round {round} must actually relaunch"
+        );
+        let argv = launched_argv(&fx, &sess).unwrap();
+        let at = argv
+            .iter()
+            .position(|a| a == "resume")
+            .unwrap_or_else(|| panic!("relaunch {round} must resume: {argv:?}"));
+        assert_eq!(
+            argv.get(at + 1).map(String::as_str),
+            Some(captured),
+            "relaunch {round} resumes the same conversation"
+        );
+    }
+}
+
+#[test]
+fn a_live_codex_session_adopts_its_reported_id_without_waiting_for_a_relaunch() {
+    // Reading the hook only at relaunch left the ledger empty for the whole life of a live session
+    // — a WINDOW, not just a delay: a worker-authored id could land first and win permanently, and
+    // nothing authoritative existed to compare it against. An ordinary tick reconciles it, with no
+    // relaunch involved.
+    let captured = "0199dddd-1111-7aaa-8bbb-ccccdddddddd";
+    let fx = setup_with(Tier::Standard, Engine::Codex, Some(300), |l| {
+        l.conversation_id = None;
+        l.run = JobRun::Monitoring { until: START };
+    });
+    let sess = loop_session(&fx);
+    fx.driver.set_alive(&sess, true);
+    let mut fx = fx;
+    std::fs::create_dir_all(fx.paths.codex_conversation_id().parent().unwrap()).unwrap();
+    std::fs::write(fx.paths.codex_conversation_id(), captured).unwrap();
+
+    fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+
+    assert_eq!(
+        ledger(&fx).conversation_id.as_deref(),
+        Some(captured),
+        "the live session's identity is reconciled on an ordinary tick"
+    );
+    assert!(
+        fx.driver.launched().is_empty(),
+        "and nothing was relaunched to get it"
+    );
 }
 
 #[test]
