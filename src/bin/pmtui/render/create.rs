@@ -18,6 +18,9 @@
 
 use crate::*;
 use ratatui::widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState};
+// The Directory ghost is split at a CLUSTER boundary, the same way `truncate` measures it, so the
+// caret cell can never land inside a multi-codepoint glyph.
+use unicode_segmentation::UnicodeSegmentation;
 
 /// Rows the focused model field's inline list is windowed to — a FIXED, compact 4-row reserve the
 /// popup always leaves room for, so focusing a model field FILLS this area (scrolling within it)
@@ -78,7 +81,22 @@ fn render_create_inner(
             "New session"
         },
         agent_manager::theme::accent(),
-        "\u{2191}\u{2193} field \u{b7} \u{2190}\u{2192} value \u{b7} ^E $EDITOR \u{b7} enter create \u{b7} esc cancel",
+        // The keybar advertises the FOCUSED row's own affordances, because the two it would
+        // otherwise have to carry together do not fit: the hint is dropped whole once it needs more
+        // than the card's width (`draw_overlay_frame_in`), so a sixth chip would silently erase the
+        // other five. `^E $EDITOR` only ever applied to the intent row, and on the Directory row
+        // `\u{2190}\u{2192}` move the caret rather than step a value — so each row says what is
+        // true of it.
+        if form.dir_pick().is_some() {
+            // SELECT MODE says so: while a candidate is picked, `enter` takes it instead of
+            // creating the session, so a keybar still offering `enter create` would be a lie. `tab`
+            // is listed because the way out is the thing a human needs most to be told.
+            "\u{2191}\u{2193} pick \u{b7} enter take \u{b7} esc back \u{b7} tab field"
+        } else if form.field == CreateForm::DIRECTORY {
+            "\u{2191}\u{2193} pick \u{b7} \u{2192} complete \u{b7} tab field \u{b7} enter create \u{b7} esc cancel"
+        } else {
+            "\u{2191}\u{2193} field \u{b7} \u{2190}\u{2192} value \u{b7} ^E $EDITOR \u{b7} enter create \u{b7} esc cancel"
+        },
     );
 
     // Columns the value gets after the [`VALUE_COL`] gutter (the two-column marker + the LABEL_W
@@ -123,13 +141,41 @@ fn render_create_inner(
         ];
         if focused {
             let v = field.caret_view(value_cols);
-            spans.push(Span::styled(v.left, style));
-            if v.at.is_empty() {
-                spans.push(Span::styled("_", style));
+            // The GHOST completion — only the Directory row has one, so the row kind asks for it
+            // rather than every caller passing it, and it can never be drawn against a field with
+            // no completion. `dir_ghost` already requires the caret at the end of the line, the
+            // only place a suggestion can honestly be drawn.
+            let ghost = if idx == CreateForm::DIRECTORY {
+                form.dir_ghost()
             } else {
-                spans.push(Span::styled(v.at, style.add_modifier(Modifier::REVERSED)));
+                None
+            };
+            spans.push(Span::styled(v.left.clone(), style));
+            match ghost {
+                // The suggestion's FIRST cluster becomes the caret cell, so the caret sits ON the
+                // completion the way a shell's block cursor sits on its autosuggestion, and the
+                // rest is dim — visibly not typed yet. `v.right` is empty here by construction.
+                Some(g) => {
+                    let g = truncate(g, value_cols.saturating_sub(text_cols(&v.left)));
+                    let mut clusters = g.graphemes(true);
+                    spans.push(Span::styled(
+                        clusters.next().unwrap_or("_").to_string(),
+                        style.add_modifier(Modifier::REVERSED),
+                    ));
+                    let rest: String = clusters.collect();
+                    if !rest.is_empty() {
+                        spans.push(Span::styled(
+                            rest,
+                            Style::default().add_modifier(Modifier::DIM),
+                        ));
+                    }
+                }
+                None if v.at.is_empty() => spans.push(Span::styled("_", style)),
+                None => {
+                    spans.push(Span::styled(v.at, style.add_modifier(Modifier::REVERSED)));
+                    spans.push(Span::styled(v.right, style));
+                }
             }
-            spans.push(Span::styled(v.right, style));
         } else {
             // Truncate into the value budget so a long path is one line (no wrap).
             spans.push(Span::styled(truncate(field.as_str(), value_cols), style));
@@ -270,8 +316,52 @@ fn render_create_inner(
         });
     }
     rows.extend(lines);
+    // The Directory row expands the same way a focused Model row does, into the SAME reserve — only
+    // one field is ever focused, so the two can never both want it, and the card's height does not
+    // move. The list has no cursor on purpose: it answers "what is there", and `Tab` acts on the
+    // ghost in the row above, so there is nothing to select and no key to spend selecting it.
     field_rows.push((CreateForm::DIRECTORY, rows.len()));
     rows.push(caret_row(CreateForm::DIRECTORY, "Directory", &form.dir));
+    let dir_paths = form.dir_option_paths();
+    if !dir_paths.is_empty() {
+        // Windowed exactly like a focused model row's catalog, and for the same reason: the card's
+        // height is FIXED, so the list scrolls inside the reserve instead of growing it. With no
+        // pick yet the window sits at the top — there is no cursor to follow.
+        let pick = form.dir_pick();
+        let win = dir_paths.len().min(MODEL_LIST_VIEWPORT);
+        let max_start = dir_paths.len().saturating_sub(win);
+        let start = pick
+            .unwrap_or(0)
+            .saturating_sub(win.saturating_sub(1))
+            .min(max_start);
+        list_span = Some(ListSpan {
+            row_off: rows.len(),
+            win,
+            current: pick.unwrap_or(0),
+            list_len: dir_paths.len(),
+        });
+        for (i, path) in dir_paths.iter().enumerate().skip(start).take(win) {
+            let picked = pick == Some(i);
+            // The WHOLE path, not the bare name: a candidate's value is what the field would
+            // become, and that is what a human compares against the path they are editing. Cut on
+            // the LEFT, because the part that distinguishes two paths is their tail.
+            let text = truncate_left(path, value_cols);
+            rows.push(Line::from(vec![
+                Span::raw(" ".repeat(VALUE_COL)),
+                Span::styled(
+                    text,
+                    if picked {
+                        // Colored BOLD marks the pick — the dashboard's emphasis everywhere.
+                        Style::default()
+                            .fg(agent_manager::theme::accent())
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().add_modifier(Modifier::DIM)
+                    },
+                ),
+            ]));
+        }
+    }
     field_rows.push((CreateForm::NAME, rows.len()));
     rows.push(caret_row(CreateForm::NAME, "Name", &form.name));
     // A dim, unlabeled rule splits "the session" (Engine/Model/Directory) from "how it's driven"

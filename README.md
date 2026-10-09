@@ -70,8 +70,9 @@ and `--socket` override them, and `--help` lists the rest.
 
 In the dashboard:
 
-1. **`n`** creates a session. Point it at a project directory, and optionally type a first
-   **Message** — the interactive Claude/Codex terminal starts on it right away. Leave it empty to
+1. **`n`** creates a session. Point it at a project directory — the **Directory** row lists where
+   you can go as whole paths (`↑`/`↓` to pick, `enter` to take) and completes as you type — and
+   optionally type a first **Message**: the interactive Claude/Codex terminal starts on it right away. Leave it empty to
    start at the agent's prompt. The **Name** field is an optional human-readable label.
 2. **`enter`** attaches you to that session's terminal. It is an ordinary `claude`/`codex` REPL:
    work in it, press **`ctrl+q`** to leave it, and the session keeps its conversation — the agent

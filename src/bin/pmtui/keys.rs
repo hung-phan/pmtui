@@ -770,10 +770,27 @@ pub(crate) fn handle_create_key(app: &mut App, code: KeyCode, mods: KeyModifiers
     // Esc/Enter need &mut App, so handle them before borrowing the form.
     match code {
         KeyCode::Esc => {
+            // Back out of the candidate list FIRST. Esc means "undo the thing I just opened", and
+            // losing a filled-in form to one stray press would be a bad trade for a picker nobody
+            // asked to keep.
+            if let UiMode::Creating(form) = &mut app.mode
+                && form.clear_dir_pick()
+            {
+                return;
+            }
             app.cancel_create_form();
             return;
         }
         KeyCode::Enter => {
+            // A PICK IS A SUBLAYER with its own Enter and Esc: while one is live, `Enter` takes the
+            // candidate and `Esc` backs out, and neither reaches the form. Submitting the form from
+            // inside a list the human is still choosing in would create a session they had not
+            // finished naming.
+            if let UiMode::Creating(form) = &mut app.mode
+                && form.accept_dir_pick()
+            {
+                return;
+            }
             app.submit_create();
             return;
         }
@@ -785,8 +802,25 @@ pub(crate) fn handle_create_key(app: &mut App, code: KeyCode, mods: KeyModifiers
     let engine_before = form.engine;
     let decider_engine_before = form.decider_engine;
     match code {
-        KeyCode::Tab | KeyCode::Down => form.next_field(),
-        KeyCode::BackTab | KeyCode::Up => form.prev_field(),
+        // TAB IS ALWAYS THE NEXT FIELD. It is the form's ONE unconditional exit, so no row can trap
+        // the human — and the Directory row, which has a list and a ghost competing for keys, is
+        // exactly the row that would. Taking something lives on keys that mean taking: `Enter` for
+        // a picked candidate, `→` for the ghost.
+        KeyCode::Tab => form.next_field(),
+        KeyCode::BackTab => form.prev_field(),
+        // `↑`/`↓` move the PICK while the Directory row is showing candidates, and move between
+        // fields everywhere else — `move_dir_pick` reports which it did. Overloading these two is
+        // safe only because `Tab`/`Shift+Tab` are not overloaded; the row's keybar says so.
+        KeyCode::Down => {
+            if !form.move_dir_pick(true) {
+                form.next_field();
+            }
+        }
+        KeyCode::Up => {
+            if !form.move_dir_pick(false) {
+                form.prev_field();
+            }
+        }
         // On a TEXT field (Directory/Goal) ←/→ move the caret; on every toggle field
         // (Engine/Model/Autonomy/Cadence/Decider/Decider Model) they step the value — the two Model
         // fields are now uniform ←→ steppers over `[(default)] ++ choices`, not comboboxes.
@@ -796,6 +830,11 @@ pub(crate) fn handle_create_key(app: &mut App, code: KeyCode, mods: KeyModifiers
             } else {
                 form.adjust(false);
             }
+        }
+        // `→` at the end of the line accepts the ghost too, the way fish does it. It cannot
+        // conflict: with the caret already at the end there is no rightward move to lose.
+        KeyCode::Right if form.dir_ghost().is_some() => {
+            form.accept_dir_ghost();
         }
         KeyCode::Right => {
             if form.is_text_field() {
@@ -821,6 +860,11 @@ pub(crate) fn handle_create_key(app: &mut App, code: KeyCode, mods: KeyModifiers
         }
         _ => {}
     }
+    // ONE recompute per key, after the key has been applied — not at each mutation site, because
+    // typing, backspace, delete and a paste all reach the same buffer. `refresh_dir_suggestion`
+    // returns immediately when the text did not change, so a caret move or a keystroke in another
+    // field costs nothing and the renderer never has to read a directory.
+    form.refresh_dir_completion();
     // The Engine toggle changes which models exist, so refresh the create form's cached
     // `model_choices` from the catalog whenever the engine just flipped — `models_for` needs
     // `&mut App` (it does the one-per-engine discovery), so it happens here, not on the form.
@@ -891,7 +935,12 @@ pub(crate) fn handle_paste(app: &mut App, raw: &str) {
         }
         // One O(n) `insert_str` into the focused text field (toggles/model steppers ignore it), the
         // same path the four overlay fields above use — not a per-char loop, which would be O(n²).
-        UiMode::Creating(form) => form.paste(&text),
+        UiMode::Creating(form) => {
+            form.paste(&text);
+            // A pasted path is the most likely thing to complete, so the ghost is recomputed here
+            // too — this is the one mutation that does not arrive through `handle_create_key`.
+            form.refresh_dir_completion();
+        }
         _ => {
             let n = text.chars().count();
             app.status = format!("pasted {n} chars — open a field first (/, R, g, i or s)");

@@ -140,6 +140,18 @@ server and daemon when the test ends.
   from what is already there. Route keys to it; do not reimplement motions, kills, wrapping or undo.
   `Enter` submits, so a newline is a chord, and `$EDITOR` is `^X^E` (which is what leaves `^E` free to
   mean end-of-line). A one-line `Field` is for a scalar: an id, an interval, a query.
+- The create form's Directory row answers two questions from one cached `DirCompletion` — the ghost
+  tail and the candidate list — keyed on the text it was computed from. `src/bin/pmtui/path_complete.rs`
+  owns the rules and nothing reads a directory to draw a frame. The tail stays a GHOST until accepted,
+  by `→` at end-of-line; a tail of just `/` is never offered. `Tab` is the form's ONE UNCONDITIONAL
+  EXIT — always `next_field`, on every row — because two conditional exits trapped the human on this
+  one; taking is only ever a key that means taking. The
+  list expands into the SAME reserve a focused Model row uses, so the card's height never moves, shows
+  each candidate's WHOLE path (`DirCompletion::base.join(name)`), and is picked with `↑`/`↓` — which
+  therefore move between fields only when that row has no list. No pick exists until an arrow asks for
+  one, which is what keeps every other key's meaning intact. A live pick is a SUBLAYER: `Enter` takes
+  the candidate instead of submitting and `Esc` drops the pick instead of cancelling, so neither reaches
+  the form, and the keybar says which keys are live. A recomputed list drops the pick too.
 - No machine declares a project done. The human closes the session.
 
 ## Spawn Command Surface

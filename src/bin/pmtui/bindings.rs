@@ -576,7 +576,7 @@ pub(crate) const BINDINGS: &[Binding] = &[
     Binding {
         key: "Tab",
         label: "Field",
-        help: "Create form: next field (↑↓ also move, Shift+Tab goes back)",
+        help: "Create form: next field — always, so no row can trap you (↓ also moves, except where it picks a Directory candidate; Shift+Tab goes back)",
         group: KeyGroup::Overlays,
         scope: Scope::Create,
         applies: Applies::Always,
@@ -601,9 +601,18 @@ pub(crate) const BINDINGS: &[Binding] = &[
         rank: 3,
     },
     Binding {
+        key: "↑/↓",
+        label: "Pick",
+        help: "Create form: pick a Directory candidate from the list under that row (Enter takes it, Esc backs out); elsewhere, move between fields",
+        group: KeyGroup::Overlays,
+        scope: Scope::Create,
+        applies: Applies::Always,
+        rank: 4,
+    },
+    Binding {
         key: "←/→",
         label: "Toggle",
-        help: "Create form: change a toggle (engine, autonomy, cadence, decider)",
+        help: "Create form: change a toggle (engine, autonomy, cadence, decider); in a text field move the caret, and → at the end of the Directory row takes its completion",
         group: KeyGroup::Overlays,
         scope: Scope::Create,
         applies: Applies::Always,
