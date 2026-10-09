@@ -291,7 +291,25 @@ impl JobScheduler {
                     session_id: Some(id),
                 }
             }
-            Engine::Codex => Resume::Fresh { session_id: None },
+            // Codex cannot be HANDED an id, but it REPORTS one: its turn hook writes the
+            // `thread_id` from `agent-turn-complete` beside the turn signal. Adopting that is the
+            // difference between resuming this session and starting it over — without it every
+            // relaunch of a codex row (a crash, a restart, `r`) silently opened a NEW conversation
+            // and orphaned the history, because the comment here promised an id "captured later"
+            // that nothing ever captured.
+            //
+            // Marked UNCONFIRMED like an adopted seed: the id is real, but the thread it names can
+            // be archived or deleted between turns, and for codex the one-shot fallback degrades to
+            // a plain fresh session (`build_standard_command` resumes only on `Continue`) — exactly
+            // the right retreat when a resume cannot work.
+            Engine::Codex => match crate::state::codex_identity::read(&self.paths) {
+                Some(id) => {
+                    next.conversation_id = Some(id.clone());
+                    next.resume_unconfirmed = true;
+                    Resume::Continue(id)
+                }
+                None => Resume::Fresh { session_id: None },
+            },
         }
     }
 

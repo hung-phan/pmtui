@@ -172,6 +172,18 @@ plain "next field" it always was, so tabbing through the form never gets stuck o
 that row has the arrows, **`shift+tab`** is how you go back a field. To descend from a path you
 typed in full, type the `/` and its children become candidates.
 
+### Codex sessions and their conversation
+
+Claude lets pmtui name a conversation up front; Codex does not — it assigns its own. So a Codex session
+learns its identity from the engine itself, reported when its **first turn finishes**. Until then the
+session has no conversation to go back to, which is why a brand-new Codex row shows none.
+
+Once it has one, `Enter` resumes that conversation and a restart keeps it. Before this, neither the
+dashboard nor the driver had any way to know the id, so a Codex session that had been working for hours
+still looked brand-new: pressing `Enter` opened a *second* conversation and the first became unreachable,
+and every driver relaunch started over. If you have Codex rows from an older version, their pre-existing
+conversations cannot be recovered — but from the first completed turn onward each one is remembered.
+
 ### Jobs an agent spawned
 
 An agent working in a session can hand an independent piece of its task to a child. That child is a

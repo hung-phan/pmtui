@@ -252,19 +252,46 @@ fn build_codex_fresh_chat_is_a_plain_interactive_codex_with_optional_flags() {
 }
 
 #[test]
-fn effective_id_prefers_ledger_then_registry_seed() {
-    // The ledger's id wins (the daemon's authority); the registry seed is only
-    // the fallback; both absent ⇒ None.
+fn effective_id_prefers_ledger_then_registry_seed_then_what_the_engine_reported() {
+    // The ledger's id wins (the daemon's authority); the registry seed is the fallback; the id
+    // codex's own hook captured ranks LAST, because the first two are decisions and this is an
+    // observation. All absent ⇒ None.
+    let captured = Some("captured");
     assert_eq!(
-        effective_id(Some("ledger"), Some("seed")),
+        effective_id(Some("ledger"), Some("seed"), captured),
         Some("ledger".to_string())
     );
-    assert_eq!(effective_id(None, Some("seed")), Some("seed".to_string()));
     assert_eq!(
-        effective_id(Some("ledger"), None),
+        effective_id(None, Some("seed"), captured),
+        Some("seed".to_string())
+    );
+    assert_eq!(
+        effective_id(Some("ledger"), None, captured),
         Some("ledger".to_string())
     );
-    assert_eq!(effective_id(None, None), None);
+    // Ranking it last is what makes the new source purely ADDITIVE: it can only ever decide a row
+    // where both decisions are empty — which is every codex row, since codex has no caller-chosen
+    // id for either of them to record.
+    assert_eq!(
+        effective_id(None, None, captured),
+        Some("captured".to_string())
+    );
+    assert_eq!(effective_id(None, None, None), None);
+}
+
+#[test]
+fn a_codex_row_whose_hook_reported_an_id_resumes_instead_of_opening_a_second_conversation() {
+    // THE BUG this closes: codex has no caller-chosen id, so a session that had run for hours
+    // still held None in both the ledger and the registry — Enter read that as never-woken and
+    // opened a SECOND conversation, orphaning the first. The hook's own `thread_id` is the only
+    // thing that could have said otherwise.
+    let captured = "0199dddd-1111-7aaa-8bbb-ccccdddddddd";
+    let eff = effective_id(None, None, Some(captured));
+    assert_eq!(
+        agent_loop_enter(None, eff.as_deref(), false),
+        EnterAction::Chat(captured.to_string()),
+        "Enter must resume what the engine reported"
+    );
 }
 
 #[test]
@@ -273,7 +300,7 @@ fn second_enter_on_seed_only_session_resumes_not_re_mints() {
     // None), a second Enter must Chat the SEEDED id via the resume path — never
     // mint a second conversation. effective_id feeds agent_loop_enter, so a
     // seed-only state is Chat(seed), not WaitingFirstWake.
-    let eff = effective_id(None, Some("seed-42"));
+    let eff = effective_id(None, Some("seed-42"), None);
     assert_eq!(
         agent_loop_enter(None, eff.as_deref(), false),
         EnterAction::Chat("seed-42".to_string())

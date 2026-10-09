@@ -208,6 +208,48 @@ fn codex_launches_fresh_interactive_without_a_pinned_id() {
 }
 
 #[test]
+fn codex_adopts_the_id_its_own_turn_hook_reported_and_resumes_it() {
+    // THE BUG: codex has no caller-chosen id, so `mint_or_fresh` launched it fresh and promised
+    // the id would be "captured later" — but nothing captured it. Every relaunch (a crash, a pmd
+    // restart, `r`) therefore opened a NEW conversation and orphaned the history. The turn hook's
+    // `thread_id` is the only thing that could have said otherwise.
+    let captured = "0199dddd-1111-7aaa-8bbb-ccccdddddddd";
+    let mut fx = setup(Tier::Standard, Engine::Codex, Some(300));
+    let sess = loop_session(&fx);
+    std::fs::create_dir_all(fx.paths.codex_conversation_id().parent().unwrap()).unwrap();
+    std::fs::write(fx.paths.codex_conversation_id(), captured).unwrap();
+
+    fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+
+    let argv = launched_argv(&fx, &sess).unwrap();
+    let at = argv.iter().position(|a| a == "resume").expect("resumes");
+    assert_eq!(argv.get(at + 1).map(String::as_str), Some(captured));
+    // Adopted onto the ledger pmd alone writes, so the NEXT relaunch takes the ledger branch
+    // instead of reading the file again.
+    assert_eq!(ledger(&fx).conversation_id.as_deref(), Some(captured));
+    // UNCONFIRMED, because the thread can be archived or deleted between turns: for codex the
+    // one-shot fallback degrades to a plain fresh session, which is the right retreat when a
+    // resume cannot work.
+    assert!(ledger(&fx).resume_unconfirmed);
+}
+
+#[test]
+fn codex_ignores_an_unusable_recorded_id_and_launches_fresh() {
+    // A truncated or tampered file must not reach the command line: `codex resume <garbage>` is a
+    // launch that dies and takes the whole heartbeat with it. Fresh is the safe reading.
+    let mut fx = setup(Tier::Standard, Engine::Codex, Some(300));
+    let sess = loop_session(&fx);
+    std::fs::create_dir_all(fx.paths.codex_conversation_id().parent().unwrap()).unwrap();
+    std::fs::write(fx.paths.codex_conversation_id(), "--help").unwrap();
+
+    fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+
+    let argv = launched_argv(&fx, &sess).unwrap();
+    assert!(!argv.iter().any(|a| a == "resume"), "{argv:?}");
+    assert!(ledger(&fx).conversation_id.is_none());
+}
+
+#[test]
 fn codex_launch_leaves_directory_trust_for_the_human() {
     let mut fx = setup(Tier::Standard, Engine::Codex, Some(300));
     let sess = loop_session(&fx);

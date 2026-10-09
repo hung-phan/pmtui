@@ -125,8 +125,31 @@ pub(crate) fn agent_loop_enter(
 /// adopted into the ledger). Pure — computed in `request_attach` and fed to
 /// [`agent_loop_enter`], so a second Enter on a seed-only session yields
 /// `Chat(seed)`, never a re-mint.
-pub(crate) fn effective_id(ledger_cid: Option<&str>, registry_cid: Option<&str>) -> Option<String> {
-    ledger_cid.or(registry_cid).map(str::to_string)
+/// `captured_cid` is the id the ENGINE itself last reported — codex's `notify` hook writes its
+/// `thread_id` to `ProjectPaths::codex_conversation_id`. It ranks LAST deliberately: the ledger and
+/// the registry are DECISIONS (pmd's and pmtui's), while this is an observation, so putting it last
+/// keeps the change purely additive — it can only decide a row where both others are empty. That is
+/// exactly the codex case, which has no caller-chosen id to record in either. Before this, a codex
+/// session that had run for hours still looked never-woken, so Enter opened a SECOND conversation
+/// and the first became unreachable.
+pub(crate) fn effective_id(
+    ledger_cid: Option<&str>,
+    registry_cid: Option<&str>,
+    captured_cid: Option<&str>,
+) -> Option<String> {
+    ledger_cid
+        .or(registry_cid)
+        .or(captured_cid)
+        .map(str::to_string)
+}
+
+/// The id codex's own turn hook recorded for this session, validated.
+///
+/// A thin alias over [`agent_manager::state::codex_identity`], which pmd reads too — ONE rule,
+/// two readers, so the dashboard and the daemon can never disagree about which conversation a
+/// codex terminal is on.
+pub(crate) fn read_captured_conversation_id(paths: &ProjectPaths) -> Option<String> {
+    agent_manager::state::codex_identity::read(paths)
 }
 
 /// What Enter does on a never-woken agent-loop row (`effective_id` is `None`),

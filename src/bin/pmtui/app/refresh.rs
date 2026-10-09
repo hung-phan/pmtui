@@ -353,9 +353,11 @@ impl App {
         // The ledger's id is the daemon's authority; fall back to the registry seed
         // (harmless — an armed session was never pmtui-seeded, so this is the daemon's
         // adopted/minted id landing in the ledger).
+        let captured = read_captured_conversation_id(&session_paths);
         let effective = effective_id(
             ledger.conversation_id.as_deref(),
             e.conversation_id.as_deref(),
+            captured.as_deref(),
         );
         let decision = armed_open_decision(effective.as_deref(), &ledger.run);
         // PRIMARY (Slice 1 C1): the arm fired BECAUSE pmd was driving this session, so by

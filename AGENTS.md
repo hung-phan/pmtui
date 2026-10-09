@@ -152,6 +152,13 @@ server and daemon when the test ends.
   one, which is what keeps every other key's meaning intact. A live pick is a SUBLAYER: `Enter` takes
   the candidate instead of submitting and `Esc` drops the pick instead of cancelling, so neither reaches
   the form, and the keybar says which keys are live. A recomputed list drops the pick too.
+- Codex is told no conversation id and REPORTS one instead: its `notify` hook's
+  `agent-turn-complete` payload carries `thread_id`, which the launch writes to
+  `ProjectPaths::codex_conversation_id` beside the turn signal. `src/state/codex_identity.rs` is the one
+  rule with two readers — pmd adopts it into its ledger so a relaunch resumes, pmtui reads it so `Enter`
+  resumes. Never read a running engine's own files to guess an identity; `/proc` scraping is Linux-only
+  and races the engine's startup. An id arrives only after the first completed turn, and one that does not
+  parse is "not known yet" — never an argument.
 - No machine declares a project done. The human closes the session.
 
 ## Spawn Command Surface
