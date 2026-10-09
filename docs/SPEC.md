@@ -961,7 +961,9 @@ happen again. A restart MUST NOT do any of these:
   - It MUST take that identity from what the engine itself reports. It MUST NOT read the private files of
     a running engine to guess it.
   - To restart such a session MUST resume the identity it learned. A restart MUST NOT start a second
-    conversation while the first one is known.
+    conversation while the first one is known. This holds for EVERY way a person brings a session
+    back, including resuming one they paused, and it MUST read the identity where the engine
+    recorded it rather than only where some earlier decision happened to be written.
   - An identity it cannot read, or one that no longer looks like an identity, MUST read as "not known
     yet". The product then starts one conversation, and never passes an unusable value to the engine.
   - An engine reports its identity only after its first turn of work ends. Until then the session has no

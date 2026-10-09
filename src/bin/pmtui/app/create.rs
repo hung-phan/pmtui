@@ -469,21 +469,31 @@ impl App {
         {
             return None;
         }
-        // The conversation to resume: the LEDGER first (the daemon's authority), then the registry
-        // seed. Only a session with neither gets a fresh one.
-        let existing = job::load(&paths)
+        // The conversation to resume, under the SAME rule Enter and the refresh use
+        // ([`crate::decide::effective_id`]): the LEDGER first (the daemon's authority), then the
+        // registry seed, then the id the ENGINE itself reported. That third source is what makes
+        // `p` then Enter keep a codex conversation: codex has no caller-chosen id, so neither of
+        // the first two is ever set on a standard codex row unless pmd happened to tick it — and
+        // `start_undriven_session` reads `None` as "open a FRESH chat", silently abandoning the
+        // conversation the human was just in. User: *"i create a test session under workspace,
+        // then chat. after that i pause, then resume. it doesn't show previous chat"*.
+        let ledger_cid = job::load(&paths)
             .ok()
             .flatten()
-            .and_then(|l| l.conversation_id)
-            .or_else(|| {
-                Registry::load(&self.registry_path).ok().and_then(|r| {
-                    r.projects
-                        .iter()
-                        .find(|p| p.id == id)?
-                        .conversation_id
-                        .clone()
-                })
-            });
+            .and_then(|l| l.conversation_id);
+        let registry_cid = Registry::load(&self.registry_path).ok().and_then(|r| {
+            r.projects
+                .iter()
+                .find(|p| p.id == id)?
+                .conversation_id
+                .clone()
+        });
+        let captured_cid = crate::decide::read_captured_conversation_id(&paths);
+        let existing = crate::decide::effective_id(
+            ledger_cid.as_deref(),
+            registry_cid.as_deref(),
+            captured_cid.as_deref(),
+        );
         Some(
             match self.start_undriven_session(id, root, engine, existing, model, None) {
                 StandardStart::Running => {

@@ -631,6 +631,37 @@ fn lifecycle_start_reports_running_with_warning_as_started() {
     assert!(!app.initial_message_retries.contains_key("bot"));
 }
 
+#[test]
+fn a_paused_codex_row_resumes_the_conversation_the_engine_reported() {
+    // The pause→Enter path (and `r`) built its resume id from the ledger and the registry ONLY.
+    // Codex has no caller-chosen id, so on a standard codex row BOTH are empty and
+    // `start_undriven_session` read that as "open a fresh chat" — the human pressed Enter on
+    // their paused session and got an EMPTY one. The engine's own hook file is the third source
+    // and the only one codex ever populates.
+    const REPORTED: &str = "01a121e0-4863-73c1-aed7-92dd66c2f0c6";
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let paths = ProjectPaths::for_session(root, "bot");
+    std::fs::create_dir_all(paths.daemon_dir()).unwrap();
+    std::fs::write(paths.codex_conversation_id(), REPORTED).unwrap();
+    let pane = FakePane::default();
+    let mut app = app_with_driver(vec![], UiMode::Normal, Box::new(pane.clone()));
+
+    let status = app
+        .start_after_lifecycle_key("bot", root, Engine::Codex, Mode::AgentLoop, None)
+        .expect("Standard lifecycle start is handled by pmtui");
+
+    assert!(status.contains("started it"), "{status}");
+    let launches = pane.launches();
+    assert_eq!(launches.len(), 1, "one terminal: {launches:?}");
+    let argv = &launches[0].2;
+    assert!(
+        argv.windows(2)
+            .any(|w| w == ["resume".to_string(), REPORTED.to_string()]),
+        "the paused conversation must be RESUMED by the id codex reported: {argv:?}"
+    );
+}
+
 /// A failed create has just dropped this session's `driver.lock`, and Enter's fork fence takes it
 /// with ONE `try_acquire`. Wait out a sibling test's fork→exec window first (see
 /// [`wait_until_free`]) so a transiently inherited fd cannot read as pmd holding the session.
