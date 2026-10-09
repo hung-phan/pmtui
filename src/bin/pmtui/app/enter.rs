@@ -114,7 +114,16 @@ impl App {
                 .as_ref()
                 .map(|l| matches!(l.run, job::JobRun::Running { .. }))
                 .unwrap_or(false);
-            let effective = effective_id(ledger_cid.as_deref(), registry_cid.as_deref());
+            // THIRD source, last in priority: the id codex's own turn hook reported. Codex has
+            // no caller-chosen id, so neither the ledger nor the registry can hold one until a
+            // wake adopts it — which is why a long-running codex session used to read as
+            // never-woken and get a SECOND conversation on Enter.
+            let captured = read_captured_conversation_id(&session_paths);
+            let effective = effective_id(
+                ledger_cid.as_deref(),
+                registry_cid.as_deref(),
+                captured.as_deref(),
+            );
             // A live unified terminal always wins over ledger routing. Enter only
             // attaches; tmux client detection makes pmd defer while the human is there.
             let loop_session = session_name(&id, &root);

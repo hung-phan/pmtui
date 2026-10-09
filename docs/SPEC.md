@@ -956,6 +956,22 @@ happen again. A restart MUST NOT do any of these:
 - A new session MUST NOT take the conversation, the progress, the decisions or the open work of a session
   that closed.
 - To resume or to restart a conversation needs an exact identity.
+- Some engines do not accept an identity from the product. For those, the product MUST learn the identity
+  the engine assigned, and MUST keep it with the session.
+  - It MUST take that identity from what the engine itself reports. It MUST NOT read the private files of
+    a running engine to guess it.
+  - To restart such a session MUST resume the identity it learned. A restart MUST NOT start a second
+    conversation while the first one is known. This holds for EVERY way a person brings a session
+    back, including resuming one they paused, and it MUST read the identity where the engine
+    recorded it rather than only where some earlier decision happened to be written.
+  - An identity it cannot read, or one that no longer looks like an identity, MUST read as "not known
+    yet". The product then starts one conversation, and never passes an unusable value to the engine.
+  - An engine reports its identity only after its first turn of work ends. Until then the session has no
+    identity, and the product says so rather than inventing one.
+  - The identity comes from the engine. The product MUST NOT take it from the worker's own report, and
+    MUST NOT ask a worker for it: a worker could name the conversation of another session.
+  - The product MUST reconcile the identity it learns during its ordinary work, not only when it starts a
+    terminal. A session that is running MUST NOT be left without the identity the engine has reported.
 - At most one supervisor drives one fleet. At most one dashboard changes it at a time.
 - A second interactive dashboard MAY replace the current one only after the person confirms. It asks the
   current one to exit, and takes the released lock before it draws. To force an exit needs a separate

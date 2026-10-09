@@ -9,6 +9,7 @@ use crate::registry::Engine;
 
 use super::*;
 
+mod codex_identity;
 mod fork;
 mod job;
 

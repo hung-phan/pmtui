@@ -187,6 +187,22 @@ impl ProjectPaths {
     pub fn turn_signal(&self) -> PathBuf {
         self.daemon_dir().join("turn-complete")
     }
+    /// The conversation id codex ASSIGNED this session, written by the same `notify` hook that
+    /// appends [`Self::turn_signal`] — its `agent-turn-complete` payload carries `thread_id`.
+    ///
+    /// Codex has no caller-chosen id, so this is the only portable way to learn one. The
+    /// alternative, in the fork path, reads the live process's open rollout file out of `/proc`:
+    /// Linux-only, and racing codex's own startup. A hook payload is a vendor-stated fact instead.
+    ///
+    /// ENGINE-WRITTEN, like `needs-you.json` — both pmd (into its ledger) and pmtui (into the
+    /// registry it owns) only ever READ it. One bare UUIDv7, replaced atomically, so a reader sees
+    /// either the previous id or the new one and never a half-written name. It appears only after
+    /// the session's FIRST completed turn, which is the price of asking the engine rather than
+    /// guessing from its open files. SIBLING of `turn_signal` in this same directory, which is
+    /// what lets the hook builder derive one path from the other.
+    pub fn codex_conversation_id(&self) -> PathBuf {
+        self.daemon_dir().join("conversation-id")
+    }
     /// The persistent agent's decision marker (Slice 2). At any decision point the agent OVERWRITES this with a
     /// `WakeReport` JSON carrying a monotonic `seq`. The harness only STATS + READS it — the agent is the SOLE
     /// writer (inverse of the single-writer ledger). Sibling of the per-session `state.json`.

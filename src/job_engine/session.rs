@@ -291,6 +291,13 @@ impl JobScheduler {
                     session_id: Some(id),
                 }
             }
+            // Codex cannot be HANDED an id, and is not given one here either: by the time
+            // `ensure_session` runs, `JobScheduler::tick` has already reconciled whatever its turn
+            // hook reported into the ledger, so a session with a known conversation takes the
+            // ledger branch above and never arrives here. Reaching this arm means no id has been
+            // reported yet — no turn has completed — and a fresh interactive session is the only
+            // honest answer. ONE adoption point; a second one here was unreachable, which is
+            // exactly what a mutation test showed.
             Engine::Codex => Resume::Fresh { session_id: None },
         }
     }

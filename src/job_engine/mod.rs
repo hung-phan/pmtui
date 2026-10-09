@@ -552,6 +552,23 @@ impl JobScheduler {
             ledger.updated_at = now;
             control_changed = true;
         }
+        // CODEX IDENTITY, reconciled on EVERY tick rather than only when a session is relaunched.
+        //
+        // Codex is handed no conversation id and reports its own through the turn hook, so the
+        // ledger is the last to know. Reading that file only at relaunch left the ledger empty for
+        // the whole life of a live session — a window, not merely a delay: a worker-authored
+        // `conversation_id` could land first and win permanently, and nothing authoritative existed
+        // to compare it against. Reconciling here closes the window, and lets the ledger converge
+        // after any fresh start — which is what makes the one-shot `resume_unconfirmed` dance
+        // unnecessary for codex (see `mint_or_fresh`).
+        if self.engine == Engine::Codex
+            && let Some(id) = state::codex_identity::read(&self.paths)
+            && ledger.conversation_id.as_deref() != Some(id.as_str())
+        {
+            ledger.conversation_id = Some(id);
+            ledger.updated_at = now;
+            control_changed = true;
+        }
         if control_changed {
             self.save_control_ledger(&mut ledger, human_cadence_changed)?;
             self.run = ledger.run.clone();

@@ -684,9 +684,13 @@ fn human_present_defers_a_fresh_blocked_marker_until_detach() {
 }
 
 #[test]
-fn oq6_codex_conversation_id_is_captured_when_the_ledger_has_none() {
-    // A codex session has no harness-pinned id; the ledger's conversation_id is
-    // None until the agent reports its rollout id in a marker. OQ6: capture it.
+fn a_codex_worker_cannot_name_its_own_conversation() {
+    // OQ6 USED to capture this: codex had no harness-pinned id, so the agent was asked to report
+    // its own rollout id and pmd believed it. The turn hook now reports that id as a fact, which
+    // makes the self-declaration redundant AND dangerous — a worker could name any conversation,
+    // including another session's, and `resolve_conversation_id` consults the ledger before the
+    // hook file, so the claim would outrank the engine's own answer. Worse, the claim arrived
+    // FIRST: the hook was read only at relaunch, so a mid-session report won permanently.
     let fx = setup_with(Tier::Standard, Engine::Codex, Some(300), |l| {
         l.conversation_id = None;
         l.run = JobRun::Monitoring { until: START };
@@ -697,7 +701,35 @@ fn oq6_codex_conversation_id_is_captured_when_the_ledger_has_none() {
     let mut fx = fx;
     write_marker(
         &fx,
-        r#"{"seq":11,"state":"working","status":"warming up","conversation_id":"codex-rollout-42"}"#,
+        r#"{"seq":11,"state":"working","status":"warming up","conversation_id":"0199aaaa-1111-7aaa-8bbb-ccccdddddddd"}"#,
+    );
+    assert!(matches!(
+        fx.sched.tick(&fx.driver, &fx.clock).unwrap(),
+        JobTick::Monitoring { .. }
+    ));
+    assert_eq!(
+        ledger(&fx).conversation_id,
+        None,
+        "a codex identity comes from the engine's hook, never from the worker's report"
+    );
+}
+
+#[test]
+fn a_claude_worker_may_still_corroborate_its_conversation_id() {
+    // The same path stays open for claude, where it cannot be a claim: the ledger is filled by
+    // mint or seed BEFORE any report, so an agent echoing its id corroborates a value pmtui
+    // already chose. Pinned here so it is not removed by accident along with the codex case.
+    let fx = setup_with(Tier::Standard, Engine::Claude, Some(300), |l| {
+        l.conversation_id = None;
+        l.run = JobRun::Monitoring { until: START };
+    });
+    let sess = tmux::session_name(&fx.sched.project_id, &fx.sched.work_dir);
+    fx.driver.set_alive(&sess, true);
+    fx.driver.set_tail(&sess, IDLE_PANE);
+    let mut fx = fx;
+    write_marker(
+        &fx,
+        r#"{"seq":11,"state":"working","status":"warming up","conversation_id":"claude-conv-42"}"#,
     );
     assert!(matches!(
         fx.sched.tick(&fx.driver, &fx.clock).unwrap(),
@@ -705,8 +737,7 @@ fn oq6_codex_conversation_id_is_captured_when_the_ledger_has_none() {
     ));
     assert_eq!(
         ledger(&fx).conversation_id.as_deref(),
-        Some("codex-rollout-42"),
-        "OQ6: the codex rollout id is persisted so a relaunch --resumes it"
+        Some("claude-conv-42")
     );
 }
 

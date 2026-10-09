@@ -2,6 +2,7 @@
 
 mod atomic;
 mod checkpoint;
+mod codex_identity;
 mod paths;
 mod purge;
 mod records;

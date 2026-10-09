@@ -615,10 +615,63 @@ fn session_id_hook_shell(identity_sink: &Path) -> String {
     )
 }
 
-/// A `-c notify=[...]` config override registering [`turn_hook_shell`] as codex's `notify`
-/// program (a TOML array of argv). codex runs `sh -c '<cmd>' '<event-json>'`, so the
-/// trailing event JSON lands as the ignored `$0`. The inner `<cmd>` single-quotes its
-/// paths and contains no `"`/`\`, so it embeds cleanly in the TOML basic string.
+/// The codex half of [`turn_hook_shell`]: append the turn byte, then ALSO record the conversation
+/// id out of the event payload.
+///
+/// Codex exposes no caller-chosen id, so its `agent-turn-complete` payload is the only place a
+/// launcher can learn one without reading the live process's open files out of `/proc` — Linux-only,
+/// and racing codex's own startup. codex runs `sh -c '<cmd>' '<event-json>'`, so the payload is `$0`.
+///
+/// THE WIRE KEY IS KEBAB-CASE. The legacy notify payload is a DIFFERENT type from the internal
+/// event: `codex-rs/hooks/src/legacy_notify.rs` re-serializes it as `UserNotification` with
+/// `#[serde(rename_all = "kebab-case")]`, so codex's own fixture reads
+/// `{"type":"agent-turn-complete","thread-id":"…","turn-id":"…","last-assistant-message":"…"}`.
+/// The internal `HookEventAfterAgent` in `hooks/src/types.rs` is snake_case, and writing a test
+/// fixture from THAT is how a first version of this shipped matching `"thread_id"` — a pattern the
+/// real hook could never satisfy, pinned by a test that agreed with it. Both spellings are accepted
+/// now: kebab is today's contract, and upstream marks the legacy payload for removal
+/// (`TODO: Remove this hook … when legacy notify support is removed`) in favour of the snake_case
+/// one, so this survives that migration rather than breaking on it.
+///
+/// Three things make reading that payload with `grep` safe, given it also carries `input-messages`
+/// and `last-assistant-message` — text the AGENT controls:
+///
+/// 1. The pattern matches a whole UUID LAYOUT ([`crate::state::codex_identity::UUID_ERE`], shared
+///    with the validator that reads the file back), not merely `"thread-id":"…"`, so prose that
+///    happens to mention the field name cannot match.
+/// 2. `head -n1` takes the FIRST match, and `thread-id` serializes before both agent-controlled
+///    fields — so a forgery would have to appear EARLIER than the real id, which needs serde to
+///    reorder the payload.
+/// 3. The capture is sequenced with `;`, not `&&`, and guarded on a non-empty result. A payload
+///    that yields nothing leaves any previous id in place and NEVER breaks the turn byte, which is
+///    the load-bearing half; the id is the additive one.
+fn codex_turn_hook_shell(turn_signal: &Path) -> String {
+    // SIBLING paths in one directory, so `turn_hook_shell`'s `mkdir -p` already made it. Derived
+    // rather than passed, so the six launch call sites need no second argument;
+    // `codex_identity_sink_is_the_paths_sibling` pins it to `ProjectPaths::codex_conversation_id`.
+    let sink = identity_sink_beside(turn_signal);
+    let sink = sink.to_string_lossy();
+    let temp = format!("{sink}.tmp");
+    format!(
+        "{}; id=$(printf '%s' \"$0\" | grep -oE '\"thread[-_]id\":\"{}\"' | head -n1 | cut -d'\"' -f4); [ -n \"$id\" ] && printf '%s' \"$id\" > {} && mv {} {}",
+        turn_hook_shell(turn_signal),
+        crate::state::codex_identity::UUID_ERE,
+        crate::tmux::shq(&temp),
+        crate::tmux::shq(&temp),
+        crate::tmux::shq(&sink),
+    )
+}
+
+/// [`ProjectPaths::codex_conversation_id`](crate::state::ProjectPaths::codex_conversation_id) for
+/// whichever session owns `turn_signal`. The two are siblings by definition — both live in one
+/// session's `daemon_dir` — so the hook builder derives one from the other instead of every caller
+/// threading a second path it would read off the same `ProjectPaths`.
+fn identity_sink_beside(turn_signal: &Path) -> PathBuf {
+    turn_signal.with_file_name("conversation-id")
+}
+
+/// A `-c notify=[...]` config override registering [`codex_turn_hook_shell`] as codex's `notify`
+/// program (a TOML array of argv).
 fn codex_turn_notify_config(turn_signal: &Path) -> String {
     // Escape the command for a TOML basic string (the claude side gets this for free via
     // serde_json). A project-root path can legally contain `"` or `\`; left unescaped either
@@ -626,7 +679,7 @@ fn codex_turn_notify_config(turn_signal: &Path) -> String {
     // itself — worse than the busy-detection bug the hook fixes. Backslash first, so the
     // backslashes introduced by escaping `"` are not doubled. Single quotes and spaces need
     // no escaping (safe in a TOML basic string and, single-quoted, in the inner shell).
-    let cmd = turn_hook_shell(turn_signal)
+    let cmd = codex_turn_hook_shell(turn_signal)
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
         .replace('\n', "\\n")

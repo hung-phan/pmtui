@@ -20,6 +20,7 @@
 
 mod atomic;
 mod checkpoint;
+pub mod codex_identity;
 mod paths;
 mod purge;
 mod records;
