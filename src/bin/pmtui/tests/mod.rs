@@ -119,6 +119,7 @@ mod create_form;
 mod daemonctl;
 mod decider_activity;
 mod decisions;
+mod dir_complete;
 mod directive;
 mod display;
 mod edit;
@@ -134,6 +135,7 @@ mod lifecycle;
 mod log;
 mod overlays;
 mod pane_dialog_answering;
+mod path_complete;
 mod pmd;
 mod preview;
 mod rename;
@@ -1046,6 +1048,16 @@ fn creating_loop_app(
     goal: &str,
     cadence_s: u64,
 ) -> App {
+    // Started from `CreateForm::new()` and overridden rather than written as a struct literal: the
+    // cached Directory completion is private state with its own invariant (the text it was computed
+    // from), and a test has no business seeding it.
+    let mut form = CreateForm::new();
+    form.field = CreateForm::GOAL;
+    form.engine = engine;
+    form.dir = dir.display().to_string().into();
+    form.tier = tier;
+    form.goal = goal.into();
+    form.cadence_s = cadence_s;
     App {
         registry_path: reg_path.to_path_buf(),
         socket: "pm-test".into(),
@@ -1054,21 +1066,7 @@ fn creating_loop_app(
         agent_tmux: Box::new(FakePane::default()),
         projects: vec![],
         selected: 0,
-        mode: UiMode::Creating(CreateForm {
-            task_mode: false,
-            field: CreateForm::GOAL,
-            engine,
-            worker_model: None,
-            model_choices: Vec::new(),
-            dir: dir.display().to_string().into(),
-            name: Field::new(),
-            tier,
-            goal: goal.into(),
-            cadence_s,
-            decider_engine: Engine::Claude,
-            decider_model: None,
-            decider_model_choices: Vec::new(),
-        }),
+        mode: UiMode::Creating(form),
         board_detail_open: false,
         return_to_board_after_create: false,
         return_to_board_after_send: false,

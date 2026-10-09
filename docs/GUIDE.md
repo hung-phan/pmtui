@@ -143,6 +143,35 @@ The cadence, rename and switcher fields stay single-line — an interval, an id 
 prose — and so do the create form's rows, where `tab` moves between fields and `^E` still opens
 `$EDITOR`.
 
+### Typing a project directory
+
+Focus the create form's **Directory** row and it lists the directories you can go to, right away —
+no typing needed, since the form opens on your working directory. Each candidate shows the **whole
+path** it would put in the field, so there is nothing to work out in your head.
+
+Two ways to use it:
+
+- **Pick one.** `↑`/`↓` move through the list and **`enter`** takes the highlighted path. Since the
+  taken path ends in `/`, the list immediately shows what is inside it — so `↓ enter ↓ enter` walks
+  down a tree. While a candidate is picked, `enter` takes the path rather than creating the session,
+  and `esc` backs out of the list and leaves the form alone; a second `esc` cancels the form. With
+  nothing picked, `enter` creates it as always.
+- **Type it.** The list narrows as you type, and the rest of the one path your text still allows
+  appears dimmed after the caret: **`→`** takes that. A unique match comes with its trailing `/`, so
+  the next `→` descends a level.
+
+**`tab` always means "next field"** on every row of this form, whatever the list is offering — so
+you can never get stuck here. `shift+tab` goes back. Taking something is always a key that means
+taking: `enter` for a candidate, `→` for the completion. The keybar on the bottom border names the
+keys that are live.
+
+It offers directories only, keeps dotfiles out of the way until you type the dot yourself, and `~/`
+works. When there is nothing picked and nothing to complete — an ambiguous stem, a path that does
+not exist, the caret parked mid-path, or a path that already names a real directory — `tab` is the
+plain "next field" it always was, so tabbing through the form never gets stuck on this row. While
+that row has the arrows, **`shift+tab`** is how you go back a field. To descend from a path you
+typed in full, type the `/` and its children become candidates.
+
 ### Jobs an agent spawned
 
 An agent working in a session can hand an independent piece of its task to a child. That child is a

@@ -47,6 +47,10 @@ impl App {
         // the Decider Model toggle read `form.decider_model_choices` with no render-time discovery
         // I/O. The decider-engine-toggle path in `handle_create_key` refreshes it.
         form.decider_model_choices = self.models_for(form.decider_engine).to_vec();
+        // The Directory candidate list is discovery I/O too, so it is filled HERE for the same
+        // reason: a click can focus that row without any key reaching `handle_create_key`, and the
+        // renderer must never read a directory.
+        form.refresh_dir_completion();
         self.mode = UiMode::Creating(form);
     }
 

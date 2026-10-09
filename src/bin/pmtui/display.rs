@@ -240,6 +240,33 @@ pub(crate) fn truncate(s: &str, n: usize) -> String {
     format!("{t}…")
 }
 
+/// [`truncate`] from the OTHER end: `s` cut to at most `n` terminal columns, beginning with `…`
+/// when anything was dropped.
+///
+/// For a PATH. Two candidate directories share their parent and differ in their last segment, so
+/// cutting the tail hides the only part worth reading; cutting the head is what every file dialog
+/// and shell prompt does. Walks grapheme clusters from the right, measured as ratatui's buffer
+/// draws them, so a wide glyph is never split.
+pub(crate) fn truncate_left(s: &str, n: usize) -> String {
+    if text_cols(s) <= n {
+        return s.to_string();
+    }
+    let budget = n.saturating_sub(1);
+    let mut used = 0;
+    let mut kept: Vec<&str> = Vec::new();
+    for grapheme in s.graphemes(true).rev() {
+        let w = text_cols(grapheme);
+        if used + w > budget {
+            break;
+        }
+        used += w;
+        kept.push(grapheme);
+    }
+    let mut out = String::from("\u{2026}");
+    out.extend(kept.into_iter().rev());
+    out
+}
+
 /// [`truncate`] padded with spaces to exactly `n` terminal columns — the fixed-width field a
 /// user-chosen label fills. `format!("{:<n}")` pads by chars, which overflows on wide glyphs.
 pub(crate) fn pad_cols(s: &str, n: usize) -> String {

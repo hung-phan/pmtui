@@ -378,6 +378,27 @@ terminal.
 
 The Autopilot create form has no message field. Its goal and its first nudge give the first instruction.
 
+Both forms name a project directory. While that field has focus, the product MAY offer the one
+completion the typed text allows, and MAY show the directories that text could still become.
+
+- The completion is a suggestion. The product MUST show it as text the human did not type, and MUST NOT
+  put it in the field until the human accepts it.
+- It MUST offer a directory and MUST NOT offer a file.
+- It MUST NOT offer a name that starts with a dot unless the typed text starts with a dot.
+- A key that accepts a completion MUST keep its other meaning when there is no completion to accept.
+  Text that already names a directory MUST NOT take that key.
+- The list says where the human can go next. When the text names a directory, the list shows what is in
+  that directory. Each candidate MUST show the whole path it would put in the field.
+- The list MUST NOT change the size of the form.
+- The human MAY choose a candidate from the list, and MUST be able to leave the list without losing what
+  the form holds. A chosen candidate MUST NOT enter the field until the human accepts it.
+- The key that moves to the next field MUST move to the next field, whatever the list offers. The human
+  MUST always be able to leave this row with one key.
+- While a candidate is chosen, the key that submits the form MUST accept that candidate instead, and the
+  product MUST NOT make the session. The product MUST show which keys are live.
+- The product MUST read the directory when the text changes, and when the form opens. It MUST NOT read
+  the directory to draw a frame.
+
 Both forms take an optional Name. The Name is display text only. The generated id stays the identity of
 the session. To rename changes only the label. The id keeps the terminal names, the paths of the state,
 the locks, and the route of each action. An empty name restores the id.

@@ -187,6 +187,21 @@ fn goal_display_handles_empty_single_multiline_and_blank_text() {
 }
 
 #[test]
+fn truncate_left_keeps_the_end_of_a_path() {
+    // The candidate list shows whole paths that share a parent, so the TAIL is the only part worth
+    // reading — cutting it would leave rows that look identical.
+    assert_eq!(truncate_left("/a/b/project-alpha/", 12), "…ject-alpha/");
+    assert_eq!(text_cols(&truncate_left("/a/b/project-alpha/", 12)), 12);
+    // Nothing dropped, nothing marked.
+    assert_eq!(truncate_left("/a/b/", 12), "/a/b/");
+    assert_eq!(truncate_left("", 4), "");
+    // A wide glyph is never split: dropping it whole keeps the result inside the budget.
+    assert!(text_cols(&truncate_left("/a/\u{1f600}\u{1f600}/", 4)) <= 4);
+    // A budget of zero still gets the marker that says text was dropped, and nothing more.
+    assert_eq!(truncate_left("/a/b/", 0), "…");
+}
+
+#[test]
 fn age_and_clock_labels_cover_boundaries_and_wraparound() {
     let now = 1_000_000;
     for (elapsed, expected) in [

@@ -121,6 +121,7 @@ mod event_dispatch;
 mod input;
 mod keys;
 mod mode;
+mod path_complete;
 mod render;
 mod seed;
 mod send;

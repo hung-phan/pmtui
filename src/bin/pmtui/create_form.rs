@@ -29,6 +29,22 @@ pub(crate) struct CreateForm {
     /// catalog with no render-time discovery I/O. The `(default)` row is implicit (cursor 0).
     pub(crate) model_choices: Vec<ModelInfo>,
     pub(crate) dir: Field,
+    /// What [`CreateForm::dir`] could become — the ghost tail and the candidate list — and the text
+    /// it was computed from.
+    ///
+    /// CACHED, not computed at render time: `complete_dir` reads a directory, and this form's own
+    /// model catalog is loaded eagerly for exactly that reason — the renderer must not do discovery
+    /// I/O. Recomputed by [`CreateForm::refresh_dir_completion`] only when the text has changed, so
+    /// a caret move or a keystroke in another field costs nothing.
+    dir_completion: path_complete::DirCompletion,
+    dir_completion_for: String,
+    /// Which candidate the human has moved onto, or `None` for "none yet".
+    ///
+    /// `None` is the load-bearing state, not an empty selection: with nothing picked, `Tab` keeps
+    /// its own meanings (complete, else next field), so arriving on this row and tabbing straight
+    /// off it behaves exactly as it did before there was a list. A pick only exists once `↑`/`↓`
+    /// asks for one.
+    dir_pick: Option<usize>,
     /// Optional human-readable display name. The generated stable id still owns runtime state.
     pub(crate) name: Field,
     /// The one Autonomy dial: Standard (YOU drive the session — pmd does not touch it;
@@ -115,6 +131,9 @@ impl CreateForm {
             engine: Engine::Claude,
             worker_model: None,
             model_choices: Vec::new(),
+            dir_completion: path_complete::DirCompletion::default(),
+            dir_completion_for: String::new(),
+            dir_pick: None,
             dir: Field::from(
                 std::env::current_dir()
                     .map(|p| p.display().to_string())
@@ -230,6 +249,111 @@ impl CreateForm {
             Self::GOAL => Some(&mut self.goal),
             _ => None,
         }
+    }
+
+    /// Recompute what the Directory could become, but only when the text actually changed.
+    ///
+    /// Called once after the form handles a key rather than from each mutation site: `insert`,
+    /// `insert_str`, `backspace` and `delete` all reach the same buffer, and guarding on the text
+    /// makes the common cases (a caret move, a keystroke in another field) free. Also called when
+    /// the form OPENS, so the candidate list is there to read before any key — a click can focus
+    /// the row too.
+    pub(crate) fn refresh_dir_completion(&mut self) {
+        if self.dir.as_str() == self.dir_completion_for {
+            return;
+        }
+        self.dir_completion_for = self.dir.as_str().to_string();
+        self.dir_completion = path_complete::complete_dir(self.dir.as_str());
+        // A new list is a new question, so the old answer goes. Keeping an INDEX across a
+        // recomputed list is how a picker ends up committing the neighbour of what was highlighted.
+        self.dir_pick = None;
+    }
+
+    /// The candidate the human is on, clamped into the live list — only while the Directory row is
+    /// focused, so no key consults a pick left behind on another row.
+    pub(crate) fn dir_pick(&self) -> Option<usize> {
+        if self.field != Self::DIRECTORY {
+            return None;
+        }
+        let i = self.dir_pick?;
+        (i < self.dir_completion.options.len()).then_some(i)
+    }
+
+    /// Move the pick one candidate, starting one when there is none: `↓` enters at the top, `↑` at
+    /// the bottom. Wraps, like every other list in the dashboard. Returns false when there is no
+    /// list to move in, so the caller can fall through to moving between FIELDS — which is what
+    /// `↑`/`↓` mean everywhere else in this form.
+    pub(crate) fn move_dir_pick(&mut self, down: bool) -> bool {
+        let len = self.dir_completion.options.len();
+        if self.field != Self::DIRECTORY || len == 0 {
+            return false;
+        }
+        self.dir_pick = Some(match (self.dir_pick(), down) {
+            (None, true) => 0,
+            (None, false) => len - 1,
+            (Some(i), true) => (i + 1) % len,
+            (Some(i), false) => (i + len - 1) % len,
+        });
+        true
+    }
+
+    /// Drop the pick. Returns false when there was none, so `Esc` can fall through to cancelling
+    /// the whole form — backing out of the list first is what a human expects, and losing a filled
+    /// form to one stray `Esc` is not.
+    pub(crate) fn clear_dir_pick(&mut self) -> bool {
+        let had = self.dir_pick().is_some();
+        self.dir_pick = None;
+        had
+    }
+
+    /// The full path of each candidate — what the field would BECOME, which is the only form of a
+    /// candidate worth showing next to a path the human is editing.
+    pub(crate) fn dir_option_paths(&self) -> Vec<String> {
+        if self.field != Self::DIRECTORY {
+            return Vec::new();
+        }
+        (0..self.dir_completion.options.len())
+            .filter_map(|i| self.dir_completion.option_path(i))
+            .collect()
+    }
+
+    /// Put the picked candidate in the field, caret at the end. Returns false when nothing is
+    /// picked, so the same key can still mean "take the ghost" and then "next field".
+    pub(crate) fn accept_dir_pick(&mut self) -> bool {
+        let Some(path) = self
+            .dir_pick()
+            .and_then(|i| self.dir_completion.option_path(i))
+        else {
+            return false;
+        };
+        self.dir = Field::from(path);
+        self.dir.end();
+        // The accepted path ends in a separator, so the refresh below lists what is inside it: one
+        // `Tab` descends a level, the same way accepting a ghost does.
+        self.refresh_dir_completion();
+        true
+    }
+
+    /// Is there a ghost to accept RIGHT NOW — Directory focused, caret at the end, a tail live?
+    ///
+    /// The caret test is what keeps `Tab` honest: editing in the middle of a path must still move
+    /// to the next field, because a ghost is only ever drawn at the end of the line.
+    pub(crate) fn dir_ghost(&self) -> Option<&str> {
+        if self.field != Self::DIRECTORY || self.dir.caret() != self.dir.char_len() {
+            return None;
+        }
+        self.dir_completion.tail.as_deref()
+    }
+
+    /// Accept the ghost. Returns false when there was nothing to accept, so the caller can fall
+    /// through to its other meaning for the same key.
+    pub(crate) fn accept_dir_ghost(&mut self) -> bool {
+        let Some(tail) = self.dir_ghost().map(str::to_string) else {
+            return false;
+        };
+        self.dir.insert_str(&tail);
+        self.refresh_dir_completion();
+        true
     }
 
     /// Type into whichever text field is focused (dir/goal), at the caret; other fields ignore.
