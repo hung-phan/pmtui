@@ -7,6 +7,7 @@ use crate::registry::Engine;
 
 mod claude;
 mod codex;
+mod trae;
 
 /// One selectable model. `label` is shown to the human; `value` is passed to the CLI
 /// verbatim (`--model <value>` for claude, `-m <value>` for codex) — already the
@@ -23,6 +24,7 @@ pub fn available_models(engine: Engine) -> Vec<ModelInfo> {
     match engine {
         Engine::Claude => claude::discover(),
         Engine::Codex => codex::discover(),
+        Engine::Trae => trae::discover(),
     }
 }
 

@@ -143,6 +143,7 @@ pub fn read_job_result(engine: Engine, log: &str, result_file: Option<&str>) -> 
     match engine {
         Engine::Claude => claude_result(log),
         Engine::Codex => codex_result(log, result_file),
+        Engine::Trae => trae_result(log),
     }
 }
 
@@ -165,6 +166,23 @@ fn claude_result(log: &str) -> Option<JobResult> {
         Some("success") => Some(JobResult::clamped(JobOutcome::Done, text, None)),
         // Every other subtype claude emits on a `result` event is a failure of the run
         // (`error_during_execution`, `error_max_turns`, …), so the outcome is stated, not inferred.
+        Some(other) => Some(JobResult::clamped(
+            JobOutcome::Failed,
+            if text.is_empty() { other } else { text },
+            None,
+        )),
+        None => None,
+    }
+}
+
+/// TRAE's stream-json result is Claude-like: the LAST `type=result` event states the run outcome.
+fn trae_result(log: &str) -> Option<JobResult> {
+    let last = json_lines(log)
+        .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("result"))
+        .last()?;
+    let text = last.get("result").and_then(|r| r.as_str()).unwrap_or("");
+    match last.get("subtype").and_then(|s| s.as_str()) {
+        Some("success") => Some(JobResult::clamped(JobOutcome::Done, text, None)),
         Some(other) => Some(JobResult::clamped(
             JobOutcome::Failed,
             if text.is_empty() { other } else { text },

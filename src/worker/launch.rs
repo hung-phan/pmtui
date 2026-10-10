@@ -32,6 +32,16 @@ impl PermissionMode {
             PermissionMode::Auto => "auto",
         }
     }
+
+    /// The value passed to `traecli --permission-mode`.
+    fn trae_arg(self) -> &'static str {
+        match self {
+            PermissionMode::Plan => "plan",
+            // TRAE v1 must stay inside the CLI's ordinary safety posture; never map this to
+            // `bypass_permissions` just because another engine can run unattended.
+            PermissionMode::AcceptEdits | PermissionMode::Auto => "default",
+        }
+    }
 }
 
 /// How a worker's conversation is anchored across wakes.
@@ -154,6 +164,31 @@ pub fn build_command(
                 }
             }
         }
+        Engine::Trae => {
+            argv.push("traecli".into());
+            argv.push("-p".into());
+            argv.push("--permission-mode".into());
+            argv.push(permission.trae_arg().into());
+            match &resume {
+                Resume::Fresh {
+                    session_id: Some(id),
+                } => {
+                    argv.push("--session-id".into());
+                    argv.push(id.clone());
+                }
+                Resume::Continue(id) => {
+                    argv.push("--resume".into());
+                    argv.push(id.clone());
+                }
+                Resume::Fresh { session_id: None } => {}
+            }
+            argv.push("--output-format".into());
+            argv.push("stream-json".into());
+            for d in add_dirs {
+                argv.push("--add-dir".into());
+                argv.push(d.to_string_lossy().into_owned());
+            }
+        }
     }
     // The prompt is the trailing positional after `--` for BOTH engines: `--`
     // ends option parsing (so a dash-leading prompt is positional), ends codex
@@ -211,7 +246,7 @@ pub fn build_job_command(
     last_message: &Path,
 ) -> Vec<String> {
     let resume = match engine {
-        Engine::Claude => Resume::Fresh {
+        Engine::Claude | Engine::Trae => Resume::Fresh {
             session_id: Some(session_id.to_string()),
         },
         // Codex assigns its own id; it is captured from the `--json` stream, never chosen here.
@@ -243,6 +278,12 @@ pub fn build_job_command(
             if let Some(model) = model {
                 extra.push("-m".into());
                 extra.push(model.to_string());
+            }
+        }
+        Engine::Trae => {
+            if let Some(model) = model.filter(|model| !model.trim().is_empty()) {
+                extra.push("-c".into());
+                extra.push(format!("model.name={model}"));
             }
         }
     }
@@ -434,6 +475,9 @@ pub fn build_loop_command(
             // cwd `tmux::Driver::launch_interactive` starts the session in, so it is
             // already codex's primary writable workspace under `workspace-write`.
         }
+        Engine::Trae => {
+            panic!("TRAE Autopilot is not supported yet");
+        }
     }
     argv
 }
@@ -490,6 +534,26 @@ pub fn build_standard_command(
                 argv.push(id.clone());
             }
         }
+        Engine::Trae => {
+            argv.push("traecli".into());
+            if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
+                argv.push("-c".into());
+                argv.push(format!("model.name={m}"));
+            }
+            match resume {
+                Resume::Fresh {
+                    session_id: Some(id),
+                } => {
+                    argv.push("--session-id".into());
+                    argv.push(id.clone());
+                }
+                Resume::Continue(id) => {
+                    argv.push("--resume".into());
+                    argv.push(id.clone());
+                }
+                Resume::Fresh { session_id: None } => {}
+            }
+        }
     }
     argv
 }
@@ -538,6 +602,9 @@ pub fn build_fork_command(
             argv.push("fork".into());
             argv.push(source_id.to_string());
             argv
+        }
+        Engine::Trae => {
+            panic!("TRAE fork support is not implemented yet");
         }
     }
 }

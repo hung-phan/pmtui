@@ -35,6 +35,16 @@ fn build_chat_codex_resumes_interactively_without_exec() {
 }
 
 #[test]
+fn build_chat_trae_resumes_interactively_without_headless_flags() {
+    let argv = build_chat(Engine::Trae, "trae-session", None, test_turn_signal());
+    assert_eq!(argv, vec!["traecli", "--resume", "trae-session"]);
+    assert!(
+        !argv.iter().any(|arg| arg == "-p"),
+        "interactive TRAE chat is not print mode: {argv:?}"
+    );
+}
+
+#[test]
 fn build_chat_inserts_model_when_some_omits_when_none() {
     // Present-iff-Some AND position. claude: `--model <m>` AFTER `claude`, BEFORE `--resume`.
     let argv = build_chat(
@@ -73,6 +83,19 @@ fn build_chat_inserts_model_when_some_omits_when_none() {
         codex_at < m_at && m_at < cx_resume_at,
         "-m after codex, before resume: {cx:?}"
     );
+    // traecli: `-c model.name=<m>` after `traecli`, before `--resume`.
+    let trae = build_chat(Engine::Trae, "trae-1", Some("seed-1"), test_turn_signal());
+    assert!(
+        trae.windows(2).any(|w| w == ["-c", "model.name=seed-1"]),
+        "{trae:?}"
+    );
+    let c_at = trae.iter().position(|a| a == "-c").unwrap();
+    let trae_at = trae.iter().position(|a| a == "traecli").unwrap();
+    let trae_resume_at = trae.iter().position(|a| a == "--resume").unwrap();
+    assert!(
+        trae_at < c_at && c_at < trae_resume_at,
+        "-c after traecli, before --resume: {trae:?}"
+    );
     // None ⇒ no flag on either engine.
     assert!(
         !build_chat(Engine::Claude, "conv-1", None, test_turn_signal())
@@ -83,6 +106,11 @@ fn build_chat_inserts_model_when_some_omits_when_none() {
         !build_chat(Engine::Codex, "sess-1", None, test_turn_signal())
             .iter()
             .any(|a| a == "-m")
+    );
+    assert!(
+        !build_chat(Engine::Trae, "trae-1", None, test_turn_signal())
+            .iter()
+            .any(|a| a == "-c")
     );
 }
 
@@ -112,6 +140,24 @@ fn build_chat_create_inserts_model_when_some_omits_when_none() {
             .iter()
             .any(|a| a == "--model")
     );
+
+    let trae = build_chat_create(Engine::Trae, "new-uuid-1", Some("seed-1"), test_turn_signal());
+    assert!(
+        trae.windows(2).any(|w| w == ["-c", "model.name=seed-1"]),
+        "{trae:?}"
+    );
+    let c_at = trae.iter().position(|a| a == "-c").unwrap();
+    let trae_at = trae.iter().position(|a| a == "traecli").unwrap();
+    let sid_at = trae.iter().position(|a| a == "--session-id").unwrap();
+    assert!(
+        trae_at < c_at && c_at < sid_at,
+        "-c after traecli, before --session-id: {trae:?}"
+    );
+    assert!(
+        !build_chat_create(Engine::Trae, "new-uuid-1", None, test_turn_signal())
+            .iter()
+            .any(|a| a == "-c")
+    );
 }
 
 #[test]
@@ -132,10 +178,22 @@ fn build_chat_and_create_omit_model_when_empty_or_whitespace() {
             "build_chat codex m={m:?}"
         );
         assert!(
+            !build_chat(Engine::Trae, "trae-1", Some(m), test_turn_signal())
+                .iter()
+                .any(|a| a == "-c"),
+            "build_chat trae m={m:?}"
+        );
+        assert!(
             !build_chat_create(Engine::Claude, "new-uuid-1", Some(m), test_turn_signal(),)
                 .iter()
                 .any(|a| a == "--model"),
             "build_chat_create claude m={m:?}"
+        );
+        assert!(
+            !build_chat_create(Engine::Trae, "new-uuid-1", Some(m), test_turn_signal(),)
+                .iter()
+                .any(|a| a == "-c"),
+            "build_chat_create trae m={m:?}"
         );
     }
 }
@@ -218,6 +276,20 @@ fn build_chat_create_claude_uses_session_id_not_resume_or_headless() {
     assert_eq!(&argv[..4], ["env", "-u", "CLAUDECODE", "claude"]);
     assert!(argv.iter().any(|arg| arg == "--settings"), "{argv:?}");
     assert_eq!(&argv[argv.len() - 2..], ["--session-id", "new-uuid-1"]);
+    assert!(
+        !argv.iter().any(|a| a == "-p"),
+        "create is interactive: no -p"
+    );
+    assert!(
+        !argv.iter().any(|a| a == "--resume"),
+        "create is not a resume"
+    );
+}
+
+#[test]
+fn build_chat_create_trae_uses_session_id_not_resume_or_headless() {
+    let argv = build_chat_create(Engine::Trae, "new-trae-id", None, test_turn_signal());
+    assert_eq!(argv, vec!["traecli", "--session-id", "new-trae-id"]);
     assert!(
         !argv.iter().any(|a| a == "-p"),
         "create is interactive: no -p"

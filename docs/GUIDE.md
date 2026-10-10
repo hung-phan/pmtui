@@ -59,6 +59,8 @@ only through `pmd checkpoint <path>`, which rejects malformed, oversized, or uns
 Standard launches the engine immediately with its normal interactive posture, and `enter`
 attaches you to that same terminal. Switching to Autopilot makes `pmd` drive it; switching
 back makes `pmd` stop typing — without restarting the process or losing the conversation.
+TRAE CLI is Standard-only in this release; `m` refuses TRAE Autopilot until its hook delivery is
+verified.
 
 Autopilot is a goal-level supervisor **above** the engine's own permission mode. Claude and
 Codex still decide whether a concrete tool call needs permission; `pmd` decides which
@@ -172,11 +174,12 @@ plain "next field" it always was, so tabbing through the form never gets stuck o
 that row has the arrows, **`shift+tab`** is how you go back a field. To descend from a path you
 typed in full, type the `/` and its children become candidates.
 
-### Codex sessions and their conversation
+### Engine sessions and their conversations
 
-Claude lets pmtui name a conversation up front; Codex does not — it assigns its own. So a Codex session
-learns its identity from the engine itself, reported when its **first turn finishes**. Until then the
-session has no conversation to go back to, which is why a brand-new Codex row shows none.
+Claude and TRAE CLI let pmtui name a conversation up front. Codex does not — it assigns its own.
+So a Codex session learns its identity from the engine itself, reported when its **first turn
+finishes**. Until then the session has no conversation to go back to, which is why a brand-new
+Codex row shows none.
 
 Once it has one, `Enter` resumes that conversation and a restart keeps it. Before this, neither the
 dashboard nor the driver had any way to know the id, so a Codex session that had been working for hours
@@ -476,8 +479,8 @@ when it has an explicit `availableModels` allowlist, resolving entries through
 `sonnet`, `opus` and `haiku` aliases (Claude still enforces what your subscription may use).
 Bedrock, Vertex, Foundry, Mantle, Anthropic AWS and custom-base-URL setups need an explicit
 allowlist, because a bare alias may not select the provider model you meant. **Codex** models
-come from `codex debug models`. The list is cached per engine for the dashboard's lifetime —
-restart `pmtui` to refresh it.
+come from `codex debug models`. **TRAE CLI** models come from `traecli models --json`.
+The list is cached per engine for the dashboard's lifetime — restart `pmtui` to refresh it.
 </details>
 
 <details>

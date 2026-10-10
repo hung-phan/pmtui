@@ -155,6 +155,7 @@ pub(crate) fn install_spawn_skill(root: &Path, engine: Engine, env: &tmux::Manag
 ///   run inside a Claude Code session — exactly like the poll worker and the
 ///   verified spike; without it the child refuses to start a nested session.
 /// - `Engine::Codex` → `codex resume <id>` (NO `exec`; that is the headless path).
+/// - `Engine::Trae` → `traecli --resume <id>` (NO `-p`; that is print mode).
 pub(crate) fn build_chat(
     engine: Engine,
     conversation_id: &str,
@@ -171,13 +172,9 @@ pub(crate) fn build_chat(
 
 /// Build the argv for a **real interactive** engine REPL that CREATES a brand-new
 /// conversation with a caller-chosen id — the "chattable-on-create" launch (the
-/// CREATE sibling of [`build_chat`], which RESUMES). Only `Engine::Claude` is
-/// creatable in v1: interactive `claude --session-id <uuid>` opens a chattable REPL
-/// on that exact id, so pmtui can mint the id, seed it into the registry (the daemon
-/// then adopts+resumes it), and hand the human a live conversation immediately —
-/// with NO `-p` (interactive, not headless) and NO `--resume` (it is a fresh
-/// create). `env -u CLAUDECODE` drops the inherited Claude Code marker exactly like
-/// [`build_chat`]/the poll worker, so the child isn't refused as a nested session.
+/// CREATE sibling of [`build_chat`], which RESUMES). Claude and TRAE are creatable
+/// because both CLIs accept a caller-chosen session id, so pmtui can mint the id,
+/// seed it into the registry, and hand the human a live conversation immediately.
 ///
 /// `Engine::Codex` is UNREACHABLE here: codex exposes no caller-chosen id for an
 /// interactive session, so it is never created by pmtui in v1 (it uses the armed
@@ -190,7 +187,7 @@ pub(crate) fn build_chat_create(
     turn_signal: &Path,
 ) -> Vec<String> {
     match engine {
-        Engine::Claude => agent_manager::worker::build_standard_command(
+        Engine::Claude | Engine::Trae => agent_manager::worker::build_standard_command(
             engine,
             &agent_manager::worker::Resume::Fresh {
                 session_id: Some(conversation_id.to_string()),

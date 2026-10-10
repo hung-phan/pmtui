@@ -68,6 +68,30 @@ fn cycle_tier_updates_per_session_config_for_agent_loop() {
 }
 
 #[test]
+fn m_refuses_trae_autopilot_without_opening_the_goal_prompt() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reg_path, root) = reg_with_agent_loop(dir.path(), "bot");
+    Registry::update(&reg_path, |registry| {
+        registry.projects[0].engine = Some(Engine::Trae);
+    })
+    .unwrap();
+
+    let mut app = loop_app(&reg_path);
+    app.cycle_tier();
+
+    assert!(
+        matches!(app.mode, UiMode::Normal),
+        "the Autopilot goal prompt must not open for unsupported TRAE"
+    );
+    assert_eq!(tier_on_disk(&root, "bot"), Tier::Standard);
+    assert!(
+        app.status.contains("TRAE Autopilot is not supported"),
+        "{}",
+        app.status
+    );
+}
+
+#[test]
 fn daemon_refresh_failure_keeps_the_session_on_standard() {
     let dir = tempfile::tempdir().unwrap();
     let (reg_path, root) = reg_with_agent_loop(dir.path(), "bot");

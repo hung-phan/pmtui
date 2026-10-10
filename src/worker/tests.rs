@@ -358,6 +358,57 @@ fn codex_fresh_ignores_pinned_session_id() {
 }
 
 #[test]
+fn trae_headless_command_uses_pinned_or_resumed_session_with_safe_permissions() {
+    let fresh = build_command(
+        Engine::Trae,
+        "work",
+        PermissionMode::Auto,
+        &[PathBuf::from("/repo/extra")],
+        Resume::Fresh {
+            session_id: Some("trae-session".into()),
+        },
+    );
+    assert_eq!(
+        fresh,
+        vec![
+            "traecli",
+            "-p",
+            "--permission-mode",
+            "default",
+            "--session-id",
+            "trae-session",
+            "--output-format",
+            "stream-json",
+            "--add-dir",
+            "/repo/extra",
+            "--",
+            "work",
+        ]
+    );
+
+    let resumed = build_command(
+        Engine::Trae,
+        "continue",
+        PermissionMode::Auto,
+        &[],
+        Resume::Continue("trae-session".into()),
+    );
+    assert!(
+        resumed
+            .windows(2)
+            .any(|w| w == ["--resume", "trae-session"]),
+        "{resumed:?}"
+    );
+    assert!(
+        !fresh
+            .iter()
+            .chain(resumed.iter())
+            .any(|arg| matches!(arg.as_str(), "-y" | "--yolo" | "bypass_permissions")),
+        "TRAE launches must not bypass permissions: fresh={fresh:?}, resumed={resumed:?}"
+    );
+}
+
+#[test]
 fn loop_command_claude_create_uses_session_id_and_add_dir() {
     // A freshly-minted id CREATES the pinned conversation via interactive
     // `claude --permission-mode auto --session-id <id>` (NO `-p`, NO stream-json).

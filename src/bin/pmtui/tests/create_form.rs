@@ -84,6 +84,31 @@ fn create_form_navigation_and_editing() {
 }
 
 #[test]
+fn worker_engine_cycles_through_all_engines_but_decider_stays_two_engine() {
+    let mut f = CreateForm::new();
+    f.field = CreateForm::ENGINE;
+    assert_eq!(f.engine, Engine::Claude);
+    f.adjust(true);
+    assert_eq!(f.engine, Engine::Codex);
+    f.adjust(true);
+    assert_eq!(f.engine, Engine::Trae);
+    f.adjust(true);
+    assert_eq!(f.engine, Engine::Claude);
+
+    f.field = CreateForm::DECIDER;
+    f.tier = Tier::Autopilot;
+    assert_eq!(f.decider_engine, Engine::Claude);
+    f.adjust(true);
+    assert_eq!(f.decider_engine, Engine::Codex);
+    f.adjust(true);
+    assert_eq!(
+        f.decider_engine,
+        Engine::Claude,
+        "TRAE is not a decider engine in this slice"
+    );
+}
+
+#[test]
 fn create_form_defaults_to_standard_autonomy() {
     // The single Autonomy dial lands on Standard — the collaborative default.
     let f = CreateForm::new();

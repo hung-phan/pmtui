@@ -190,7 +190,8 @@ pmtui spawn --cancel --request-id ID      # ask once; asking twice is asking onc
 ```
 
 `--cancel` names its child through `--request-id`; it takes no value of its own. The agent flag is
-`--agent`, not `--engine`.
+`--agent`, not `--engine`, and accepts `claude`, `codex`, or `traecli`. TRAE supports Standard
+sessions and spawned jobs only; Autopilot remains refused until its hook contract is proven.
 
 Exit codes are the contract an agent branches on. `--json` still prints a result document on a
 nonzero exit, so read the document rather than trusting the code alone. From `exit_code`:
@@ -211,7 +212,7 @@ directory, so it works where `$HOME` is read-only.
 
 - `src/job_engine/`: persistent-session scheduling and policy application.
 - `src/tmux/`: terminal driver, exact targeting, input delivery, and names.
-- `src/worker/`: Claude/Codex launch argv and result schemas.
+- `src/worker/`: Claude/Codex/TRAE launch argv and result schemas.
 - `src/advise/`: read-only decider consult and reply validation.
 - `src/daemon/`: registry reconciliation, ownership, escalation, and cleanup.
 - `src/doctor/`: read-only registry, state, executable, skill, and tmux diagnostics.

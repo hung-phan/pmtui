@@ -63,6 +63,9 @@ impl JobScheduler {
         if alive {
             return Ok(EnsureOutcome::AlreadyUp);
         }
+        if self.engine == Engine::Trae {
+            anyhow::bail!("TRAE Autopilot is not supported yet");
+        }
         // The spawn skill ships only with a terminal pmd itself starts, and only when that
         // terminal names pmtui (`PMTUI_BIN`): an adopted pane keeps its launcher's environment.
         self.install_spawn_skill();
@@ -170,7 +173,7 @@ impl JobScheduler {
             crate::registry::Engine::Claude => {
                 crate::skills::ensure_claude_worker_skill_link(&self.paths).is_ok()
             }
-            crate::registry::Engine::Codex => true,
+            crate::registry::Engine::Codex | crate::registry::Engine::Trae => true,
         };
         self.worker_skill_installed = canonical_written && engine_ready;
         if !self.worker_skill_installed {
@@ -277,14 +280,14 @@ impl JobScheduler {
     }
 
     /// The tail of [`JobScheduler::resolve_conversation_id`] for a session with NO ledger
-    /// cid and NO registry seed: claude mints+pins a fresh uuid and CREATES it; codex has
-    /// no caller-chosen id, so a fresh interactive session whose id is captured later.
+    /// cid and NO registry seed: caller-pinned engines mint+pin a fresh uuid and CREATE it; codex
+    /// has no caller-chosen id, so a fresh interactive session whose id is captured later.
     fn mint_or_fresh(&self, next: &mut AgentLoopState) -> Resume {
         match self.engine {
             // A freshly minted uuid is CREATED, never a stale seed, so it stays CONFIRMED
             // (`resume_unconfirmed` untouched at its `false` default): a later relaunch
             // resumes it.
-            Engine::Claude => {
+            Engine::Claude | Engine::Trae => {
                 let id = mint_uuid_v4();
                 next.conversation_id = Some(id.clone());
                 Resume::Fresh {

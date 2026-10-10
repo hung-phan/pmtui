@@ -115,6 +115,27 @@ fn task_board_theme_uses_semantic_lanes_metadata_and_selection_surface() {
 }
 
 #[test]
+fn task_board_colours_trae_engine_metadata_from_theme() {
+    let mut trae = view("trae", Posture::Fresh, vec![]);
+    trae.engine = Some(Engine::Trae);
+    trae.project_name = Some("pmtui".into());
+    let mut app = app_with(vec![trae], UiMode::Board);
+    app.selected = 0;
+
+    let mut terminal = Terminal::new(TestBackend::new(80, 12)).unwrap();
+    terminal.draw(|frame| render(frame, &app)).unwrap();
+
+    let styles =
+        styles_under_row(&terminal, "traecli · standard", "traecli").expect("TRAE metadata");
+    assert!(
+        styles
+            .iter()
+            .all(|(fg, _)| *fg == agent_manager::theme::accent_alt()),
+        "TRAE metadata must use a theme role: {styles:?}"
+    );
+}
+
+#[test]
 fn board_columns_partition_every_session_from_runtime_truth() {
     let app = board_app();
     let columns: Vec<_> = app.projects.iter().map(board_column).collect();

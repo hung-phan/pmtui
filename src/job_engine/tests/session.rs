@@ -208,6 +208,26 @@ fn codex_launches_fresh_interactive_without_a_pinned_id() {
 }
 
 #[test]
+fn trae_autopilot_launch_is_refused_before_building_a_loop_command() {
+    let mut fx = setup(Tier::Autopilot, Engine::Trae, Some(300));
+    let error = fx.sched.tick(&fx.driver, &fx.clock).unwrap_err();
+
+    assert!(
+        format!("{error:#}").contains("TRAE Autopilot is not supported"),
+        "{error:#}"
+    );
+    assert!(
+        fx.driver.launched().is_empty(),
+        "the daemon must not construct or launch a TRAE loop argv"
+    );
+    assert_eq!(
+        ledger(&fx).run,
+        JobRun::Idle,
+        "a refused launch must leave the ledger unchanged"
+    );
+}
+
+#[test]
 fn codex_adopts_the_id_its_own_turn_hook_reported_and_resumes_it() {
     // THE BUG: codex has no caller-chosen id, so `mint_or_fresh` launched it fresh and promised
     // the id would be "captured later" — but nothing captured it. Every relaunch (a crash, a pmd

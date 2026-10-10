@@ -581,8 +581,12 @@ pub(crate) fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) {
         let len = match app.mode {
             UiMode::ModelPicker {
                 stage: PickStage::Engine,
+                target,
                 ..
-            } => Engine::ALL.len(),
+            } => match target {
+                PickTarget::Decider => Engine::DECIDERS.len(),
+                PickTarget::Worker => Engine::ALL.len(),
+            },
             UiMode::ModelPicker {
                 stage: PickStage::Model,
                 engine,

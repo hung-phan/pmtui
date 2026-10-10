@@ -576,7 +576,7 @@ fn armed_drain_disarms_for_both_engines_when_pmd_is_observed_down() {
         app.pending_first_chat = Some("bot".into());
         app.armed_drains_left = match engine {
             Engine::Claude => Some(AUTOPILOT_ARM_DRAINS),
-            Engine::Codex => None, // the unbounded arm — the one that used to hang
+            Engine::Codex | Engine::Trae => None, // the unbounded arm — the one that used to hang
         };
         // Pre-seed a streak one short of the threshold, then let the drain take the
         // sample that reaches it (no lock file exists ⇒ DOWN).

@@ -392,6 +392,7 @@ impl App {
             let probe = match engine {
                 Engine::Claude => self.agent_tmux.claude_session_id(session, identity_file),
                 Engine::Codex => self.agent_tmux.codex_session_id(session, root),
+                Engine::Trae => anyhow::bail!("TRAE fork support is not implemented yet"),
             };
             match probe {
                 // Codex holds the source rollout open while it copies the history, so seeing

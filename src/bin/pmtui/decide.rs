@@ -159,11 +159,11 @@ pub(crate) fn read_captured_conversation_id(paths: &ProjectPaths) -> Option<Stri
 /// `request_attach`.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum FirstWakeAction {
-    /// claude + free lock ⇒ CREATE-and-chat immediately (mint an id, seed the
+    /// caller-pinned engine + free lock ⇒ CREATE-and-chat immediately (mint an id, seed the
     /// registry, hold the lease through the REPL). Carries no copy — the caller
     /// builds the create status once the mint/seed succeeds.
     CreateAndChat,
-    /// pmd is driving (claude or codex + held lock) ⇒ ARM the auto-open and show
+    /// pmd is driving (any engine + held lock) ⇒ ARM the auto-open and show
     /// this honest status meanwhile.
     Arm(String),
     /// codex + free lock (pmd is down) ⇒ open a FRESH codex chat NOW. Codex has no
@@ -175,8 +175,8 @@ pub(crate) enum FirstWakeAction {
 }
 
 /// Decide the never-woken Enter action + copy from `(engine, lease_free)`.
-/// - claude + free lock → create-and-chat now.
-/// - claude + held lock → arm ("creating on the first wake — you'll drop in
+/// - caller-pinned engine + free lock → create-and-chat now.
+/// - caller-pinned engine + held lock → arm ("creating on the first wake — you'll drop in
 ///   automatically").
 /// - codex + held lock → arm ("codex: the conversation is created after the first
 ///   wake completes").
@@ -184,8 +184,8 @@ pub(crate) enum FirstWakeAction {
 ///   creates the conversation itself; a live REPL opens like claude's create-and-chat).
 pub(crate) fn first_wake_action(engine: Engine, lease_free: bool, id: &str) -> FirstWakeAction {
     match (engine, lease_free) {
-        (Engine::Claude, true) => FirstWakeAction::CreateAndChat,
-        (Engine::Claude, false) => FirstWakeAction::Arm(format!(
+        (Engine::Claude | Engine::Trae, true) => FirstWakeAction::CreateAndChat,
+        (Engine::Claude | Engine::Trae, false) => FirstWakeAction::Arm(format!(
             "{id}: creating on the first wake — you'll drop in automatically"
         )),
         (Engine::Codex, false) => FirstWakeAction::Arm(format!(

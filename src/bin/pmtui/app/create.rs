@@ -83,6 +83,11 @@ impl App {
             self.status = "autopilot needs a goal to steer by (Standard doesn't)".into();
             return;
         }
+        if form.engine == Engine::Trae && form.tier == Tier::Autopilot {
+            self.status =
+                "TRAE Autopilot is not supported yet; use Standard or choose Claude/Codex".into();
+            return;
+        }
         if let Err(error) = agent_manager::registry::normalize_display_name(form.name.as_str()) {
             self.status = error.into();
             return;
@@ -652,7 +657,7 @@ fn new_session_id_base(dir: &Path) -> String {
 /// before its real id is minted.
 const MINTED_ID_SHAPE: &str = "00000000-0000-4000-8000-000000000000";
 
-/// The argv of a FRESH Standard launch carrying its one-time initial Message: Claude creates
+/// The argv of a FRESH Standard launch carrying its one-time initial Message: Claude and TRAE create
 /// conversation `claude_id` (`build_chat_create`), while Codex has no caller-chosen id, starts
 /// its own (`build_codex_fresh_chat`) and ignores `claude_id`.
 ///
@@ -667,7 +672,7 @@ pub(crate) fn fresh_standard_argv(
 ) -> Vec<String> {
     let argv = match engine {
         Engine::Codex => build_codex_fresh_chat(model, turn_signal),
-        Engine::Claude => build_chat_create(Engine::Claude, claude_id, model, turn_signal),
+        Engine::Claude | Engine::Trae => build_chat_create(engine, claude_id, model, turn_signal),
     };
     with_initial_prompt(argv, message)
 }

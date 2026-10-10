@@ -51,9 +51,10 @@ fn assert_spawn_skill(root: &Path, engine: Engine) {
                 SPAWN_SKILL_MD
             );
         }
-        Engine::Codex => assert!(
+        Engine::Codex | Engine::Trae => assert!(
             !paths.claude_root_dir().exists(),
-            "Codex discovers .agents/skills natively; no Claude directory appears"
+            "{} discovers .agents/skills natively; no Claude directory appears",
+            engine.label()
         ),
     }
     assert!(
@@ -70,7 +71,7 @@ fn assert_no_spawn_skill(root: &Path) {
 
 #[test]
 fn standard_create_installs_the_spawn_skill_and_claude_link() {
-    for engine in [Engine::Claude, Engine::Codex] {
+    for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         let dir = tempfile::tempdir().unwrap();
         let reg_path = dir.path().join("registry.json");
         let project = project_dir(dir.path());
@@ -88,7 +89,7 @@ fn standard_create_installs_the_spawn_skill_and_claude_link() {
 
 #[test]
 fn no_pmtui_bin_means_no_spawn_skill() {
-    for engine in [Engine::Claude, Engine::Codex] {
+    for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         let dir = tempfile::tempdir().unwrap();
         let reg_path = dir.path().join("registry.json");
         let project = project_dir(dir.path());
@@ -108,7 +109,7 @@ fn no_pmtui_bin_means_no_spawn_skill() {
 fn resume_and_restart_ship_the_skill_before_the_terminal_starts() {
     // `start_undriven_session` is the launch behind Enter-after-pause and `r`. The install runs
     // before the launch, so even a launch tmux refuses leaves the skill for the retry.
-    for engine in [Engine::Claude, Engine::Codex] {
+    for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         let dir = tempfile::tempdir().unwrap();
         let pane = FakePane::default();
         let mut app = app_with_driver(vec![], UiMode::Normal, Box::new(pane.clone()));
@@ -158,7 +159,7 @@ fn a_failed_install_never_blocks_a_standard_launch() {
 
 #[test]
 fn chat_launches_ship_the_skill_before_the_terminal_starts() {
-    for engine in [Engine::Claude, Engine::Codex] {
+    for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         let dir = tempfile::tempdir().unwrap();
         let paths = ProjectPaths::for_session(dir.path(), "bot");
         let req = ChatReq {
@@ -232,7 +233,7 @@ fn enter_queues_each_chat_launch_with_its_rows_engine() {
     // First Enter on a Standard row whose immediate launch failed: Claude creates its
     // conversation (`CreateChatReq`), Codex opens a fresh chat (`ChatReq`). Each request carries
     // the row's engine so the launch installs the skill in that engine's discovery form.
-    for engine in [Engine::Claude, Engine::Codex] {
+    for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         let dir = tempfile::tempdir().unwrap();
         let reg_path = dir.path().join("registry.json");
         let project = project_dir(dir.path());
@@ -250,7 +251,7 @@ fn enter_queues_each_chat_launch_with_its_rows_engine() {
         handle_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
 
         let queued = match engine {
-            Engine::Claude => app.pending_create_chat.as_ref().map(|req| req.engine),
+            Engine::Claude | Engine::Trae => app.pending_create_chat.as_ref().map(|req| req.engine),
             Engine::Codex => app.pending_chat.as_ref().map(|req| req.engine),
         };
         assert_eq!(queued, Some(engine), "{engine:?}: {}", app.status);

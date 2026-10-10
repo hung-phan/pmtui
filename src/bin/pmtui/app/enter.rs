@@ -218,7 +218,7 @@ impl App {
                                 // so it stays unbounded — second-class and unregressed.
                                 self.armed_drains_left = match engine {
                                     Engine::Claude => Some(AUTOPILOT_ARM_DRAINS),
-                                    Engine::Codex => None,
+                                    Engine::Codex | Engine::Trae => None,
                                 };
                                 // The daemon-DOWN give-up (`armed_wait_decision`) counts
                                 // CONSECUTIVE down samples, so the count has to start HERE:

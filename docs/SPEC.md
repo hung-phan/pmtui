@@ -43,8 +43,9 @@ An agent that works alone has two opposite faults:
 - it stops the person to ask about routine choices that the goal already answers; or
 - it becomes idle, blocked, repetitive or unavailable, and does not make this clear.
 
-agent-manager keeps Claude and Codex sessions at work on a goal that a person writes. It sends only the
-decisions that a person must make to that person.
+agent-manager manages Claude, Codex, and TRAE CLI sessions around a goal that a person writes.
+Autopilot keeps Claude and Codex sessions at work; TRAE CLI is Standard-only until its hooks are
+proven. It sends only the decisions that a person must make to that person.
 
 agent-manager adds automation above the permission modes of the engines. It does not replace those modes,
 and it does not give permission to use a tool.
@@ -64,7 +65,7 @@ yourself.
 
 ### In Scope
 
-- persistent Claude and Codex sessions;
+- persistent Claude, Codex, and TRAE CLI sessions;
 - the Standard mode and the Autopilot mode;
 - nudges, monitoring, and detection of no progress;
 - decisions that a worker raises, and the terminal menus that the product can read;
@@ -81,7 +82,8 @@ yourself.
 - a workflow engine that makes its own plan;
 - publishing, merging, deployment, use of credentials, payments or destructive actions without a person;
 - a statement that a project is complete, without a person;
-- any way around the permission, trust or command approval of Claude or Codex; or
+- TRAE CLI Autopilot until hook delivery and idle reporting are proven;
+- any way around the permission, trust or command approval of Claude, Codex, or TRAE CLI; or
 - a dashboard that hides the agent from the person.
 
 ## 3. Product Model
@@ -92,7 +94,7 @@ yourself.
 |---|---|
 | **Dashboard** | the view and the controls for the person |
 | **Supervisor** | the driver for Autopilot sessions. It is optional. |
-| **Worker** | the Claude or Codex agent that does the project work |
+| **Worker** | the Claude, Codex, or TRAE CLI agent that does the project work |
 | **Decider** | a read-only consult that answers one routine decision from the goal and the project |
 
 ### Technical Names
@@ -748,8 +750,8 @@ Autopilot handles a decision in three separate layers:
 
 1. **The fixed boundary.** Categories and explicit effects name the decisions that stay with a person.
 2. **The goal-aware answer.** The read-only decider takes the routine decisions that are eligible.
-3. **The permission of the engine.** Claude or Codex still enforces its own permission, trust and command
-   approval for each tool action.
+3. **The permission of the engine.** Claude, Codex, or TRAE CLI still enforces its own permission,
+   trust and command approval for each tool action.
 
 To pass one layer MUST NOT give a way past another layer.
 
