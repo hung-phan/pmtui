@@ -79,7 +79,27 @@ pub(crate) enum SettingKind {
     Updates,
 }
 
+/// What `Enter` on a settings row does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Gesture {
+    /// Open the row's list of values and commit the one the cursor lands on. Two presses, with the
+    /// list on screen for the second, because picking a value is a choice.
+    Pick,
+    /// Do the one thing the row's state says is next. ONE press, because there is nothing to choose
+    /// between: a list of one option is ceremony, and the row's third column already says what will
+    /// happen.
+    Act,
+}
+
 impl SettingKind {
+    /// Whether `Enter` on this row opens a list or acts.
+    pub(crate) fn gesture(self) -> Gesture {
+        match self {
+            Self::Theme => Gesture::Pick,
+            Self::Updates => Gesture::Act,
+        }
+    }
+
     /// Every setting, in the order the view lists them.
     pub(crate) const ALL: [Self; 2] = [Self::Theme, Self::Updates];
 

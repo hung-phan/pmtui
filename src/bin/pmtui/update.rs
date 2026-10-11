@@ -32,6 +32,13 @@ pub(crate) enum Outcome {
     NothingPublished,
     /// GitHub could not be asked at all — offline, a proxy, a throttled API (any other exit).
     Unreachable,
+    /// The installer ran and did not answer the question: it is older than `--check`.
+    ///
+    /// THE FOURTH OUTCOME, and the one this module first got wrong. An installer that predates
+    /// `--check` prints `unknown argument: --check` and exits 1 — the same exit as "could not ask" —
+    /// so on every machine installed before this feature the row reported a network problem to
+    /// someone whose network was fine, and sent them to debug the wrong thing.
+    Unsupported,
 }
 
 impl Outcome {
@@ -42,6 +49,19 @@ impl Outcome {
             Some(0) => Self::Found,
             Some(10) => Self::NothingPublished,
             _ => Self::Unreachable,
+        }
+    }
+
+    /// The verdict including whether the installer answered the CONTRACT at all.
+    ///
+    /// Judged on the two key lines rather than on the old script's error wording: a supporting
+    /// installer always prints `current=` and `latest=`, empty or not, so neither key means the
+    /// request was not understood. The wording belongs to one release; the contract belongs to
+    /// every release. A child with no exit code at all was killed, which is still "could not ask".
+    fn read(code: Option<i32>, answered: bool) -> Self {
+        match code {
+            Some(_) if !answered => Self::Unsupported,
+            other => Self::from_code(other),
         }
     }
 }
@@ -64,18 +84,21 @@ impl Check {
     pub(crate) fn parse(stdout: &str, code: Option<i32>) -> Self {
         let mut installed = None;
         let mut latest = None;
+        let mut answered = false;
         for line in stdout.lines() {
             let line = line.trim();
             if let Some(value) = line.strip_prefix("current=") {
                 installed = non_empty(value);
+                answered = true;
             } else if let Some(value) = line.strip_prefix("latest=") {
                 latest = non_empty(value);
+                answered = true;
             }
         }
         Self {
             installed,
             latest,
-            outcome: Outcome::from_code(code),
+            outcome: Outcome::read(code, answered),
         }
     }
 }
@@ -126,6 +149,12 @@ pub(crate) enum Status {
     },
     NothingPublished,
     Unreachable,
+    /// The `install.sh` on disk predates `--check`, so it cannot be asked.
+    ///
+    /// Its own `--update` still works and replaces its copy of itself, so this state has a way out
+    /// — and naming it is the whole point: reported as `Unreachable`, as it was at first, it sent a
+    /// person with a perfectly good network to go and debug their network.
+    InstallerTooOld,
 }
 
 impl Status {
@@ -137,12 +166,13 @@ impl Status {
         // column, and a sentence here is elided to a `…` that hides the fact it was written to
         // carry. The status line says the long version when a check has just run.
         let head = match self {
-            Self::Unchecked => format!("{RUNNING} · Enter to check"),
+            Self::Unchecked => format!("{RUNNING} · not checked yet"),
             Self::Available { latest } => format!("{RUNNING} → {latest}"),
             Self::Current => format!("{RUNNING} · up to date"),
             Self::Incomparable { latest } => format!("{RUNNING} · latest {latest}"),
             Self::NothingPublished => format!("{RUNNING} · no releases"),
-            Self::Unreachable => format!("{RUNNING} · unreachable"),
+            Self::Unreachable => format!("{RUNNING} · could not reach GitHub"),
+            Self::InstallerTooOld => format!("{RUNNING} · installer too old to ask"),
         };
         match installed {
             // Only when it DISAGREES. On an ordinary install these are the same string, and saying
@@ -160,6 +190,7 @@ pub(crate) fn status(check: &Check) -> Status {
     match check.outcome {
         Outcome::NothingPublished => Status::NothingPublished,
         Outcome::Unreachable => Status::Unreachable,
+        Outcome::Unsupported => Status::InstallerTooOld,
         Outcome::Found => match check.latest.as_deref() {
             // Exit 0 promises a tag; an empty one is a contract violation, and "could not reach"
             // is the honest reading of an answer we cannot use.
@@ -177,46 +208,46 @@ pub(crate) fn status(check: &Check) -> Status {
     }
 }
 
-/// The values this row's dropdown commits. Each is an INSTRUCTION rather than a stored preference,
-/// which is why `commit_setting` runs them instead of writing them to `pmtui.json`.
-pub(crate) const ACTION_CHECK: &str = "check";
-pub(crate) const ACTION_UPDATE: &str = "update";
-
-/// One dropdown row: the value it commits, its label, and its dim note.
-pub(crate) struct Action {
-    pub(crate) value: &'static str,
-    pub(crate) label: String,
-    pub(crate) note: String,
+/// What `Enter` on the row does next.
+///
+/// ONE KEYPRESS, NOT A MENU. The row has at most one sensible action at any moment — ask, or install
+/// what asking found — so a dropdown made the human choose between an option and nothing, which is
+/// ceremony around a single answer (user: *"the UI, looks complex. it can be just a simple to tap on
+/// to check for update"*). So this row has no dropdown: its third column says what `Enter` will do,
+/// and `Enter` does it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Next {
+    /// Ask the installer what the newest release is.
+    Check,
+    /// Run the installer to install `latest`.
+    ///
+    /// Offered for `Incomparable` too, deliberately: this module's comparison is PRESENTATIONAL, and
+    /// `install.sh --update --if-newer` makes the real decision and declines on its own when nothing
+    /// is newer. Withholding the action on a tag shape we merely failed to parse would leave the
+    /// human with no way forward.
+    Install { latest: String },
+    /// Run the installer so it replaces its own copy, because the one on disk cannot be asked.
+    FixInstaller,
 }
 
-/// The dropdown's rows for a given status: always a check, plus an update once there is something
-/// to update to.
-///
-/// `Incomparable` offers the update too, and that is deliberate — this module's comparison is
-/// PRESENTATIONAL. `install.sh --update --if-newer` makes the real decision and declines on its own
-/// when nothing is newer, so offering the action cannot cause a wrong install; withholding it on a
-/// tag shape we merely failed to parse would strand the human with no way forward.
-pub(crate) fn actions(status: &Status) -> Vec<Action> {
-    // The notes are TAGS, not sentences. A dropdown's note is a column sized to the widest one, and
-    // the label — the thing a human is choosing between — gets what is left: two sentences here once
-    // left the label zero columns wide, so the list rendered its options as blanks.
-    let mut rows = vec![Action {
-        value: ACTION_CHECK,
-        label: "Check now".to_string(),
-        note: "asks GitHub".to_string(),
-    }];
-    let latest = match status {
-        Status::Available { latest } | Status::Incomparable { latest } => Some(latest),
-        _ => None,
-    };
-    if let Some(latest) = latest {
-        rows.push(Action {
-            value: ACTION_UPDATE,
-            label: format!("Update to {latest}"),
-            // Eleven columns, like its sibling: the note column is capped at a third of the
-            // dropdown, so anything longer is clipped mid-word at every width the view supports.
-            note: "installs it".to_string(),
-        });
+impl Next {
+    /// Whether this runs the installer — and so takes the terminal — rather than only asking.
+    pub(crate) fn installs(&self) -> bool {
+        !matches!(self, Self::Check)
     }
-    rows
+}
+
+/// The one action a status leaves to do.
+pub(crate) fn next(status: &Status) -> Next {
+    match status {
+        Status::Available { latest } | Status::Incomparable { latest } => Next::Install {
+            latest: latest.clone(),
+        },
+        Status::InstallerTooOld => Next::FixInstaller,
+        // Checked and current, never checked, nothing published, unreachable: asking again is the
+        // only thing left, and it is also the only thing that could change the answer.
+        Status::Unchecked | Status::Current | Status::NothingPublished | Status::Unreachable => {
+            Next::Check
+        }
+    }
 }

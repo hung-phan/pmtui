@@ -138,29 +138,20 @@ fn the_updates_row_checks_a_real_installer_and_hands_it_the_terminal() {
         "the row must name the setting and the running version: {table}"
     );
     assert!(
-        table.contains("Enter to check"),
-        "the row must say how to check: {table}"
+        table.contains("not checked yet"),
+        "the row must say it has not asked: {table}"
     );
     assert!(
         !log.exists(),
         "the dashboard ran the installer without being asked"
     );
 
-    // ENTER DROPS THE LIST. Unchecked, there is nothing to update to, so only the check is offered.
-    assert!(send_key(host.name(), "ui", "Enter"));
-    assert!(wait_for_pane_text_within(
-        &driver,
-        "ui",
-        "Check now",
-        Duration::from_secs(5)
-    ));
-    let opened = driver.capture_tail("ui", 40).expect("capture the dropdown");
+    // ONE KEYPRESS, NO LIST. The keybar names the act before it happens, and no dropdown appears
+    // over the row — the whole point of the row having no options.
     assert!(
-        !opened.contains("Update to"),
-        "an unchecked row is offering an update: {opened}"
+        table.contains("Check for updates"),
+        "the keybar must say what Enter does: {table}"
     );
-
-    // COMMITTING THE CHECK runs the real installer and reports what it said.
     assert!(send_key(host.name(), "ui", "Enter"));
     assert!(
         wait_for_pane_text_within(
@@ -189,39 +180,97 @@ fn the_updates_row_checks_a_real_installer_and_hands_it_the_terminal() {
         "the row does not name the disagreeing marker: {row}"
     );
 
-    // AND NOW THE UPDATE IS OFFERED, and committing it gives the installer the real terminal.
-    assert!(send_key(host.name(), "ui", "Enter"));
-    assert!(wait_for_pane_text_within(
-        &driver,
-        "ui",
-        &format!("Update to {LATEST}"),
-        Duration::from_secs(5)
-    ));
-    assert!(send_key(host.name(), "ui", "j"));
-    assert!(send_key(host.name(), "ui", "Enter"));
+    // THE SAME KEY NOW INSTALLS, and the keybar says so rather than still offering a check.
     assert!(
-        wait_for_pane_text_within(
-            &driver,
-            "ui",
-            "restart pmtui to run the new version",
-            Duration::from_secs(20)
-        ),
-        "the installer never finished in the handed-over terminal: {}",
+        wait_for_pane_text_within(&driver, "ui", "Install it", Duration::from_secs(5)),
+        "the keybar never changed to the install: {}",
         driver.capture_tail("ui", 40).unwrap_or_default()
     );
-    // `--if-newer` even though the row already decided: the installer is the authority on whether
-    // replacing the binaries is warranted, and `-y` because the human just said yes here.
+    assert!(send_key(host.name(), "ui", "Enter"));
+    // AND THE DASHBOARD COMES BACK AS A NEW PROCESS. The old image knew the answer; a dashboard
+    // that has forgotten it is the proof that this one re-executed rather than merely repainted —
+    // which is what "refresh pmtui after installing" has to mean.
+    assert!(
+        wait_for_pane_text_within(&driver, "ui", "SESSIONS", Duration::from_secs(30)),
+        "pmtui never restarted after the installer: {}",
+        driver.capture_tail("ui", 40).unwrap_or_default()
+    );
+    // It came back as ITSELF: the seeded session is still listed, so the `--registry` it was given
+    // survived the exec and a throwaway dashboard did not reappear pointed at the real one.
+    assert!(
+        wait_for_pane_text_within(&driver, "ui", "alpha", Duration::from_secs(10)),
+        "the restarted dashboard lost its scratch registry: {}",
+        driver.capture_tail("ui", 40).unwrap_or_default()
+    );
+    open_updates_row(&host, &driver);
+    assert!(
+        wait_for_pane_text_within(&driver, "ui", "not checked yet", Duration::from_secs(10)),
+        "the dashboard kept the old process's answer, so it did not restart: {}",
+        driver.capture_tail("ui", 40).unwrap_or_default()
+    );
+    // Read LAST, now that the restart proves the installer finished: `--if-newer` even though the
+    // row already decided, because the installer is the authority on whether replacing the binaries
+    // is warranted, and `-y` because the human just said yes here.
     let ran = std::fs::read_to_string(&log).expect("the installer log");
     assert!(
         ran.lines().any(|line| line == "--update --if-newer -y"),
         "the update argv is not what the row promised: {ran}"
     );
-    // The dashboard is BACK: the handoff restored the terminal rather than leaving the installer's
-    // screen behind.
+}
+
+/// An `install.sh` from before `--check` existed, verbatim in behaviour: it rejects the argument on
+/// stderr and exits 1 — the SAME exit as "could not reach GitHub".
+fn old_installer(root: &Path) -> std::path::PathBuf {
+    let data = root.join("old-data");
+    let dir = data.join("agent-manager");
+    std::fs::create_dir_all(&dir).expect("create the installer directory");
+    let script = dir.join("install.sh");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\nprintf '\u{2717} unknown argument: %s (try --help)\\n' \"$1\" >&2\nexit 1\n",
+    )
+    .expect("write the old installer");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+        .expect("make it executable");
+    data
+}
+
+#[test]
+#[ignore = "acceptance: real pmtui update check over tmux"]
+fn an_installer_too_old_to_ask_is_named_rather_than_blamed_on_the_network() {
+    if !tmux_available() {
+        eprintln!("skipping settings-update acceptance: tmux not available");
+        return;
+    }
+
+    // THE BUG A USER HIT ON DAY ONE. Every machine installed before `--check` shipped has an
+    // installer that cannot answer, and reporting its exit 1 as "could not reach GitHub" sent
+    // someone with a working network to go and debug their network.
+    let host = TmuxSocket::new("am-settings-oldinstaller");
+    let inner = TmuxSocket::new("am-settings-oldinstaller-inner");
+    let dir = tempfile::tempdir().expect("scratch root");
+    let registry = dir.path().join("registry.json");
+    seed_standard_loop_session(&registry, dir.path(), "alpha");
+    let data = old_installer(dir.path());
+
+    let driver = launch(&host, &inner, &registry, &data);
+    open_updates_row(&host, &driver);
+    assert!(send_key(host.name(), "ui", "Enter"));
     assert!(
-        wait_for_pane_text_within(&driver, "ui", "SETTINGS", Duration::from_secs(10)),
-        "the dashboard never repainted after the installer: {}",
+        wait_for_pane_text_within(&driver, "ui", "too old", Duration::from_secs(15)),
+        "the dashboard did not name the real problem: {}",
         driver.capture_tail("ui", 40).unwrap_or_default()
+    );
+    let said = driver.capture_tail("ui", 40).expect("capture the row");
+    assert!(
+        !said.contains("could not reach GitHub"),
+        "a working network is still being blamed: {said}"
+    );
+    // AND THE WAY OUT IS ON SCREEN: the old installer's own `--update` replaces its copy of itself,
+    // so the next press fixes the thing that is broken.
+    assert!(
+        said.contains("Update the installer"),
+        "the keybar does not offer the fix: {said}"
     );
 }
 
@@ -245,13 +294,6 @@ fn a_build_with_no_installer_says_so_rather_than_failing_a_check() {
 
     let driver = launch(&host, &inner, &registry, &data);
     open_updates_row(&host, &driver);
-    assert!(send_key(host.name(), "ui", "Enter"));
-    assert!(wait_for_pane_text_within(
-        &driver,
-        "ui",
-        "Check now",
-        Duration::from_secs(5)
-    ));
     assert!(send_key(host.name(), "ui", "Enter"));
     assert!(
         wait_for_pane_text_within(&driver, "ui", "no installer at", Duration::from_secs(10)),

@@ -83,9 +83,9 @@ In the dashboard:
    session a goal with **`g`** — it is the direction every nudge steers by.
 4. **`1`**, **`2`** and **`0`** switch views: **Sessions**, the terminal-first list with the selected
    session's transcript beside it, **Tasks**, the same sessions as cards in Paused, Needs You,
-   Pending, Autopilot and Working columns, and **Settings**, a table of preferences where **Enter**
-   opens a row's dropdown — the theme, from the 38 `opaline` ships, and **Updates**, which says
-   which pmtui you are running and installs a newer one. The active view is the underlined tab in
+   Pending, Autopilot and Working columns, and **Settings**, a table of preferences — the theme,
+   from the 38 `opaline` ships, and **Updates**, which says which pmtui you are running and, in one
+   keypress, installs a newer one and restarts onto it. The active view is the underlined tab in
    the header.
 5. **`s`** sends one message without taking over the terminal, or answers an open decision.
    **`?`** lists every key.

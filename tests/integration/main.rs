@@ -27,6 +27,7 @@ mod nudge_judge;
 mod pane_reading;
 #[cfg(target_os = "linux")]
 mod pdeathsig;
+mod pmd_refresh;
 mod pmtui_fixture;
 mod preview_scroll;
 mod probe;

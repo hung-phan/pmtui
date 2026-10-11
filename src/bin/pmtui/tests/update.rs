@@ -6,7 +6,7 @@
 //! the ones where a wrong answer is actively misleading.
 
 use super::*;
-use crate::update::{Check, Outcome, RUNNING, Status, actions, status};
+use crate::update::{Check, Next, Outcome, RUNNING, Status, next, status};
 
 /// A stand-in `install.sh` that prints what a test wants and exits how a test wants.
 ///
@@ -22,6 +22,23 @@ fn stub_installer(dir: &std::path::Path, stdout: &str, code: i32) -> std::path::
         // `%b`, not `%s`: the callers write the two-line contract with `\n` escapes, and the point
         // of a stub is that it emits what the real installer emits.
         format!("#!/bin/sh\nprintf '%b' '{stdout}'\nexit {code}\n"),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    script
+}
+
+/// A stub standing in for every `install.sh` shipped BEFORE `--check` existed.
+///
+/// Verbatim from the real v0.1.2 script's behaviour, which is what a user's machine actually had:
+/// it rejects the argument on stderr and exits 1. That exit is also "could not ask GitHub", which is
+/// exactly why the row has to judge on the two key lines instead.
+fn old_installer(dir: &std::path::Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let script = dir.join("old-install.sh");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\nprintf '\u{2717} unknown argument: %s (try --help)\\n' \"$1\" >&2\nexit 1\n",
     )
     .unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -95,10 +112,11 @@ fn a_newer_release_is_offered_and_the_current_one_is_not() {
             latest: latest.clone()
         }
     );
-    assert!(
-        actions(&available)
-            .iter()
-            .any(|action| action.label == format!("Update to {latest}")),
+    assert_eq!(
+        next(&available),
+        Next::Install {
+            latest: latest.clone()
+        },
         "a newer release must be actionable"
     );
 
@@ -107,14 +125,10 @@ fn a_newer_release_is_offered_and_the_current_one_is_not() {
         Some(0),
     ));
     assert_eq!(current, Status::Current);
-    let labels: Vec<String> = actions(&current)
-        .into_iter()
-        .map(|action| action.label)
-        .collect();
     assert_eq!(
-        labels,
-        vec!["Check now".to_string()],
-        "nothing to update to means no update action"
+        next(&current),
+        Next::Check,
+        "nothing to update to leaves nothing to install"
     );
 }
 
@@ -150,9 +164,8 @@ fn a_tag_that_cannot_be_compared_is_a_fact_not_a_verdict() {
             latest: "nightly-2026-10-11".to_string()
         }
     );
-    assert_eq!(
-        actions(&status).len(),
-        2,
+    assert!(
+        next(&status).installs(),
         "an unknown shape still offers the update"
     );
 }
@@ -194,6 +207,7 @@ fn every_status_names_the_version_that_is_running() {
         },
         Status::NothingPublished,
         Status::Unreachable,
+        Status::InstallerTooOld,
     ] {
         let value = status.value(None);
         assert!(
@@ -202,7 +216,16 @@ fn every_status_names_the_version_that_is_running() {
         );
     }
     assert!(Status::NothingPublished.value(None).contains("no releases"));
-    assert!(Status::Unreachable.value(None).contains("unreachable"));
+    assert!(
+        Status::Unreachable
+            .value(None)
+            .contains("could not reach GitHub")
+    );
+    assert!(
+        Status::InstallerTooOld
+            .value(None)
+            .contains("installer too old")
+    );
     assert!(
         Status::Available {
             latest: "v9.0.0".to_string()
@@ -307,15 +330,84 @@ fn a_build_that_was_not_installed_by_the_installer_says_so() {
 }
 
 #[test]
-fn an_installer_that_prints_nothing_useful_is_not_up_to_date() {
-    // Exit 0 promising a tag and delivering none. Already pinned purely; this proves the dashboard
-    // half reads the same way when a REAL process does it.
+fn an_installer_that_answers_nothing_is_too_old_rather_than_offline() {
+    // THE BUG A USER HIT ON DAY ONE. Every machine installed before `--check` existed has an
+    // installer that prints `unknown argument: --check` and exits 1 — the same exit as "could not
+    // ask GitHub" — so the row told someone with a working network to go and debug their network.
+    // The signal is the CONTRACT: a supporting installer always prints both keys.
     let dir = tempfile::tempdir().unwrap();
     let mut app = app_with(Vec::new(), UiMode::Normal);
+    app.installer_path = old_installer(dir.path());
+    app.check_for_update();
+    assert_eq!(app.update_status, Status::InstallerTooOld);
+    assert_eq!(app.update_installed, None);
+    assert!(
+        !app.status.contains("could not reach"),
+        "a working network must not be blamed: {}",
+        app.status
+    );
+    assert!(app.status.contains("too old"), "{}", app.status);
+
+    // And the way out is named and reachable: `Enter` runs the installer, whose own `--update`
+    // replaces its copy of itself.
+    let next = next(&app.update_status);
+    assert_eq!(next, Next::FixInstaller);
+    assert!(next.installs(), "the way out runs the installer");
+
+    // Exit 0 with nothing printed is the same failure to answer, not an empty answer.
     app.installer_path = stub_installer(dir.path(), "", 0);
     app.check_for_update();
-    assert_eq!(app.update_status, Status::Unreachable);
-    assert_eq!(app.update_installed, None);
+    assert_eq!(app.update_status, Status::InstallerTooOld);
+}
+
+#[test]
+fn enter_does_the_one_thing_each_state_leaves_to_do() {
+    // ONE KEYPRESS. A dropdown here asked the human to choose between an option and nothing (user:
+    // *"the UI, looks complex. it can be just a simple to tap on to check for update"*), so the row
+    // has no list: `Enter` acts, and the third column says what it will do.
+    assert_eq!(
+        crate::settings::SettingKind::Updates.gesture(),
+        crate::settings::Gesture::Act
+    );
+    assert_eq!(
+        crate::settings::SettingKind::Theme.gesture(),
+        crate::settings::Gesture::Pick,
+        "picking a theme is a choice and keeps its list"
+    );
+
+    // Nothing known, nothing published, nothing reachable, nothing newer: asking is the only move
+    // left, and also the only one that could change the answer.
+    for status in [
+        Status::Unchecked,
+        Status::Current,
+        Status::NothingPublished,
+        Status::Unreachable,
+    ] {
+        let next = next(&status);
+        assert_eq!(next, Next::Check, "{status:?}");
+        assert!(!next.installs(), "{status:?} must not take the terminal");
+    }
+
+    // A tag that could not be compared still offers the install: the comparison here is
+    // presentational and `--if-newer` is the real decision.
+    for status in [
+        Status::Available {
+            latest: "v9.0.0".to_string(),
+        },
+        Status::Incomparable {
+            latest: "v9.0.0".to_string(),
+        },
+    ] {
+        let next = next(&status);
+        assert_eq!(
+            next,
+            Next::Install {
+                latest: "v9.0.0".to_string()
+            },
+            "{status:?}"
+        );
+        assert!(next.installs());
+    }
 }
 
 #[test]
@@ -332,51 +424,45 @@ fn updating_queues_the_installer_and_the_drain_runs_it() {
     let mut handoff = UpdateHandoff::default();
     drain_terminal_requests(&mut app, &mut handoff, "/bin/true");
 
-    // The installer gets the REAL terminal, so the drain must hand it over and take it back.
-    assert_eq!(handoff.events, ["suspend", "restore"]);
+    // TWO HANDOVERS: one for the installer, one to leave the terminal cooked for the `exec`. The
+    // second restore only happens because this test's `relaunch_exe` cannot be executed — on a real
+    // success there is no process left to restore for.
+    assert_eq!(handoff.events, ["suspend", "restore", "suspend", "restore"]);
     assert!(!app.pending_update, "the request is consumed, not repeated");
-    // A NEW BINARY IS NOT A NEW PROCESS: the success message has to say restart, because this image
-    // is still the old one and a human reading "updated" would believe otherwise.
-    assert_eq!(
-        app.status,
-        "installer finished — restart pmtui to run the new version"
+    assert!(!app.pending_relaunch, "and so is the refresh");
+    // A NEW BINARY IS NOT A NEW PROCESS. When the restart cannot happen, the message must still say
+    // the update LANDED — otherwise someone goes looking for a problem with the install.
+    assert!(
+        app.status.contains("the new version is installed"),
+        "{}",
+        app.status
     );
+    assert!(app.status.contains("quit and reopen it"), "{}", app.status);
 }
 
 #[test]
-fn an_installer_that_fails_is_reported_rather_than_claimed() {
+fn a_failed_install_never_reaches_the_refresh() {
     use crate::session::drain_terminal_requests;
 
+    // The refresh is what finishes the job, so it must be reached by a SUCCESS and nothing else: a
+    // dashboard that restarted after a failed install would look like it had updated.
     let dir = tempfile::tempdir().unwrap();
     let mut app = app_with(Vec::new(), UiMode::Normal);
-    app.installer_path = stub_installer(dir.path(), "", 3);
+    app.installer_path = stub_installer(dir.path(), "", 7);
     app.request_update();
 
     let mut handoff = UpdateHandoff::default();
     drain_terminal_requests(&mut app, &mut handoff, "/bin/true");
+    assert_eq!(handoff.events, ["suspend", "restore"], "no second handover");
+    assert!(!app.pending_relaunch);
     assert!(app.status.contains("installer exited"), "{}", app.status);
-    assert!(!app.pending_update);
-
-    // And when the TERMINAL could not be handed over, the installer never ran at all — which must
-    // not read as a finished update.
-    app.installer_path = stub_installer(dir.path(), "", 0);
-    app.request_update();
-    let mut broken = UpdateHandoff {
-        fail_suspend: true,
-        ..UpdateHandoff::default()
-    };
-    drain_terminal_requests(&mut app, &mut broken, "/bin/true");
-    assert!(
-        app.status.contains("could not run the installer"),
-        "{}",
-        app.status
-    );
 }
 
-/// The terminal-handoff seam, recording the suspend/restore pair the installer must be wrapped in.
+/// The terminal-handoff seam, recording the suspend/restore pairs the installer and the restart must
+/// be wrapped in.
 ///
-/// Local rather than shared with `tests/session.rs`: this file needs only the pair and one failure
-/// mode, and a handoff that records nothing else keeps the assertion above readable as a sentence.
+/// Local rather than shared with `tests/session.rs`: this file needs only the pairs and one failure
+/// mode, and a handoff that records nothing else keeps the assertions readable as sentences.
 #[derive(Default)]
 struct UpdateHandoff {
     events: Vec<&'static str>,
@@ -399,46 +485,55 @@ impl crate::session::TerminalHandoff for UpdateHandoff {
 }
 
 #[test]
-fn the_updates_row_offers_actions_rather_than_a_remembered_value() {
-    // A Settings row normally stores what was picked. These are INSTRUCTIONS, so the dropdown opens
-    // on no row at all — opening it on "Check now" would imply checking is the setting in force.
+fn the_updates_row_has_no_list_and_says_what_enter_does() {
     let mut app = app_with(Vec::new(), UiMode::Normal);
     let row = app.setting_row(crate::settings::SettingKind::Updates);
+    assert!(
+        row.options.is_empty(),
+        "an acting row must carry no options: {:?}",
+        row.options
+    );
     assert_eq!(row.current, None);
     assert_eq!(row.value, Status::Unchecked.value(None));
-    assert_eq!(row.options.len(), 1, "unchecked offers only the check");
 
     app.update_status = Status::Available {
         latest: "v9.0.0".to_string(),
     };
-    let row = app.setting_row(crate::settings::SettingKind::Updates);
-    let values: Vec<&str> = row
-        .options
-        .iter()
-        .map(|option| option.value.as_str())
-        .collect();
-    assert_eq!(values, [crate::update::ACTION_CHECK, "update"]);
+    assert!(
+        app.setting_row(crate::settings::SettingKind::Updates)
+            .options
+            .is_empty(),
+        "no state grows this row a list"
+    );
+
+    // A picking row still has its list — this change must not flatten Theme too.
+    assert!(
+        !app.setting_row(crate::settings::SettingKind::Theme)
+            .options
+            .is_empty()
+    );
 }
 
 #[test]
-fn committing_an_update_action_runs_it_and_remembers_nothing() {
-    // THE FILE MUST NOT LEARN AN INSTRUCTION. `commit_setting` normally saves the picked option to
-    // `pmtui.json`; writing "check" there would make checking a remembered preference, applied on
-    // every start.
+fn one_enter_does_it_and_the_preferences_learn_nothing() {
+    // ONE KEYPRESS, and NOTHING REMEMBERED. `commit_setting` normally saves the picked option to
+    // `pmtui.json`; writing an action there would make it a preference applied at every start.
     let dir = tempfile::tempdir().unwrap();
     let mut app = app_with(Vec::new(), UiMode::Normal);
     app.settings_path = dir.path().join("pmtui.json");
     app.installer_path = stub_installer(dir.path(), "current=v0.1.2\\nlatest=v0.0.1\\n", 0);
 
-    // Driven through the keys a human presses: the Updates row is the SECOND one, the first Enter
-    // opens its dropdown, the second commits the row the cursor is on.
+    // The Updates row is the second one. ONE Enter — no list opens over it.
     app.mode = UiMode::Settings {
         cursor: 1,
         open: None,
     };
     handle_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
-    assert!(matches!(app.mode, UiMode::Settings { open: Some(0), .. }));
-    handle_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+    assert!(
+        matches!(app.mode, UiMode::Settings { open: None, .. }),
+        "an acting row must not open a list: {:?}",
+        app.mode
+    );
     // THE KEYPRESS ONLY ANNOUNCES IT. The check itself blocks, and a frame has to carry that word to
     // the screen before the blocking starts — otherwise a slow network reads as a dead dashboard.
     assert!(app.pending_check);
@@ -462,20 +557,20 @@ fn committing_an_update_action_runs_it_and_remembers_nothing() {
         "an action must not be written to the preferences file"
     );
 
-    // Now that something is comparable-and-newer the dropdown grows an Update row; commit that one.
+    // Once something newer is known the SAME key installs it instead — the row's state picks the
+    // act, so the human never chooses from a menu.
     app.update_status = Status::Available {
         latest: "v9.0.0".to_string(),
     };
-    app.mode = UiMode::Settings {
-        cursor: 1,
-        open: Some(1),
-    };
     handle_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
     assert!(app.pending_update, "the update is queued for the handoff");
+    assert!(matches!(app.mode, UiMode::Settings { open: None, .. }));
     assert!(!app.settings_path.exists());
 
-    // An action this build does not know is reported, not performed. A newer installer could
-    // offer one, and a silent no-op would look like a dashboard that ignores Enter.
+    // And an option can never reach the commit path for this row, because the row has none — but if
+    // one did, it must change nothing rather than be written down as a preference.
+    app.pending_update = false;
+    app.status = "untouched".into();
     app.commit_setting(
         crate::settings::SettingKind::Updates,
         &crate::settings::SettingOption {
@@ -484,7 +579,9 @@ fn committing_an_update_action_runs_it_and_remembers_nothing() {
             value: "teleport".into(),
         },
     );
-    assert_eq!(app.status, "unknown update action teleport");
+    assert_eq!(app.status, "untouched");
+    assert!(!app.pending_update);
+    assert!(!app.settings_path.exists());
 }
 
 #[test]
@@ -514,7 +611,7 @@ fn a_wide_terminal_states_the_whole_answer_and_a_narrow_one_keeps_its_summary() 
         "the answer was elided at 120: {screen}"
     );
     for kind in crate::settings::SettingKind::ALL {
-        assert!(screen.contains(kind.summary()), "{:?}: {screen}", kind);
+        assert!(screen.contains(kind.summary()), "{kind:?}: {screen}");
     }
 
     // Narrow: the summaries still survive whole, and it is the VALUE that gives way — the row keeps
@@ -525,8 +622,7 @@ fn a_wide_terminal_states_the_whole_answer_and_a_narrow_one_keeps_its_summary() 
     for kind in crate::settings::SettingKind::ALL {
         assert!(
             screen.contains(kind.summary()),
-            "{:?} lost its summary at 80 columns: {screen}",
-            kind
+            "{kind:?} lost its summary at 80 columns: {screen}"
         );
     }
     assert!(
@@ -577,15 +673,12 @@ fn the_installer_is_looked_for_where_the_installer_puts_it() {
 }
 
 #[test]
-fn an_unchecked_row_says_how_to_check_and_offers_only_that() {
+fn an_unchecked_row_says_so_and_offers_only_the_asking() {
     // The row never checks on its own: opening a screen must not reach the network, where a stall
-    // is indistinguishable from a frozen dashboard. So it has to say what to press.
+    // is indistinguishable from a frozen dashboard. So it says it has not asked, and the hint says
+    // what asking takes.
     let value = Status::Unchecked.value(None);
     assert!(value.starts_with(RUNNING), "{value}");
-    assert!(value.contains("Enter to check"), "{value}");
-    let labels: Vec<String> = actions(&Status::Unchecked)
-        .into_iter()
-        .map(|action| action.label)
-        .collect();
-    assert_eq!(labels, vec!["Check now".to_string()]);
+    assert!(value.contains("not checked yet"), "{value}");
+    assert_eq!(next(&Status::Unchecked), Next::Check);
 }

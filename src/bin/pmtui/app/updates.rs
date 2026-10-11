@@ -104,6 +104,11 @@ impl App {
             crate::update::Status::Current => "already on the newest release".into(),
             crate::update::Status::Incomparable { latest } => format!("newest release is {latest}"),
             crate::update::Status::NothingPublished => "no releases published yet".into(),
+            // NOT "could not reach GitHub" — that is the diagnosis this state exists to stop. The
+            // network is fine; the installer on disk is older than the question.
+            crate::update::Status::InstallerTooOld => {
+                "the installed install.sh is too old to check — Enter updates it".into()
+            }
             crate::update::Status::Unreachable | crate::update::Status::Unchecked => {
                 "could not reach GitHub".into()
             }

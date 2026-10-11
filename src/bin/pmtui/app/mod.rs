@@ -70,6 +70,21 @@ pub(crate) struct App {
     /// A requested `install.sh --update`, drained by `drain_terminal_requests`. The installer gets
     /// the real terminal: it is slow, prints a lot, and may ask something.
     pub(crate) pending_update: bool,
+    /// Set by a SUCCESSFUL update: the binaries on disk are new and this process is not.
+    ///
+    /// A new binary is not a new process, so telling the human "restart pmtui" left them to finish
+    /// the job by hand — and left `pmd` running the old code besides (user: *"after install we would
+    /// need to refresh pmtui and pmd too"*). Draining this restarts both.
+    pub(crate) pending_relaunch: bool,
+    /// The pmtui this process re-executes to pick up a new build, resolved ONCE at startup.
+    ///
+    /// A field for the same reason as [`App::installer_path`]: a test cannot be allowed to `exec`
+    /// the test binary, so the path is injected and pointed somewhere that fails.
+    ///
+    /// `pmd` is NOT restarted from here. Every `pmd` watches its own executable and replaces itself
+    /// (`agent_manager::selfexec`), which covers the daemons this dashboard never started as well
+    /// as its own — and one mechanism cannot race the other.
+    pub(crate) relaunch_exe: std::path::PathBuf,
     /// The `install.sh` this dashboard would run, resolved from the environment ONCE at startup.
     ///
     /// A field rather than a lookup at each use because edition 2024 forbids `set_var` in tests: a
@@ -380,6 +395,8 @@ impl App {
             update_installed: None,
             pending_check: false,
             pending_update: false,
+            pending_relaunch: false,
+            relaunch_exe: agent_manager::selfexec::current_exe(),
             installer_path: crate::app::updates::installer_from_env(),
             return_to_board_after_answer: false,
             return_to_board_after_switch: false,
@@ -553,23 +570,14 @@ impl App {
                     options,
                 }
             }
-            SettingKind::Updates => {
-                let options: Vec<SettingOption> = crate::update::actions(&self.update_status)
-                    .into_iter()
-                    .map(|action| SettingOption {
-                        label: action.label,
-                        note: action.note,
-                        value: action.value.to_string(),
-                    })
-                    .collect();
-                SettingRow {
-                    value: self.update_status.value(self.update_installed.as_deref()),
-                    // NOTHING is in force: these rows are actions, not a stored value, so there is
-                    // no "current" one to open on. The dropdown therefore starts at its first row.
-                    current: None,
-                    options,
-                }
-            }
+            SettingKind::Updates => SettingRow {
+                value: self.update_status.value(self.update_installed.as_deref()),
+                // NO LIST AT ALL. There is nothing in force to open on and nothing to choose
+                // between, so `Enter` acts (`SettingKind::gesture`) and the third column says what
+                // it will do — which is also what keeps this row one variant and no new key.
+                current: None,
+                options: Vec::new(),
+            },
         }
     }
 
@@ -608,9 +616,31 @@ impl App {
         let Some(kind) = self.settings_kind() else {
             return;
         };
+        // AN ACTING ROW NEVER OPENS. One keypress does the thing, because a list holding a single
+        // option asks a question with one answer.
+        if kind.gesture() == crate::settings::Gesture::Act {
+            self.act_on_setting(kind);
+            return;
+        }
         let start = self.setting_row(kind).current.unwrap_or(0);
         if let UiMode::Settings { open, .. } = &mut self.mode {
             *open = Some(start);
+        }
+    }
+
+    /// `Enter` on a row whose gesture is Act: do the one thing its state says is next.
+    fn act_on_setting(&mut self, kind: crate::settings::SettingKind) {
+        match kind {
+            // A picking row cannot reach here — `settings_open` routed on the gesture — but saying
+            // so as a no-op beats an `unreachable!` that a future variant could reach for real.
+            crate::settings::SettingKind::Theme => {}
+            crate::settings::SettingKind::Updates => {
+                if crate::update::next(&self.update_status).installs() {
+                    self.request_update();
+                } else {
+                    self.request_check();
+                }
+            }
         }
     }
 
@@ -679,17 +709,10 @@ impl App {
                 }
                 self.settings.theme = option.value.clone();
             }
-            // ACTIONS, not a value. They report through the status line and return EARLY, because
-            // the save below would write an instruction into `pmtui.json` as though it were a
-            // preference — and then "check" would be the remembered value of a setting.
-            SettingKind::Updates => {
-                match option.value.as_str() {
-                    crate::update::ACTION_CHECK => self.request_check(),
-                    crate::update::ACTION_UPDATE => self.request_update(),
-                    other => self.status = format!("unknown update action {other}"),
-                }
-                return;
-            }
+            // AN ACTING ROW HAS NOTHING TO COMMIT. It carries no options, so no dropdown can open
+            // over it and no option can reach here — and the save below must not run, because
+            // writing an action into `pmtui.json` would make it a preference applied at every start.
+            SettingKind::Updates => return,
         }
         let name = kind.name().to_lowercase();
         match crate::settings::save(&self.settings_path, &self.settings) {

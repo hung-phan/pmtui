@@ -127,7 +127,9 @@ fn render_rows(f: &mut Frame, app: &App, area: Rect, cursor: usize, open: bool) 
                 Span::raw("  "),
                 Span::styled(pad_cols("Setting", NAME_W), attention::pane_title()),
                 Span::styled(pad_cols("Value", value_w), attention::pane_title()),
-                Span::styled("Enter opens the list", attention::text_dim()),
+                // NOT "Enter opens the list" any more: one row's Enter acts instead, and a heading
+                // that promised a list over a row that has none was the table lying about itself.
+                Span::styled("What it does", attention::text_dim()),
             ]),
             Line::raw(""),
         ]),
@@ -163,8 +165,16 @@ fn render_rows(f: &mut Frame, app: &App, area: Rect, cursor: usize, open: bool) 
                         .add_modifier(Modifier::BOLD),
                 ),
                 // `▾` says "there is a list under here", which is the whole affordance a keyboard
-                // dropdown has.
-                Span::styled("▾ ", Style::default().fg(agent_manager::theme::muted())),
+                // dropdown has — so a row whose `Enter` ACTS must not draw one, or it promises a
+                // list that never opens.
+                Span::styled(
+                    if kind.gesture() == crate::settings::Gesture::Pick {
+                        "▾ "
+                    } else {
+                        "  "
+                    },
+                    Style::default().fg(agent_manager::theme::muted()),
+                ),
                 Span::styled(kind.summary(), attention::text_dim()),
             ]))
         })

@@ -666,6 +666,9 @@ fn app_with_driver(projects: Vec<ProjectView>, mode: UiMode, agent_tmux: Box<dyn
         update_installed: None,
         pending_check: false,
         pending_update: false,
+        pending_relaunch: false,
+        // NEVER the test binary: a successful `exec` here would replace the test runner.
+        relaunch_exe: std::path::PathBuf::from("/nonexistent/pmtui"),
         installer_path: std::path::PathBuf::from("/nonexistent/install.sh"),
         return_to_board_after_answer: false,
         return_to_board_after_switch: false,
@@ -1080,6 +1083,9 @@ fn creating_loop_app(
         update_installed: None,
         pending_check: false,
         pending_update: false,
+        pending_relaunch: false,
+        // NEVER the test binary: a successful `exec` here would replace the test runner.
+        relaunch_exe: std::path::PathBuf::from("/nonexistent/pmtui"),
         installer_path: std::path::PathBuf::from("/nonexistent/install.sh"),
         return_to_board_after_answer: false,
         return_to_board_after_switch: false,

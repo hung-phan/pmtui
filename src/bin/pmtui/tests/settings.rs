@@ -380,7 +380,7 @@ fn the_settings_screen_is_a_table_of_settings() {
         "Value",
         "Theme",
         SettingKind::Theme.summary(),
-        "Enter opens the list",
+        "What it does",
         // `▾` is the affordance: it says a list lives under this row.
         "▾",
         "/home/dev/.config/pmd/pmtui.json",

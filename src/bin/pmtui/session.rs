@@ -400,16 +400,35 @@ pub(crate) fn drain_terminal_requests(
             }),
         );
         // A NEW BINARY IS NOT A NEW PROCESS. The replacement is on disk, but this pmtui is still
-        // the image that was loaded, so saying "updated" without "restart" would be a half-truth
-        // the human acts on. Deliberately NOT re-checking either: this process cannot report a
-        // version it is not running.
-        app.status = match status {
+        // the image that was loaded — and `pmd` is still the old one too. So a success does not
+        // report and stop; it queues the refresh that finishes the job.
+        match status {
             Ok(Ok(code)) if code.success() => {
-                "installer finished — restart pmtui to run the new version".into()
+                app.pending_relaunch = true;
+                app.status = "installed — restarting pmtui".into();
             }
-            Ok(Ok(code)) => format!("installer exited {code}"),
-            Ok(Err(e)) | Err(e) => format!("could not run the installer: {e:#}"),
-        };
+            Ok(Ok(code)) => app.status = format!("installer exited {code}"),
+            Ok(Err(e)) | Err(e) => app.status = format!("could not run the installer: {e:#}"),
+        }
+    }
+    if std::mem::take(&mut app.pending_relaunch) {
+        // SUSPEND FIRST, and never restore on the success path: there is no process left to restore
+        // for. The new pmtui builds its own screen from the cooked terminal this leaves behind.
+        let suspended = handoff.suspend();
+        // NOTHING IS DONE TO pmd HERE. Every pmd watches its own executable and replaces itself, so
+        // the daemons this dashboard never started are covered too — and one mechanism cannot race
+        // another for the same singleton lock.
+        let failure = agent_manager::selfexec::relaunch(&app.relaunch_exe);
+        // Still here, so the exec failed. The update DID land, and saying otherwise would send
+        // someone looking for a problem with the install.
+        let _ = handoff.restore();
+        app.status = format!(
+            "the new version is installed, but this pmtui could not restart itself \
+             ({failure}) — quit and reopen it"
+        );
+        if let Err(e) = suspended {
+            app.status = format!("{} (terminal: {e:#})", app.status);
+        }
     }
     if let Some(req) = app.pending_brief_edit.take() {
         let edited = edit_brief(handoff, &req.goal, editor);

@@ -232,12 +232,12 @@ finished work.
 setting, with its name, what it is set to, and what it governs.
 
 ```
-  Setting       Value                                 Enter opens the list
-  Theme         Catppuccin Mocha                    ▾ every colour the dashboard draws
-  Updates       0.1.6 · Enter to check              ▾ the version this dashboard runs
+  Setting       Value                      What it does
+  Theme         Catppuccin Mocha         ▾ every colour the dashboard draws
+  Updates       0.1.6 · not checked yet    the version this dashboard runs
 ```
 
-**Enter** on a row drops its list of values — every theme
+**Enter** on the Theme row drops its list of values — every theme
 [opaline](https://github.com/hyperb1iss/opaline) ships, by name, with `dark` or `light` beside it.
 The list opens on the value in force, marked `●`; `j`/`k` move, **Enter** applies the one under the
 cursor and writes it down, **Esc** closes the list and changes nothing. Nothing changes until that
@@ -267,26 +267,55 @@ through it, that is the trade — a light theme is unreadable without it.
 #### Checking for updates
 
 The **Updates** row says which pmtui you are running. It does not ask GitHub on its own — opening a
-screen should never block on the network — so the row starts at `Enter to check`. **Enter**, then
-**Enter** again on `Check now`, and it asks:
+screen should never block on the network — so it starts out saying it has not asked, and the keybar
+says what the one keypress will do:
 
 ```
-  Updates       0.1.6 → v0.1.7 (installed 0.1.4)  ▾ the version this dashboard runs
+  Setting       Value                      What it does
+  Theme         Catppuccin Mocha         ▾ every colour the dashboard draws
+  Updates       0.1.6 · not checked yet    the version this dashboard runs
+
+  Enter  Check for updates ·  ↑↓/jk  Move
 ```
 
-Now the list has a second row, `Update to v0.1.7`. Picking it hands the terminal to `install.sh` —
-the same installer you first ran — and you watch it download, verify and swap the binaries. The
-dashboard comes back when it finishes and says to restart: the new pmtui is on disk, but this
-process is still the old image.
+**Enter** asks. There is no list to open: the row has at most one sensible action at any moment, so
+`Enter` just does it and the keybar names it first.
+
+```
+  Updates       0.1.6 → v0.1.7 (installed 0.1.4)   the version this dashboard runs
+
+  Enter  Install it ·  ↑↓/jk  Move
+```
+
+**Enter** again hands the terminal to `install.sh` — the same installer you first ran — and you
+watch it download, verify and swap the binaries. Then pmtui **restarts itself** on the new build,
+because a replaced binary is no use to a process that is already loaded. Your `--registry` and
+`--socket` come back with it, and your agent terminals are untouched: they live in tmux, not in the
+dashboard.
+
+Every running `pmd` restarts itself too, within a tick or so, and each one does it on its own. A
+`pmd` owns one tmux socket, so you may have several, and the dashboard you updated from has no
+business reaching into another one's — so each daemon watches its own binary instead and becomes the
+new one when it is replaced. It does that between sweeps, never mid-nudge, and a daemon that cannot
+restart keeps driving on the old build rather than leaving your sessions unattended.
 
 The row answers a question a version number alone cannot. `(installed …)` appears only when the
 installer's own record disagrees with the binary you are running, which is what happens when
-`~/.local/bin` points at a local build — the reason an update can look like it did nothing. And
-"could not reach GitHub" is kept apart from "up to date", so a check that failed never reads as a
-check that passed.
+`~/.local/bin` points at a local build — the reason an update can look like it did nothing.
 
-If the row says `no installer at …`, this build did not come from `install.sh` (a `cargo build`, a
-package manager, a checkout). Nothing is wrong; it just has no installer to drive.
+Four different things can go wrong, and the row keeps them apart, because the fix for each is
+different:
+
+| What it says | What it means |
+|---|---|
+| `could not reach GitHub` | offline, a proxy, or a throttled API. Press Enter to retry. |
+| `no releases` | GitHub answered; this repository has published nothing. |
+| `installer too old to ask` | your `install.sh` predates `--check`. Enter updates it, which fixes it. |
+| `no installer at …` | this build did not come from `install.sh` — a `cargo build`, a package manager, a checkout. Nothing is wrong; there is just no installer to drive. |
+
+"Could not reach GitHub" is never shown for a problem that is not the network. That distinction is
+the point: being told your network is down when your installer is simply out of date sends you to
+debug the wrong machine.
 
 The row drives `install.sh` from `$XDG_DATA_HOME/agent-manager/install.sh` — the copy the installer
 keeps of itself — so the dashboard and `install.sh --check` always agree on what the newest release
