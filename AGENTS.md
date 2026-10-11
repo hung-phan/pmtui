@@ -127,7 +127,12 @@ server and daemon when the test ends.
 - Stopping pmd never kills project terminals. Pause, restart, and remove are
   explicit pmtui actions.
 - A human attach is detected by tmux clients plus a short-lived attach-intent
-  marker. Terminal liveness alone never means a human is present.
+  marker. Terminal liveness alone never means a human is present. An attach NEVER OUTLIVES ITS
+  pmtui: the foreground `tmux attach-session` carries `PR_SET_PDEATHSIG` (`arm_parent_death`),
+  because a child orphaned by a SIGKILLed dashboard keeps holding the client, and every
+  `has_clients` reader then sees a human who is gone — pmd defers every tick and `s` refuses, both
+  silently, which parked a live row 47h past its cadence. The marker expires; a client does not, so
+  only the kernel can release it. A released client never ends the agent's terminal.
 - Never auto-approve Codex directory trust or override host security hooks.
 - `decide_kind` remains byte-pure: only `Tier`, `StopKind`, and `RiskClass`.
 - The worker nudge is derived only from agent-authored inputs and fixed protocol

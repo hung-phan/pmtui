@@ -441,9 +441,61 @@ impl TmuxDriver {
     pub fn attach_command(&self, session: &str) -> Command {
         let mut c = self.base();
         c.arg("attach-session").arg("-t").arg(exact(session));
+        arm_parent_death(&mut c);
         c
     }
 }
+
+/// Tie the attach client's life to the pmtui that spawned it.
+///
+/// THE BUG THIS CLOSES. [`TmuxDriver::attach_interactive`] runs this command as a CHILD and waits
+/// on it, so pmtui cannot exit NORMALLY while the attach lives. Abnormal death is the hole: on
+/// `SIGKILL` the child is reparented to init and keeps holding the tmux client, and every consumer
+/// of [`Driver::has_clients`] then reads that corpse as a present human —
+/// `JobScheduler::human_present` defers every tick so a driven row is never nudged again, and
+/// `send_decision` refuses `s` with "attached there — type it in that pane". Measured live on
+/// 2026-10-10: a row sat 47h past a 6h cadence behind an orphan whose PPID was 1, on a tty whose
+/// own shell was still alive, so the pty never closed and never hung the orphan up.
+///
+/// `PR_SET_PDEATHSIG` makes the KERNEL deliver `SIGHUP` the moment the parent goes, which is the
+/// only agent that can act when pmtui is already gone — no reaper, no timeout, and nothing that
+/// has to guess whether a client is "really" a human. Measured: the normal `Ctrl+q` detach is
+/// byte-identical with the signal armed (`[detached (from session …)]`, exit 0); an orphaned
+/// attach instead exits `[lost tty]` and releases the client; and the project terminal survives
+/// both, which is the thing this must never break.
+///
+/// The `getppid` recheck closes the fork-to-prctl race: pmtui can die in that window, and the
+/// signal only fires on a death that happens AFTER it is armed. An already-reparented child would
+/// exec into exactly the orphan this prevents, so it fails the exec instead — which
+/// `attach_interactive` surfaces as an attach error and the dashboard reports.
+///
+/// Both calls are raw syscalls and therefore async-signal-safe, which `pre_exec` requires: it runs
+/// in the forked child, where touching an allocator or a lock a thread held at fork would deadlock.
+///
+/// Linux only. FreeBSD's `procctl(PROC_PDEATHSIG_CTL)` is equivalent but untested here, and macOS
+/// has no mechanism at all, so a darwin build keeps the pre-existing behaviour.
+#[cfg(target_os = "linux")]
+fn arm_parent_death(c: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: the closure runs between fork and exec and calls only `prctl` and `getppid` —
+    // two raw syscalls that allocate nothing and take no locks.
+    unsafe {
+        c.pre_exec(|| {
+            rustix::process::set_parent_process_death_signal(Some(rustix::process::Signal::HUP))?;
+            if rustix::process::getppid() == Some(rustix::process::Pid::INIT) {
+                return Err(std::io::Error::other(
+                    "the dashboard exited before the attach was armed",
+                ));
+            }
+            Ok(())
+        });
+    }
+}
+
+/// No parent-death signal on this platform: behave exactly as before. See the Linux version for
+/// what is being given up.
+#[cfg(not(target_os = "linux"))]
+fn arm_parent_death(_c: &mut Command) {}
 
 impl Driver for TmuxDriver {
     fn spawn_step(
