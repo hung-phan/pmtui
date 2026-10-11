@@ -383,6 +383,34 @@ pub(crate) fn drain_terminal_requests(
         });
         finish_pending_attach(app, &label, result);
     }
+    if std::mem::take(&mut app.pending_update) {
+        let script = app.installer_path.clone();
+        let args = crate::app::updates::update_args();
+        // The installer gets the REAL terminal, like `$EDITOR` and attach: it downloads, verifies a
+        // checksum, smoke-tests the binaries and may ask something, and a human who just asked to
+        // replace their own tools should watch that happen rather than stare at a frozen dashboard.
+        let status = with_terminal_handoff(
+            handoff,
+            Box::new(|| {
+                std::process::Command::new("bash")
+                    .arg(&script)
+                    .args(args)
+                    .status()
+                    .map_err(anyhow::Error::from)
+            }),
+        );
+        // A NEW BINARY IS NOT A NEW PROCESS. The replacement is on disk, but this pmtui is still
+        // the image that was loaded, so saying "updated" without "restart" would be a half-truth
+        // the human acts on. Deliberately NOT re-checking either: this process cannot report a
+        // version it is not running.
+        app.status = match status {
+            Ok(Ok(code)) if code.success() => {
+                "installer finished — restart pmtui to run the new version".into()
+            }
+            Ok(Ok(code)) => format!("installer exited {code}"),
+            Ok(Err(e)) | Err(e) => format!("could not run the installer: {e:#}"),
+        };
+    }
     if let Some(req) = app.pending_brief_edit.take() {
         let edited = edit_brief(handoff, &req.goal, editor);
         finish_pending_brief_edit(app, req, edited);

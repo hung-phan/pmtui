@@ -226,14 +226,15 @@ It asks the run to finish before it kills the terminal, so the child gets to cle
 child that had already reported keeps what it reported — a cancel that arrives late does not erase
 finished work.
 
-### Picking a theme (`0`)
+### Settings (`0`)
 
 `0` opens **Settings**, the third tab after Sessions and Tasks. It is a table: one row per
 setting, with its name, what it is set to, and what it governs.
 
 ```
-  Setting       Value                     Enter opens the list
-  Theme         Catppuccin Mocha        ▾ every colour the dashboard draws
+  Setting       Value                                 Enter opens the list
+  Theme         Catppuccin Mocha                    ▾ every colour the dashboard draws
+  Updates       0.1.6 · Enter to check              ▾ the version this dashboard runs
 ```
 
 **Enter** on a row drops its list of values — every theme
@@ -262,6 +263,35 @@ has no colour of its own. pmtui fills the whole frame with the theme's backgroun
 your terminal's show through, and an agent's transcript keeps the colours the agent chose while its
 "default colour" becomes the theme's. If you keep a translucent terminal and would rather see
 through it, that is the trade — a light theme is unreadable without it.
+
+#### Checking for updates
+
+The **Updates** row says which pmtui you are running. It does not ask GitHub on its own — opening a
+screen should never block on the network — so the row starts at `Enter to check`. **Enter**, then
+**Enter** again on `Check now`, and it asks:
+
+```
+  Updates       0.1.6 → v0.1.7 (installed 0.1.4)  ▾ the version this dashboard runs
+```
+
+Now the list has a second row, `Update to v0.1.7`. Picking it hands the terminal to `install.sh` —
+the same installer you first ran — and you watch it download, verify and swap the binaries. The
+dashboard comes back when it finishes and says to restart: the new pmtui is on disk, but this
+process is still the old image.
+
+The row answers a question a version number alone cannot. `(installed …)` appears only when the
+installer's own record disagrees with the binary you are running, which is what happens when
+`~/.local/bin` points at a local build — the reason an update can look like it did nothing. And
+"could not reach GitHub" is kept apart from "up to date", so a check that failed never reads as a
+check that passed.
+
+If the row says `no installer at …`, this build did not come from `install.sh` (a `cargo build`, a
+package manager, a checkout). Nothing is wrong; it just has no installer to drive.
+
+The row drives `install.sh` from `$XDG_DATA_HOME/agent-manager/install.sh` — the copy the installer
+keeps of itself — so the dashboard and `install.sh --check` always agree on what the newest release
+is. The launcher wrappers that same installer writes already check once a day on their own; set
+`AGENT_MANAGER_NO_UPDATE=1` if you would rather only ever update from this row.
 
 ### When something looks wrong
 
@@ -506,6 +536,9 @@ curl -fsSL https://raw.githubusercontent.com/hung-phan/pmtui/main/install.sh | b
 ... | bash -s -- --dir /usr/local/bin
 ... | bash -s -- --version v0.1.0
 ... | bash -s -- --no-wrapper
+
+# ask what is published without changing anything (what the Settings Updates row runs)
+... | bash -s -- --check
 
 # update now, or remove everything (your registry and project state are left alone)
 ... | bash -s -- --update

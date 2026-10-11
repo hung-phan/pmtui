@@ -485,6 +485,32 @@ phrase that says what the setting controls. The product offers only the values t
 A setting applies first and saves second. The product reports each failure apart from the other, because
 "It does not work" and "It will not continue after a restart" are different facts.
 
+A row of the Settings view MAY offer actions in place of values. An action runs on commit. The product
+MUST NOT write an action to the preferences, because a remembered action would run again at every start.
+
+### Updates
+
+The Settings view states the version that the dashboard runs. The person asks for a check; the product
+MUST NOT reach the network to draw a frame, because a stall there cannot be told from a dashboard that
+has stopped.
+
+The installer answers the question. The product asks it for the newest release and for the version that
+it last installed, and the product performs an update by running the installer. The product MUST NOT
+resolve a release on its own, because a second answer to "what is newest?" can disagree with the one
+that installs.
+
+- The product keeps "there is nothing newer", "nothing is published" and "the question could not be
+  asked" apart. To report the third as the first tells a person that they are current while their
+  network is down.
+- The product compares versions by number. A version that it cannot compare is a fact, never a verdict,
+  and the product still offers the update, because the installer decides and declines on its own.
+- The product names the version that the installer last installed WHEN that version disagrees with the
+  one running. That disagreement is why an update appears to do nothing on a machine whose binaries
+  point at a local build.
+- A build that no installer placed MUST say so, and MUST NOT report a check that failed.
+- The installer takes the terminal for an update, as an editor does. The product reports that a new
+  version is on disk and that this process still runs the old one.
+
 The preferences belong to the person. They sit beside the registry, so a scratch registry MUST NOT write
 over the preferences of the person. The product gives each field a default, so a file from another version
 still loads. The product reports a file that it cannot read, and MUST NOT replace it without a message.

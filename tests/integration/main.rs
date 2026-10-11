@@ -35,6 +35,7 @@ mod send_keys;
 mod send_message;
 mod session_switcher;
 mod settings_theme;
+mod settings_update;
 mod single_instance;
 mod spawn;
 mod stubs;

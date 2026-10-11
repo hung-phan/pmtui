@@ -148,7 +148,17 @@ server and daemon when the test ends.
   "default colour" as the theme's. No animated effects: a repaint happens because state
   changed.
 - A Settings row is one `SettingKind` variant plus its dropdown; neither the renderer nor
-  the key handler grows per setting.
+  the key handler grows per setting. A row may offer ACTIONS instead of a value, and an action
+  returns before the save — writing one to `pmtui.json` would make it a preference that runs at
+  every start. The dropdown's note is decoration and its LABEL is the content: the note column
+  yields, because a wordy note once took the whole width and the list drew its options as blanks.
+- `install.sh` IS THE AUTHORITY on versions. The `Updates` row runs `--check` (two lines, exit 0/10/
+  other) and `--update --if-newer -y`; it never resolves a release itself, because a second answer to
+  "what is newest?" can disagree with the one that installs. `src/bin/pmtui/update.rs` is pure and
+  owns the readings — "unreachable" is never "up to date", a tag it cannot compare is a fact and not
+  a verdict, and the installer's marker is named only when it disagrees with `RUNNING`. The installer
+  is resolved from `$XDG_DATA_HOME`/`$HOME` through `installer_in`, taken as arguments so both
+  branches are testable, and read ONCE into `App::installer_path`.
 - The three PROSE fields — Message, goal and directive — edit a `ratatui-textarea` buffer, seeded
   from what is already there. Route keys to it; do not reimplement motions, kills, wrapping or undo.
   `Enter` submits, so a newline is a chord, and `$EDITOR` is `^X^E` (which is what leaves `^E` free to
@@ -226,6 +236,9 @@ directory, so it works where `$HOME` is read-only.
 - `src/bin/pmtui/composer.rs`: the prose buffers' seam onto `ratatui-textarea` — which library call
   each key means, and nothing else. `src/bin/pmtui/input.rs`'s one-line `Field` backs the answer,
   cadence, rename and switcher fields, and the create form's rows.
+- `src/bin/pmtui/update.rs`: what the `Updates` row knows — parsing `install.sh --check` and
+  presenting it; pure, so every awkward state is tested without a network. `src/bin/pmtui/app/
+  updates.rs` is the half that runs the installer.
 - `src/bin/pmtui/`: dashboard state, actions, rendering, and terminal handoff.
 - `.agents/skills/`: canonical project-local skills; `.claude/skills/` contains compatibility
   symlinks only.

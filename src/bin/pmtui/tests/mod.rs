@@ -156,6 +156,7 @@ mod switcher;
 mod takeover;
 mod theming;
 mod undriven_activity;
+mod update;
 mod wake;
 
 #[derive(Default)]
@@ -661,6 +662,11 @@ fn app_with_driver(projects: Vec<ProjectView>, mode: UiMode, agent_tmux: Box<dyn
         board_detail_open: false,
         return_to_board_after_create: false,
         return_to_board_after_send: false,
+        update_status: crate::update::Status::Unchecked,
+        update_installed: None,
+        pending_check: false,
+        pending_update: false,
+        installer_path: std::path::PathBuf::from("/nonexistent/install.sh"),
         return_to_board_after_answer: false,
         return_to_board_after_switch: false,
         return_to_board_after_action: false,
@@ -1070,6 +1076,11 @@ fn creating_loop_app(
         board_detail_open: false,
         return_to_board_after_create: false,
         return_to_board_after_send: false,
+        update_status: crate::update::Status::Unchecked,
+        update_installed: None,
+        pending_check: false,
+        pending_update: false,
+        installer_path: std::path::PathBuf::from("/nonexistent/install.sh"),
         return_to_board_after_answer: false,
         return_to_board_after_switch: false,
         return_to_board_after_action: false,
