@@ -609,6 +609,195 @@ fn dialog_pane_escalates_on_the_first_tick_carrying_the_question_and_options() {
     );
 }
 
+#[test]
+fn a_dialog_raised_mid_cadence_escalates_without_waiting_out_the_whole_cadence() {
+    // THE BUG: a dialog is the ONE blocking state the agent cannot self-report — it is stuck
+    // inside its own turn, so it writes no marker. With the window parked in the future and the
+    // marker revision unchanged, `tick`'s Monitoring arm took its third branch
+    // (`Ok(JobTick::Monitoring { until })`) and NOTHING read the pane again until the cadence
+    // expired. The row kept showing the agent's last self-reported "working" for the rest of it —
+    // 20 minutes on a 1200s row, SIX HOURS on a 21600s one — while claude sat on the prompt.
+    //
+    // The human's workaround was `m` off/on, which is why this looked like an autopilot bug: that
+    // flip calls `start_driving_now`, bumping `control.wake_generation`, which `tick` turns into
+    // `Monitoring { until: now }` — instantly due, so the full `drive` finally reached the dialog
+    // check. User: *"claude still displays working instead of choosing the options. i have to turn
+    // autopilot on/off again with m"*.
+    //
+    // TWO ticks, because the watch DECIDES NOTHING: it only makes the row due, and the next sweep
+    // runs the full `drive` so the dialog is disposed in one place with the whole ordering in front
+    // of it. Letting the watch dispose the dialog itself is what parked a selection the supervisor
+    // had already made — see `JobScheduler::watch_for_dialog`.
+    const CADENCE: Epoch = 3600;
+    let (mut fx, sess) = marker_fx(Tier::Autopilot, |l| {
+        l.run = JobRun::Monitoring {
+            until: START + CADENCE,
+        };
+    });
+    fx.driver.set_tail(&sess, DIALOG_PANE);
+    assert!(
+        fx.clock.now() < START + CADENCE,
+        "sanity: these ticks must be MID-cadence, or they prove nothing"
+    );
+
+    assert_eq!(
+        fx.sched.tick(&fx.driver, &fx.clock).unwrap(),
+        JobTick::Monitoring { until: START },
+        "the watch must bring the row DUE (until == now), not wait out the cadence"
+    );
+    let out = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+
+    let JobTick::Escalated(ids) = &out else {
+        panic!(
+            "the woken sweep must dispose the dialog: {out:?} \
+             (the pane has been showing a prompt the whole time)"
+        );
+    };
+    let l = ledger(&fx);
+    assert_eq!(
+        l.run,
+        JobRun::Blocked {
+            stop_ids: ids.clone(),
+            since: START
+        },
+        "the dialog parks Blocked, so later ticks route to `on_blocked` and this probe cannot \
+         collapse the cadence"
+    );
+    assert_eq!(l.open_stops.len(), 1);
+    assert_eq!(
+        l.open_stops[0].question.as_deref(),
+        Some("Do you want to create hello.txt?"),
+        "the human must get the real question, not a stale 'working'"
+    );
+    assert!(
+        fx.driver.sent_keys().is_empty(),
+        "noticing a permission prompt must never answer it, and must never nudge"
+    );
+}
+
+#[test]
+fn the_mid_cadence_dialog_watch_is_throttled_and_then_catches_up() {
+    // The COST control, which is the whole reason this probe is allowed on a path that otherwise
+    // spends one `stat` per 500ms sweep. Without a throttle the daemon would run a `capture-pane`
+    // 120 times a minute per driven row — "the subprocess storm this function was written to
+    // avoid". The recovery half matters just as much: a bounded probe that never fires again
+    // would be the original bug with extra steps.
+    let (mut fx, sess) = marker_fx(Tier::Autopilot, |l| {
+        l.run = JobRun::Monitoring {
+            until: START + 3600,
+        };
+    });
+    fx.driver.set_tail(&sess, IDLE_PANE);
+    // Probe one: nothing on screen, and it spends the window.
+    assert!(matches!(
+        fx.sched.tick(&fx.driver, &fx.clock).unwrap(),
+        JobTick::Monitoring { .. }
+    ));
+
+    // The dialog appears one second later. Still inside the window, so it is NOT yet seen: the row
+    // stays parked at its ORIGINAL deadline rather than being brought due.
+    fx.driver.set_tail(&sess, DIALOG_PANE);
+    fx.clock.set(START + 1);
+    assert_eq!(
+        fx.sched.tick(&fx.driver, &fx.clock).unwrap(),
+        JobTick::Monitoring {
+            until: START + 3600
+        },
+        "a second probe inside DIALOG_WATCH_S must not happen — that is the storm"
+    );
+    assert!(ledger(&fx).open_stops.is_empty());
+
+    // Once the window elapses the same dialog is caught and the row is brought due...
+    fx.clock.set(START + DIALOG_WATCH_S);
+    assert_eq!(
+        fx.sched.tick(&fx.driver, &fx.clock).unwrap(),
+        JobTick::Monitoring {
+            until: START + DIALOG_WATCH_S
+        },
+        "the throttle must DELAY the wake by at most DIALOG_WATCH_S, never drop it"
+    );
+    // ...and the woken sweep is what disposes it.
+    let out = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+    assert!(
+        matches!(out, JobTick::Escalated(_)),
+        "the woken sweep must dispose the dialog: {out:?}"
+    );
+}
+
+#[test]
+fn the_mid_cadence_dialog_watch_never_spawns_a_second_consult_for_the_same_dialog() {
+    // TOKENS. The watch reads the pane and parses it — no model anywhere, and it cannot consult:
+    // it only makes the row due. The consult is spawned by the woken `drive`, which reaches 3a only
+    // after `advise_step` has had its say, and THAT is what makes a second consult impossible.
+    //
+    // This pins the property rather than the plumbing, because the plumbing already got it wrong
+    // once: an earlier shape of the watch called the disposer directly, with no `advise_step` in
+    // front of it, so a dialog left on screen would have bought a fresh PAID decider process every
+    // `DIALOG_WATCH_S` for as long as it sat there.
+    let (mut fx, sess) = marker_fx(Tier::Autopilot, |l| {
+        l.run = JobRun::Monitoring {
+            until: START + 3600,
+        };
+    });
+    write_goal(
+        &fx,
+        "Keep the changelog tooling consistent; dprint is already vendored.",
+    );
+    fx.driver.set_tail(&sess, CHOICE_DIALOG_PANE);
+
+    // Tick one wakes the row; tick two is the sweep that consults.
+    let _ = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+    assert_eq!(
+        fx.driver.spawn_count(),
+        0,
+        "the watch itself must never launch a decider — it decides nothing"
+    );
+    let _ = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+    let after_first = fx.driver.spawn_count();
+    assert_eq!(
+        after_first, 1,
+        "the woken sweep should consult the decider ONCE for a delegable choice"
+    );
+
+    // Several more windows elapse with the same dialog still on screen and no verdict yet.
+    for step in 1..=3 {
+        fx.clock.set(START + DIALOG_WATCH_S * step);
+        let _ = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+        let _ = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+    }
+    assert_eq!(
+        fx.driver.spawn_count(),
+        after_first,
+        "a dialog still waiting on a verdict must not buy another consult every {DIALOG_WATCH_S}s"
+    );
+}
+
+#[test]
+fn the_mid_cadence_dialog_watch_defers_to_a_human_at_the_pane() {
+    // Parity with step 3a, whose ordering puts the dialog check AFTER the human-present defer
+    // gate: someone sitting at the pane can just answer the prompt, and parking a stop on a
+    // decision they are already looking at is exactly what that gate prevents. A mid-cadence
+    // probe must not acquire a second opinion about that.
+    let (mut fx, sess) = marker_fx(Tier::Autopilot, |l| {
+        l.run = JobRun::Monitoring {
+            until: START + 3600,
+        };
+    });
+    fx.driver.set_tail(&sess, DIALOG_PANE);
+    fx.driver.set_clients(&sess, true);
+
+    let out = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+
+    assert!(
+        matches!(out, JobTick::Monitoring { .. }),
+        "a human owns this pane; the watch consumes nothing: {out:?}"
+    );
+    assert!(
+        ledger(&fx).open_stops.is_empty(),
+        "no stop is parked on a dialog the human is already looking at"
+    );
+}
+
 fn answer_dialog(fx: &Fx, stop_id: &str, answer: &str, now: Epoch) {
     state::append_answer(
         &fx.paths,
