@@ -189,36 +189,6 @@ pub(crate) const DIALOG_STUB: &str = "#!/bin/sh\n\
      printf ' Do you want to create hello.txt?\\n \\342\\235\\257 1. Yes\\n   2. No\\n\\n Esc to cancel\\n'\n\
      while IFS= read -r l; do printf 'LEAKED %s\\n' \"$l\"; done\n";
 
-/// A `claude` stub that raises its dialog only AFTER it has been nudged — the one shape that can
-/// reproduce a MID-CADENCE dialog.
-///
-/// [`DIALOG_STUB`] cannot: it paints the dialog at launch, so pmd's very first drive (a freshly
-/// created row is due immediately) reaches step 3a and parks the stop. A test built on it passes
-/// with the mid-cadence watch disabled — measured, not assumed, which is how this stub came to
-/// exist.
-///
-/// The ordering here is CAUSAL rather than timed, which is what makes it reliable: a nudge can only
-/// arrive after pmd confirmed the pane idle twice and parked `Monitoring{now + cadence}`, so the
-/// dialog provably appears inside that window. A `sleep`-based stub would be racing the cadence
-/// instead of ordering against it.
-///
-/// Prints the dialog exactly ONCE — a second copy would put two option blocks in
-/// `classify_dialog`'s tail window — then consumes the rest of the pasted nudge silently and blocks
-/// forever, so the pane never dies and `pane_dead` can never be the thing that escalates.
-///
-/// `stty -echo` IS LOAD-BEARING, and was measured the hard way. Without it the tty echoes the ~4KB
-/// nudge while the stub is already printing, so the dialog's lines are spliced THROUGH the echoed
-/// prompt — `…it is your only chan Do you want to create hello.txt?` / `nel to the human… ❯ 1. Yes`
-/// — and `classify_dialog` finds no coherent block, failing the test for a reason that has nothing
-/// to do with the product. Echo off is also the more faithful model: a real engine redraws its own
-/// UI, it does not raw-echo a paste across its own output.
-pub(crate) const NUDGE_THEN_DIALOG_STUB: &str = "#!/bin/sh\n\
-     stty -echo 2>/dev/null\n\
-     printf '\\342\\235\\257 \\n'\n\
-     IFS= read -r _first\n\
-     printf ' Do you want to create hello.txt?\\n \\342\\235\\257 1. Yes\\n   2. No\\n\\n Esc to cancel\\n'\n\
-     while IFS= read -r _rest; do :; done\n";
-
 pub(crate) fn write_stub(fx: &EnterFixture, body: &str) {
     use std::os::unix::fs::PermissionsExt;
     let stub = fx.dir.path().join("bin/claude");

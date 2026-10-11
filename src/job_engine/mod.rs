@@ -161,12 +161,6 @@ pub struct JobScheduler {
     /// observable progress and rebases `busy_since`; volatile spinner/footer counters are excluded.
     /// In-memory only, so a daemon restart conservatively starts a fresh inactivity window.
     last_busy_progress_fingerprint: Option<u64>,
-    /// When the MID-CADENCE dialog watch last read the pane, throttling it to one capture per
-    /// [`drive::DIALOG_WATCH_S`] (see [`JobScheduler::watch_for_dialog`] for why a parked tick has
-    /// to look at all). In-memory only, mirroring `busy_since`: a lost value after a daemon restart
-    /// just means the first tick probes, which is the fail-safe direction here — the risk this
-    /// bounds is a subprocess storm, not an early escalation.
-    last_dialog_watch: Option<Epoch>,
     /// Confirmation gate counter: how many CONSECUTIVE `PaneActivity::Idle` observations
     /// the heartbeat has seen since the last nudge / Busy observation / human touch. The
     /// `drive` Idle arm only nudges once this reaches
@@ -339,7 +333,6 @@ impl JobScheduler {
             max_wall_clock_s: DEFAULT_MAX_WALL_CLOCK_S,
             window_start: None,
             busy_since: None,
-            last_dialog_watch: None,
             last_busy_progress_fingerprint: None,
             idle_confirmations: 0,
             last_idle_fingerprint: None,
@@ -597,21 +590,6 @@ impl JobScheduler {
                     // cadence (the daemon sweeps every 500ms, so falling into the full
                     // nudge path here would collapse the cadence — regression I1).
                     self.drive_marker_only(driver, now, &ledger, &config, until)
-                } else if let Some(tick) = self.watch_for_dialog(driver, now) {
-                    // The stat above cannot see the ONE blocking state the agent never writes a
-                    // marker for: a dialog it is stuck inside its own turn on. Without this arm the
-                    // match fell straight through to the parked timer below, so nothing read the
-                    // pane until the cadence expired — up to six hours on a 21600s row, with the
-                    // row still reporting the agent's last "working".
-                    //
-                    // It DECIDES nothing: it makes the row due and returns, so the next sweep takes
-                    // the `now >= until` branch above and `drive` disposes the dialog with its whole
-                    // ordering in front of it. Two earlier shapes of this were wrong — folding it
-                    // into `drive_marker_only`'s condition gave a parked tick that function's
-                    // `ensure_session` side effect, and letting it dispose the dialog itself let it
-                    // park a selection the supervisor had already made. See
-                    // `JobScheduler::watch_for_dialog` for both.
-                    Ok(tick)
                 } else {
                     Ok(JobTick::Monitoring { until })
                 }

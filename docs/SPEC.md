@@ -529,12 +529,6 @@ A person who attaches to a session, or who types into it, owns the input of the 
 the supervisor MUST NOT type, MUST NOT submit a choice, and MUST NOT send an automatic answer. The work
 and the answers that wait stay saved until the automation can continue safely.
 
-That ownership MUST end when the person does. An attachment MUST NOT outlive the dashboard that opened
-it, however that dashboard ends, including a death it cannot clean up after. A dashboard that is gone
-MUST NOT leave a session owned: an ownership nobody holds stops the automation for as long as it lasts
-and refuses the person's own messages, and it reports neither, so the session simply stops advancing.
-The session's terminal and its agent MUST survive the release.
-
 The product MUST serialize all automatic input to a terminal. The last checks for a person and for a live
 terminal MUST cover the complete submission.
 
@@ -557,14 +551,6 @@ A live process is not proof of work. The product separates these states:
 
 The product treats terminal activity that is not clear as work. It MUST NOT treat the last frame of a dead
 terminal as an idle prompt.
-
-A worker blocked on a choice in its terminal is the one blocked state the worker cannot report, because it
-is stopped inside its own turn. The product MUST NOT rely on a report to find it, and MUST NOT wait out the
-session's whole check interval before looking: a long interval is a statement about how often the worker
-needs prompting, never about how long a person may be left believing it is at work. So the product MUST
-notice such a choice within a short, bounded time of it appearing, whatever the interval is set to, and MUST
-then say what it is waiting for. Looking for it MUST NOT prompt the worker, change the interval, or start
-anything, and it MUST leave the choice to the person when one is already at the terminal.
 
 An accepted monitoring report means that the worker gave up that wake. The dashboard MUST show the next
 check after the terminal is stably idle, even if an optional turn-end signal did not arrive. The

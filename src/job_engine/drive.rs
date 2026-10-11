@@ -74,21 +74,6 @@ pub(super) const MARKER_LESS_RECHECK_MAX: u32 = 3;
 /// question, and the nudge it was sent asks it to report EACH wake.
 pub(super) const REPORT_DEBT_CEILING_S: i64 = 2700;
 
-/// How often the MID-CADENCE path may read the pane looking for a blocking dialog.
-///
-/// A dialog is the one blocking state the agent cannot self-report, so it is the one state the
-/// cheap marker fast-path cannot see (see [`JobScheduler::watch_for_dialog`]). The cadence cannot
-/// be the gate for noticing it: the live rows this was measured against sit on 1200s and 21600s.
-///
-/// 10 seconds is the whole budget this costs. The sweep is 500ms, so one probe per 20 sweeps: TWO
-/// tmux calls, `list-clients` for the human gate and `capture-pane` for the pane, so 12 per minute
-/// per driven row. Measured on the dev box at 2.38ms and 2.48ms, i.e. ~0.05% of a core per row,
-/// against a path whose doc rightly warns that a per-sweep subprocess is "the subprocess storm
-/// this function was written to avoid". For scale, the same file already accepts a `has_clients`
-/// probe on EVERY sweep while a human is attached — ten times this, documented as "accepted
-/// Minor". The latency it buys back is a human-scale pause instead of a whole cadence of silence.
-pub(super) const DIALOG_WATCH_S: i64 = 10;
-
 impl JobScheduler {
     /// The DRIVE path (design §2.3), run for `Idle`, a due `Monitoring`, and the
     /// `Running` re-drive. In order:
@@ -318,7 +303,78 @@ impl JobScheduler {
                 // 2.5, which keeps its precedence: the agent's own written
                 // self-assessment outranks anything we infer from pixels.
                 if let Some(dialog) = tmux::classify_dialog(&capture) {
-                    return self.dispose_pane_dialog(driver, now, base, config, dialog);
+                    let policy_decision = crate::policy::decide_kind(
+                        config.autonomy,
+                        StopKind::Ambiguity,
+                        RiskClass::Medium,
+                    );
+                    let authority_marker =
+                        crate::advise::hard_floor_hit_in(&dialog.question, &dialog.options);
+                    if policy_decision == crate::policy::Decision::AutoFlow
+                        && dialog.class == tmux::PaneDialogClass::DelegableChoice
+                        && authority_marker.is_none()
+                        && let Some(tick) = self.spawn_dialog_advice(
+                            driver,
+                            now,
+                            base,
+                            dialog.clone(),
+                            config.decider_engine,
+                            config.decider_model.as_deref(),
+                        )?
+                    {
+                        return Ok(tick);
+                    }
+                    let reason = if policy_decision != crate::policy::Decision::AutoFlow {
+                        "tier policy requires human ownership; no decider was called".into()
+                    } else if let Some(marker) = authority_marker {
+                        format!(
+                            "terminal authority guard matched `{marker}`; no decider was called"
+                        )
+                    } else if dialog.class != tmux::PaneDialogClass::DelegableChoice {
+                        "terminal dialog classification requires human ownership; no decider was \
+                         called"
+                            .into()
+                    } else if dialog.selected_index.is_none() {
+                        "terminal dialog has no stable selected option; no decider was called"
+                            .into()
+                    } else {
+                        "decider unavailable or dialog not safely consultable; no decider was called"
+                            .into()
+                    };
+                    let human_owned_surface = authority_marker.is_some()
+                        || dialog.class != tmux::PaneDialogClass::DelegableChoice
+                        || dialog.selected_index.is_none();
+                    let audit_kind = if human_owned_surface {
+                        StopKind::Capability
+                    } else {
+                        StopKind::Ambiguity
+                    };
+                    let audit_risk = if human_owned_surface {
+                        RiskClass::Hard
+                    } else {
+                        RiskClass::Medium
+                    };
+                    let mut audited = base.clone();
+                    self.record_decider_skip(
+                        &mut audited,
+                        now,
+                        DeciderSkip {
+                            engine: config.decider_engine,
+                            model: config.decider_model.as_deref(),
+                            target: job::DeciderTarget::Dialog,
+                            question: &dialog.question,
+                            options: &dialog.options,
+                            policy: job::DeciderPolicy {
+                                kind: audit_kind,
+                                labelled_risk: RiskClass::Medium,
+                                effective_risk: audit_risk,
+                            },
+                            reason,
+                            reported_kind: None,
+                            effect: None,
+                        },
+                    );
+                    return self.park_dialog(now, &audited, dialog);
                 }
                 match tmux::classify_pane(&capture) {
                     PaneActivity::Idle => self.idle_observed(driver, now, base, &capture),
@@ -840,163 +896,6 @@ impl JobScheduler {
                 Ok(JobTick::Monitoring { until })
             }
         }
-    }
-
-    /// Turn a dialog found on the pane into a consult or an escalation: step 3a's body, lifted out
-    /// of an already-deep `match` arm. Auto-flow consults the decider ONLY for a `DelegableChoice`
-    /// with no authority marker; every other shape is recorded as a skip and parked for the human.
-    ///
-    /// CALLED FROM THE DUE PATH ONLY, and that is a safety property rather than an accident.
-    /// [`JobScheduler::watch_for_dialog`] deliberately does NOT call this: it only makes the row
-    /// due, so every dialog decision still runs here with `drive`'s full ordering in front of it.
-    /// Calling it directly from a mid-cadence tick is what broke
-    /// `job_scheduler::supervisor_selects_a_live_multi_choice_end_to_end_over_real_tmux` — the
-    /// watch fired just after a verdict had been applied and the keys sent, found the dialog still
-    /// painted and no consult in flight, and PARKED it, overwriting the selection audit with
-    /// "attach to the session and answer it there". Parking is `Blocked`, so that silently converted
-    /// a completed automatic selection into a decision the human had to make by hand.
-    fn dispose_pane_dialog(
-        &mut self,
-        driver: &dyn Driver,
-        now: Epoch,
-        base: &AgentLoopState,
-        config: &Config,
-        dialog: tmux::PaneDialog,
-    ) -> Result<JobTick> {
-        let policy_decision =
-            crate::policy::decide_kind(config.autonomy, StopKind::Ambiguity, RiskClass::Medium);
-        let authority_marker = crate::advise::hard_floor_hit_in(&dialog.question, &dialog.options);
-        if policy_decision == crate::policy::Decision::AutoFlow
-            && dialog.class == tmux::PaneDialogClass::DelegableChoice
-            && authority_marker.is_none()
-            && let Some(tick) = self.spawn_dialog_advice(
-                driver,
-                now,
-                base,
-                dialog.clone(),
-                config.decider_engine,
-                config.decider_model.as_deref(),
-            )?
-        {
-            return Ok(tick);
-        }
-        let reason = if policy_decision != crate::policy::Decision::AutoFlow {
-            "tier policy requires human ownership; no decider was called".into()
-        } else if let Some(marker) = authority_marker {
-            format!("terminal authority guard matched `{marker}`; no decider was called")
-        } else if dialog.class != tmux::PaneDialogClass::DelegableChoice {
-            "terminal dialog classification requires human ownership; no decider was called".into()
-        } else if dialog.selected_index.is_none() {
-            "terminal dialog has no stable selected option; no decider was called".into()
-        } else {
-            "decider unavailable or dialog not safely consultable; no decider was called".into()
-        };
-        let human_owned_surface = authority_marker.is_some()
-            || dialog.class != tmux::PaneDialogClass::DelegableChoice
-            || dialog.selected_index.is_none();
-        let audit_kind = if human_owned_surface {
-            StopKind::Capability
-        } else {
-            StopKind::Ambiguity
-        };
-        let audit_risk = if human_owned_surface {
-            RiskClass::Hard
-        } else {
-            RiskClass::Medium
-        };
-        let mut audited = base.clone();
-        self.record_decider_skip(
-            &mut audited,
-            now,
-            DeciderSkip {
-                engine: config.decider_engine,
-                model: config.decider_model.as_deref(),
-                target: job::DeciderTarget::Dialog,
-                question: &dialog.question,
-                options: &dialog.options,
-                policy: job::DeciderPolicy {
-                    kind: audit_kind,
-                    labelled_risk: RiskClass::Medium,
-                    effective_risk: audit_risk,
-                },
-                reason,
-                reported_kind: None,
-                effect: None,
-            },
-        );
-        self.park_dialog(now, &audited, dialog)
-    }
-
-    /// Whether the mid-cadence dialog watch is due. Read by `tick`'s `Monitoring` arm, which
-    /// otherwise returns the parked timer without looking at anything.
-    pub(super) fn dialog_watch_due(&self, now: Epoch) -> bool {
-        self.last_dialog_watch
-            .is_none_or(|last| now.saturating_sub(last) >= DIALOG_WATCH_S)
-    }
-
-    /// Look for a blocking dialog BETWEEN cadences, at most once per [`DIALOG_WATCH_S`].
-    ///
-    /// THE BUG THIS CLOSES. A dialog is the one blocking state the agent CANNOT self-report: it is
-    /// stuck inside its own turn, so it writes no marker, so `marker_revision_advanced()` is false
-    /// and `tick`'s `Monitoring` arm fell through to `Ok(JobTick::Monitoring { until })` — nothing
-    /// read the pane again until the cadence expired. Step 3a's comment promises a dialog escalates
-    /// "immediately"; that was only ever true of a tick that REACHED 3a, and a parked tick does
-    /// not. Measured against live cadences, the silence ran from 20 minutes (a 1200s row) to SIX
-    /// HOURS (a 21600s one), with the row still showing the agent's last self-reported "working" —
-    /// the newest thing anyone knew. The human's workaround was `m` off/on, which looks like an
-    /// autopilot bug but is really `start_driving_now` bumping `wake_generation` so the window
-    /// becomes due and the full `drive` finally runs.
-    ///
-    /// IT DECIDES NOTHING. All it does is make the row DUE, so the next sweep runs the full
-    /// [`JobScheduler::drive`] and every dialog decision happens there, in one place, with the whole
-    /// ordering in front of it — the human-present gate, `ensure_session`, `budget_backstop`, the
-    /// marker disposer, `advise_step` (which owns an in-flight consult) and the dead-pane probe —
-    /// before step 3a disposes anything. This is EXACTLY the human's own workaround automated: `m`
-    /// off/on works because `start_driving_now` bumps `wake_generation` and `tick` turns that into
-    /// `Monitoring { until: now }`.
-    ///
-    /// IT USED TO DISPOSE THE DIALOG ITSELF, and that was wrong in a way no unit test caught.
-    /// `job_scheduler::supervisor_selects_a_live_multi_choice_end_to_end_over_real_tmux` failed:
-    /// the consult had already run and the keys had already been sent, the pane still showed the
-    /// dialog for a moment, and the watch — finding no consult in flight, because it had just
-    /// finished — PARKED it, overwriting the selection audit with "attach to the session and answer
-    /// it there". Parking is `Blocked`, so a completed automatic selection silently became a
-    /// decision the human had to make by hand. A second decision path racing the first cannot be
-    /// made safe by adding guards to it; it has to stop being a second decision path.
-    ///
-    /// WHY IT CANNOT COLLAPSE THE CADENCE (regression I1, which `drive_marker_only` exists to
-    /// prevent): it wakes the row ONLY when a dialog is actually on screen, and a dialog pane has no
-    /// bare prompt, so `classify_pane` calls it `Busy` and the woken `drive` takes
-    /// `busy_pane_recheck` — no nudge. 3a parks `Blocked` first anyway, after which every tick
-    /// routes to `on_blocked` and never comes back here.
-    ///
-    /// WHY IT IS THROTTLED. This path otherwise costs one `stat` per 500ms sweep, and its own doc
-    /// warns that "adding a subprocess to a path that currently costs one `stat` would be the
-    /// subprocess storm this function was written to avoid". The stamp advances even when the
-    /// capture FAILS, so an unreadable pane costs the same bounded rate rather than one probe per
-    /// sweep.
-    pub(super) fn watch_for_dialog(&mut self, driver: &dyn Driver, now: Epoch) -> Option<JobTick> {
-        if !self.dialog_watch_due(now) {
-            return None;
-        }
-        // Stamped BEFORE the probes below so every exit — deferred, unreadable, or woken — costs
-        // the same bounded rate.
-        self.last_dialog_watch = Some(now);
-        // Parity with step 3a's documented ordering: a human at the pane answers the dialog
-        // themselves, and `drive` would defer to them on the very next tick anyway. Consumes
-        // nothing.
-        if self.human_present(driver, now) {
-            return None;
-        }
-        // A capture error is NOT evidence of anything (constraint: transient tmux errors defer),
-        // and this path runs no dead-pane probe, so there is nothing to act on. A session that is
-        // not alive simply fails to capture.
-        let capture = driver.capture_tail(&self.loop_session(), 40).ok()?;
-        tmux::classify_dialog(&capture)?;
-        // Due NOW. `self.run` is the in-memory authority `tick` matches on, so this needs no ledger
-        // write — pmd stays the sole ledger writer and nothing is consumed here.
-        self.run = JobRun::Monitoring { until: now };
-        Some(JobTick::Monitoring { until: now })
     }
 
     /// Whether a human is chatting this conversation (`chat_lock`) or attached to the
