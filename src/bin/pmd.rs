@@ -452,6 +452,13 @@ where
     // Every terminal pmd launches names the `pmtui` beside this executable (or omits
     // PMTUI_BIN when there is none), resolved once here rather than per launch.
     let mut daemon = daemon.with_pmtui_bin(agent_manager::tmux::pmtui_bin_for_current_process());
+    // WHICH BUILD THIS IS, as a file rather than a version string. An update replaces the binaries
+    // and nothing more, so a daemon that keeps running drives with the old code while the dashboard
+    // reports the new one. Nobody can tell this process to restart — one pmd owns one socket, so
+    // there may be several and no dashboard has authority over another pair's daemon (user: *"after
+    // we update, all the pmd would need to be restarted"*) — so it watches its own executable.
+    let exe = agent_manager::selfexec::current_exe();
+    let build = agent_manager::selfexec::identity(&exe);
     loop {
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             anyhow::bail!("pmd run exceeded its test deadline");
@@ -470,6 +477,13 @@ where
             eprintln!("{message}");
             break;
         }
+        // BETWEEN SWEEPS, which is the only safe moment: a sweep owns `input.lock` across its pane
+        // recheck, paste and Enter, and replacing the image mid-nudge would drop that lock between
+        // the paste and the Enter. Here nothing is in flight, and the next image rebuilds its own
+        // view from `state.json` exactly as any restarted pmd does.
+        // Returns only when nothing happened or the restart failed, and logs either way — so this
+        // stays one statement with no branch for a test to be unable to reach.
+        agent_manager::selfexec::refresh_or_log(&exe, build, "pmd");
         std::thread::sleep(Duration::from_millis(args.tick_ms));
         reload_registry(&args.registry, &mut reg);
     }

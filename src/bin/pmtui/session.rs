@@ -383,6 +383,53 @@ pub(crate) fn drain_terminal_requests(
         });
         finish_pending_attach(app, &label, result);
     }
+    if std::mem::take(&mut app.pending_update) {
+        let script = app.installer_path.clone();
+        let args = crate::app::updates::update_args();
+        // The installer gets the REAL terminal, like `$EDITOR` and attach: it downloads, verifies a
+        // checksum, smoke-tests the binaries and may ask something, and a human who just asked to
+        // replace their own tools should watch that happen rather than stare at a frozen dashboard.
+        let status = with_terminal_handoff(
+            handoff,
+            Box::new(|| {
+                std::process::Command::new("bash")
+                    .arg(&script)
+                    .args(args)
+                    .status()
+                    .map_err(anyhow::Error::from)
+            }),
+        );
+        // A NEW BINARY IS NOT A NEW PROCESS. The replacement is on disk, but this pmtui is still
+        // the image that was loaded — and `pmd` is still the old one too. So a success does not
+        // report and stop; it queues the refresh that finishes the job.
+        match status {
+            Ok(Ok(code)) if code.success() => {
+                app.pending_relaunch = true;
+                app.status = "installed — restarting pmtui".into();
+            }
+            Ok(Ok(code)) => app.status = format!("installer exited {code}"),
+            Ok(Err(e)) | Err(e) => app.status = format!("could not run the installer: {e:#}"),
+        }
+    }
+    if std::mem::take(&mut app.pending_relaunch) {
+        // SUSPEND FIRST, and never restore on the success path: there is no process left to restore
+        // for. The new pmtui builds its own screen from the cooked terminal this leaves behind.
+        let suspended = handoff.suspend();
+        // NOTHING IS DONE TO pmd HERE. Every pmd watches its own executable and replaces itself, so
+        // the daemons this dashboard never started are covered too — and one mechanism cannot race
+        // another for the same singleton lock.
+        let failure = agent_manager::selfexec::relaunch(&app.relaunch_exe);
+        // Still here, so the exec failed. The update DID land, and saying otherwise would send
+        // someone looking for a problem with the install.
+        let _ = handoff.restore();
+        app.status = format!(
+            "the new version is installed, but this pmtui could not restart itself \
+             ({failure}) — quit and reopen it"
+        );
+        if let Err(e) = suspended {
+            app.status = format!("{} (terminal: {e:#})", app.status);
+        }
+    }
     if let Some(req) = app.pending_brief_edit.take() {
         let edited = edit_brief(handoff, &req.goal, editor);
         finish_pending_brief_edit(app, req, edited);

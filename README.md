@@ -53,8 +53,9 @@ runtime and managed launches need **tmux 3.0 or newer**; the installer tells you
 prints the one line to add.
 
 Installed commands are thin wrappers that check for updates in the background at most once a day
-and run the real binary immediately, so opening is never blocked. Updating, uninstalling, pinning
-a version and source-only builds are all flags on the same script — see
+and run the real binary immediately, so opening is never blocked. You can also ask from inside the
+dashboard, on the **Updates** row of Settings. Updating, uninstalling, pinning a version and
+source-only builds are all flags on the same script — see
 [the installer FAQ](docs/GUIDE.md#faq).
 
 ## Quick start
@@ -82,9 +83,10 @@ In the dashboard:
    session a goal with **`g`** — it is the direction every nudge steers by.
 4. **`1`**, **`2`** and **`0`** switch views: **Sessions**, the terminal-first list with the selected
    session's transcript beside it, **Tasks**, the same sessions as cards in Paused, Needs You,
-   Pending, Autopilot and Working columns, and **Settings**, a table of preferences where **Enter**
-   opens a row's dropdown — today that is the theme, from the 38 `opaline` ships. The active view is
-   the underlined tab in the header.
+   Pending, Autopilot and Working columns, and **Settings**, a table of preferences — the theme,
+   from the 38 `opaline` ships, and **Updates**, which says which pmtui you are running and, in one
+   keypress, installs a newer one and restarts onto it. The active view is the underlined tab in
+   the header.
 5. **`s`** sends one message without taking over the terminal, or answers an open decision.
    **`?`** lists every key.
 

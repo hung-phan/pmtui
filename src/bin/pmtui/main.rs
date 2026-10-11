@@ -131,6 +131,7 @@ mod spawn_cli;
 mod spawn_status;
 mod status_log;
 mod takeover;
+mod update;
 
 pub(crate) use crate::app::*;
 pub(crate) use crate::bindings::*;
@@ -593,6 +594,10 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     let mut last_refresh = std::time::Instant::now();
     loop {
         terminal.draw(|f| render(f, app))?;
+        // AFTER the draw, because the frame above is the one that says "checking…": a check blocks
+        // this loop for as long as `install.sh` takes, and a dashboard that stops repainting with no
+        // explanation is indistinguishable from one that has died.
+        crate::app::updates::drain_pending_check(app);
         // Handle at most one key per iteration. Crucially, do NOT refresh() on every
         // iteration: event::poll returns immediately while input is queued, so a
         // per-iteration refresh would shell `tmux has-session` per interactive

@@ -14,6 +14,7 @@
 # Subcommands / flags:
 #   (default)            install (or reinstall) the latest version
 #   --update             update to the latest version (alias: `update`)
+#   --check              print `current=<tag>` and `latest=<tag>` and change nothing (alias: `check`)
 #   --uninstall          remove everything this installer put on disk (alias: `uninstall`)
 #   --version <tag>      install a specific release tag, e.g. --version v0.1.0
 #   --dir <path>         directory for the `pmd`/`pmtui` commands (default: ~/.local/bin)
@@ -148,10 +149,29 @@ detect_platform() {
 # Where `releases/latest` redirects to. A repository WITH releases lands on
 # `/releases/tag/<tag>`; one with none lands on `/releases`. Plain HTTP, not the REST API, so it is
 # not subject to the API's unauthenticated hourly limit.
+# BOUNDED on purpose. The dashboard's Settings row runs `--check` inline on its event loop, so an
+# unbounded wait here would read on screen as a frozen pmtui. Ten seconds is generous for one
+# redirect and still short enough that a dead network feels like an answer rather than a hang; the
+# caller treats the failure as "could not reach GitHub", which is the truth.
 latest_tag_url() {
-  if have curl; then curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest"
-  elif have wget; then wget -qO /dev/null --max-redirect=5 "https://github.com/$REPO/releases/latest" 2>&1 \
+  if have curl; then curl -fsSL -m 10 -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest"
+  elif have wget; then wget -qO /dev/null --timeout=10 --tries=1 --max-redirect=5 "https://github.com/$REPO/releases/latest" 2>&1 \
     | sed -nE 's#^Location: (https://[^ ]*).*#\1#p' | tail -n1
+  else die "need curl or wget to download"
+  fi
+}
+
+# The REST API fallback for `latest_tag`, on stdout.
+#
+# BOUNDED LIKE ITS SIBLING, and a separate function for exactly that reason: this used to call the
+# unbounded `fetch`, which left the ten-second cap above covering only HALF the path — a blackholed
+# network got ten seconds for the redirect and then waited forever on the API, so `--check` could
+# hang the dashboard that runs it. `fetch` itself must stay unbounded: it also downloads tarballs,
+# and `curl -m` caps TOTAL time, which would abort a slow but perfectly healthy download.
+latest_tag_api() {
+  local url="https://api.github.com/repos/$REPO/releases/latest"
+  if have curl; then curl -fsSL -m 10 "$url"
+  elif have wget; then wget -qO- --timeout=10 --tries=1 "$url"
   else die "need curl or wget to download"
   fi
 }
@@ -182,7 +202,7 @@ latest_tag() {
   fi
   # The redirect did not resolve (old wget, a proxy that rewrites it). Try the API, which may well
   # be throttled — but a throttled API is still worth asking before giving up.
-  tag="$(fetch "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+  tag="$(latest_tag_api 2>/dev/null \
     | grep -m1 '"tag_name"' \
     | sed -E 's/.*"tag_name" *: *"([^"]+)".*/\1/')"
   [ -n "$tag" ] || return 1
@@ -195,6 +215,7 @@ parse_args() {
     case "$1" in
       install)           ACTION="install" ;;
       update|--update)   ACTION="update" ;;
+      check|--check)     ACTION="check" ;;
       uninstall|--uninstall) ACTION="uninstall" ;;
       --version)         shift; REQ_VERSION="${1:-}"; [ -n "$REQ_VERSION" ] || die "--version needs a tag" ;;
       --dir)             shift; BIN_DIR="${1:-}"; [ -n "$BIN_DIR" ] || die "--dir needs a path" ;;
@@ -562,6 +583,31 @@ Uninstall any time:  curl -fsSL https://raw.githubusercontent.com/$REPO/main/ins
 EOF
 }
 
+# Report what is installed and what is newest, and change NOTHING.
+#
+# This exists for the dashboard's Settings row, which wants the answer without the side effect:
+# `--update --if-newer` also decides, downloads and replaces, and a human asking "is there an
+# update?" has not asked for any of that.
+#
+# Always prints the same TWO lines, so one parser handles every outcome:
+#   current=<marker or empty>    # $STATE_DIR/version; empty = not installed by this installer
+#   latest=<tag or empty>
+#
+# and EXITS WITH `latest_tag`'s verdict — 0 found, 10 GitHub answered and nothing is published,
+# 1 GitHub could not be asked. Collapsing those into "no update" is the lie that matters here: it
+# would tell someone they are up to date when the truth is that the network was unreachable.
+do_check() {
+  local cur="" remote="" rc=0
+  [ -f "$STATE_DIR/version" ] && cur="$(cat "$STATE_DIR/version" 2>/dev/null || echo "")"
+  # `if` rather than a bare assignment: this script runs under `set -e`, where a non-zero
+  # `latest_tag` would abort before the two lines are printed — and a caller that gets no output
+  # cannot tell "unreachable" from "crashed".
+  if remote="$(latest_tag)"; then rc=0; else rc=$?; fi
+  printf 'current=%s\n' "$cur"
+  printf 'latest=%s\n' "$remote"
+  return "$rc"
+}
+
 do_update() {
   detect_platform
   local cur=""
@@ -624,6 +670,7 @@ main() {
   case "$ACTION" in
     install)   do_install ;;
     update)    do_update ;;
+    check)     do_check ;;
     uninstall) do_uninstall ;;
     *) die "internal: unknown action $ACTION" ;;
   esac

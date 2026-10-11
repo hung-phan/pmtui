@@ -21,12 +21,35 @@ use crate::*;
 /// Columns the name column takes, so every value lines up under the one above it.
 const NAME_W: usize = 14;
 
-/// Columns the value column takes, including the `▾` marker.
+/// Narrowest the value column ever gets, including the `▾` marker.
 const VALUE_W: usize = 26;
+
+/// The value column's width for this frame.
+///
+/// NEITHER FIXED WIDTH WORKED. At 26 the `Updates` row's answer — the running version, what is
+/// available and, when they disagree, the installer's own marker — was elided to a `…` exactly where
+/// it stopped being useful. At 38 the summary column fell off an 80-column terminal, the narrowest
+/// this view supports: `every colour the dashboard draws` became `every colour the das`. So the
+/// column takes what the widest value needs and gives back what the widest summary needs, never
+/// below the width the short-valued rows have always lined up on.
+fn value_width(app: &App, width: usize) -> usize {
+    let widest = |f: fn(&App, crate::settings::SettingKind) -> String| {
+        crate::settings::SettingKind::ALL
+            .iter()
+            .map(|kind| text_cols(&f(app, *kind)))
+            .max()
+            .unwrap_or(0)
+    };
+    let value = widest(|app, kind| app.setting_row(kind).value);
+    let summary = widest(|_, kind| kind.summary().to_string());
+    // 2 for the cursor column, 2 for the `▾ ` marker, 3 for what `truncate` reserves for its `…`.
+    let room = width.saturating_sub(2 + NAME_W + 2 + summary);
+    (value + 3).clamp(VALUE_W, room.max(VALUE_W))
+}
 
 /// Widest a dropdown gets. Beyond this a long name is truncated rather than allowed to cover the whole
 /// view — the list is a choice, not a document.
-const DROP_W: u16 = 40;
+const DROP_W: u16 = 48;
 
 /// THE MOVING CURSOR, drawn rather than merely highlighted.
 ///
@@ -96,14 +119,17 @@ fn render_rows(f: &mut Frame, app: &App, area: Rect, cursor: usize, open: bool) 
     }
 
     let [head, list] = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).areas(inner);
+    let value_w = value_width(app, usize::from(inner.width));
     f.render_widget(
         Paragraph::new(vec![
             Line::from(vec![
                 // Indented by the cursor column the rows spend, so the headings sit over their columns.
                 Span::raw("  "),
                 Span::styled(pad_cols("Setting", NAME_W), attention::pane_title()),
-                Span::styled(pad_cols("Value", VALUE_W), attention::pane_title()),
-                Span::styled("Enter opens the list", attention::text_dim()),
+                Span::styled(pad_cols("Value", value_w), attention::pane_title()),
+                // NOT "Enter opens the list" any more: one row's Enter acts instead, and a heading
+                // that promised a list over a row that has none was the table lying about itself.
+                Span::styled("What it does", attention::text_dim()),
             ]),
             Line::raw(""),
         ]),
@@ -133,14 +159,22 @@ fn render_rows(f: &mut Frame, app: &App, area: Rect, cursor: usize, open: bool) 
                 ),
                 // The value in the dashboard's own accent: it is the answer this row exists to give.
                 Span::styled(
-                    pad_cols(&truncate(&row.value, VALUE_W - 3), VALUE_W - 2),
+                    pad_cols(&truncate(&row.value, value_w - 3), value_w - 2),
                     Style::default()
                         .fg(agent_manager::theme::accent())
                         .add_modifier(Modifier::BOLD),
                 ),
                 // `▾` says "there is a list under here", which is the whole affordance a keyboard
-                // dropdown has.
-                Span::styled("▾ ", Style::default().fg(agent_manager::theme::muted())),
+                // dropdown has — so a row whose `Enter` ACTS must not draw one, or it promises a
+                // list that never opens.
+                Span::styled(
+                    if kind.gesture() == crate::settings::Gesture::Pick {
+                        "▾ "
+                    } else {
+                        "  "
+                    },
+                    Style::default().fg(agent_manager::theme::muted()),
+                ),
                 Span::styled(kind.summary(), attention::text_dim()),
             ]))
         })
@@ -232,12 +266,17 @@ fn render_dropdown(
     let text_w = usize::from(inner.width);
     // The note is a COLUMN, not a suffix: one width for every label lines each `dark`/`light` up, so
     // the eye scans a column instead of reading every row's tail.
+    //
+    // THE NOTE YIELDS. It is decoration and the label is the content, so the column is capped at a
+    // third of the row: without that cap a wordy note subtracted the whole width and `label_w`
+    // became 0, which does not look like a layout bug — the list renders its options as blank rows.
     let note_w = setting
         .options
         .iter()
         .map(|option| text_cols(&option.note))
         .max()
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .min(text_w / 3);
     let label_w = text_w.saturating_sub(4 + note_w + 1);
     let items: Vec<ListItem> = setting
         .options
@@ -247,7 +286,7 @@ fn render_dropdown(
             let current = setting.current == Some(index);
             let here = index == pick.min(setting.options.len().saturating_sub(1));
             let label = pad_cols(&truncate(&option.label, label_w), label_w);
-            let note = pad_cols(&option.note, note_w);
+            let note = pad_cols(&truncate(&option.note, note_w), note_w);
             ListItem::new(Line::from(vec![
                 Span::styled(
                     if here { CURSOR } else { "  " },

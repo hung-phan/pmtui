@@ -147,8 +147,38 @@ server and daemon when the test ends.
   repaint the theme's pair over any rect a widget `Clear`s, and read an agent's own
   "default colour" as the theme's. No animated effects: a repaint happens because state
   changed.
-- A Settings row is one `SettingKind` variant plus its dropdown; neither the renderer nor
-  the key handler grows per setting.
+- A Settings row is one `SettingKind` variant plus ONE `Gesture`; neither the renderer nor the key
+  handler grows per setting. `Pick` opens the row's list; `Act` does the one thing the row's state
+  leaves to do in a SINGLE keypress and carries no options at all, because a list holding one option
+  is ceremony around an answer that was never in doubt. An acting row draws no `▾` (it promises a
+  list that never opens) and the KEYBAR names the act, because "Change" is a value's word. An action
+  returns before the save — writing one to `pmtui.json` would make it a preference that runs at
+  every start. A dropdown's note is decoration and its LABEL is the content: the note column yields,
+  because a wordy note once took the whole width and the list drew its options as blanks.
+- `install.sh` IS THE AUTHORITY on versions. The `Updates` row runs `--check` and
+  `--update --if-newer -y`; it never resolves a release itself, because a second answer to "what is
+  newest?" can disagree with the one that installs. `src/bin/pmtui/update.rs` is pure and owns the
+  readings — "unreachable" is never "up to date", a tag it cannot compare is a fact and not a
+  verdict, and the installer's marker is named only when it disagrees with `RUNNING`. FOUR answers,
+  not three: an installer older than `--check` exits 1 like an unreachable GitHub, so it is told
+  apart by the CONTRACT (an installer that answers prints both `current=` and `latest=`, so neither
+  key means the question was not understood) and never by its error wording, which belongs to one
+  release. That bug shipped: every machine installed before this feature was told its network was
+  down. The installer is resolved from `$XDG_DATA_HOME`/`$HOME` through `installer_in`, taken as
+  arguments so both branches are testable, and read ONCE into `App::installer_path`.
+- A REPLACED BINARY IS NO USE TO A LOADED PROCESS, and `src/selfexec.rs` is the one place that
+  knows it. A successful update re-execs pmtui (`relaunch`, carrying `args_os`) while the terminal
+  is SUSPENDED — the new pmtui builds its own alternate screen, and exec'ing out of the old one
+  leaves a screen nothing will pop. pmtui does NOT touch pmd: EVERY pmd watches its own executable
+  (`replaced`, by `(dev, ino)` — the installer `mv`s, so a rename is the signal and no half-written
+  binary is observable) and becomes the new one itself, which is what covers the daemons this
+  dashboard never started. One pmd owns one socket, so there is no single process with authority
+  over all of them; two mechanisms would race for the same singleton lock. pmd re-execs BETWEEN
+  sweeps, never while it owns `input.lock` across a paste and its Enter, and a failed exec keeps it
+  driving on the old image — supervised sessions outrank the newest build. An exe that cannot be
+  stat'ed is never "replaced", because a restart loop on a permissions error is worse than a stale
+  build. `relaunch_exe` is a field for the same reason `installer_path` is: a test that could exec
+  the test binary would replace the runner.
 - The three PROSE fields — Message, goal and directive — edit a `ratatui-textarea` buffer, seeded
   from what is already there. Route keys to it; do not reimplement motions, kills, wrapping or undo.
   `Enter` submits, so a newline is a chord, and `$EDITOR` is `^X^E` (which is what leaves `^E` free to
@@ -220,12 +250,17 @@ directory, so it works where `$HOME` is read-only.
 - `src/advise/`: read-only decider consult and reply validation.
 - `src/daemon/`: registry reconciliation, ownership, escalation, and cleanup.
 - `src/doctor/`: read-only registry, state, executable, skill, and tmux diagnostics.
+- `src/selfexec.rs`: noticing that this process's own binary was replaced, and becoming it. The
+  one place both pmtui's post-update restart and every pmd's self-refresh read from.
 - `src/theme.rs`: the opaline seam — the dashboard's colour ROLES and the one place RGB
   enters chrome; `src/attention.rs` builds every style from it.
 - `src/spawn/`: the request/receipt protocol, the job prompt, and the job result the harness writes.
 - `src/bin/pmtui/composer.rs`: the prose buffers' seam onto `ratatui-textarea` — which library call
   each key means, and nothing else. `src/bin/pmtui/input.rs`'s one-line `Field` backs the answer,
   cadence, rename and switcher fields, and the create form's rows.
+- `src/bin/pmtui/update.rs`: what the `Updates` row knows — parsing `install.sh --check` and
+  presenting it; pure, so every awkward state is tested without a network. `src/bin/pmtui/app/
+  updates.rs` is the half that runs the installer.
 - `src/bin/pmtui/`: dashboard state, actions, rendering, and terminal handoff.
 - `.agents/skills/`: canonical project-local skills; `.claude/skills/` contains compatibility
   symlinks only.

@@ -109,9 +109,13 @@ fn a_setting_row_names_its_value_and_offers_the_rest() {
             "{option:?}"
         );
     }
-    assert_eq!(SettingKind::ALL.len(), 1, "one setting today");
-    assert_eq!(SettingKind::Theme.name(), "Theme");
-    assert!(!SettingKind::Theme.summary().is_empty());
+    // The NAMES rather than the count: adding a setting should be a deliberate edit here, and a
+    // bare number says nothing about which one arrived.
+    let names: Vec<&str> = SettingKind::ALL.iter().map(|kind| kind.name()).collect();
+    assert_eq!(names, vec!["Theme", "Updates"]);
+    for kind in SettingKind::ALL {
+        assert!(!kind.summary().is_empty(), "{kind:?} needs a summary");
+    }
 }
 
 /// A stored value this build does not offer is SAID to be unknown, rather than shown as a choice.
@@ -226,11 +230,17 @@ fn an_open_dropdown_keeps_the_view_keys_to_itself() {
 fn the_same_keys_move_whichever_cursor_is_live() {
     let mut app = app_with(Vec::new(), UiMode::Normal);
     app.open_settings();
-    // One setting today: the row cursor has nowhere to go, and says so by not moving.
+    // The ROW cursor moves, then CLAMPS at the last setting rather than wrapping or running off.
+    handle_key(&mut app, KeyCode::Char('j'), KeyModifiers::NONE);
+    assert_eq!(cursors(&app), (1, None));
+    let last_setting = SettingKind::ALL.len() - 1;
     for key in [KeyCode::Char('j'), KeyCode::End, KeyCode::PageDown] {
         handle_key(&mut app, key, KeyModifiers::NONE);
-        assert_eq!(cursors(&app), (0, None), "{key:?}");
+        assert_eq!(cursors(&app), (last_setting, None), "{key:?}");
     }
+    // Back to Theme, whose dropdown the rest of this test drives.
+    handle_key(&mut app, KeyCode::Home, KeyModifiers::NONE);
+    assert_eq!(cursors(&app), (0, None));
 
     handle_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
     let last = app.setting_row(SettingKind::Theme).options.len() - 1;
@@ -370,7 +380,7 @@ fn the_settings_screen_is_a_table_of_settings() {
         "Value",
         "Theme",
         SettingKind::Theme.summary(),
-        "Enter opens the list",
+        "What it does",
         // `▾` is the affordance: it says a list lives under this row.
         "▾",
         "/home/dev/.config/pmd/pmtui.json",

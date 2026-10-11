@@ -23,6 +23,7 @@ pub mod ops;
 pub mod pmstate;
 pub mod policy;
 pub mod registry;
+pub mod selfexec;
 pub mod skills;
 pub mod spawn;
 pub mod state;

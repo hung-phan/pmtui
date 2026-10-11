@@ -226,17 +226,18 @@ It asks the run to finish before it kills the terminal, so the child gets to cle
 child that had already reported keeps what it reported — a cancel that arrives late does not erase
 finished work.
 
-### Picking a theme (`0`)
+### Settings (`0`)
 
 `0` opens **Settings**, the third tab after Sessions and Tasks. It is a table: one row per
 setting, with its name, what it is set to, and what it governs.
 
 ```
-  Setting       Value                     Enter opens the list
-  Theme         Catppuccin Mocha        ▾ every colour the dashboard draws
+  Setting       Value                      What it does
+  Theme         Catppuccin Mocha         ▾ every colour the dashboard draws
+  Updates       0.1.6 · not checked yet    the version this dashboard runs
 ```
 
-**Enter** on a row drops its list of values — every theme
+**Enter** on the Theme row drops its list of values — every theme
 [opaline](https://github.com/hyperb1iss/opaline) ships, by name, with `dark` or `light` beside it.
 The list opens on the value in force, marked `●`; `j`/`k` move, **Enter** applies the one under the
 cursor and writes it down, **Esc** closes the list and changes nothing. Nothing changes until that
@@ -262,6 +263,64 @@ has no colour of its own. pmtui fills the whole frame with the theme's backgroun
 your terminal's show through, and an agent's transcript keeps the colours the agent chose while its
 "default colour" becomes the theme's. If you keep a translucent terminal and would rather see
 through it, that is the trade — a light theme is unreadable without it.
+
+#### Checking for updates
+
+The **Updates** row says which pmtui you are running. It does not ask GitHub on its own — opening a
+screen should never block on the network — so it starts out saying it has not asked, and the keybar
+says what the one keypress will do:
+
+```
+  Setting       Value                      What it does
+  Theme         Catppuccin Mocha         ▾ every colour the dashboard draws
+  Updates       0.1.6 · not checked yet    the version this dashboard runs
+
+  Enter  Check for updates ·  ↑↓/jk  Move
+```
+
+**Enter** asks. There is no list to open: the row has at most one sensible action at any moment, so
+`Enter` just does it and the keybar names it first.
+
+```
+  Updates       0.1.6 → v0.1.7 (installed 0.1.4)   the version this dashboard runs
+
+  Enter  Install it ·  ↑↓/jk  Move
+```
+
+**Enter** again hands the terminal to `install.sh` — the same installer you first ran — and you
+watch it download, verify and swap the binaries. Then pmtui **restarts itself** on the new build,
+because a replaced binary is no use to a process that is already loaded. Your `--registry` and
+`--socket` come back with it, and your agent terminals are untouched: they live in tmux, not in the
+dashboard.
+
+Every running `pmd` restarts itself too, within a tick or so, and each one does it on its own. A
+`pmd` owns one tmux socket, so you may have several, and the dashboard you updated from has no
+business reaching into another one's — so each daemon watches its own binary instead and becomes the
+new one when it is replaced. It does that between sweeps, never mid-nudge, and a daemon that cannot
+restart keeps driving on the old build rather than leaving your sessions unattended.
+
+The row answers a question a version number alone cannot. `(installed …)` appears only when the
+installer's own record disagrees with the binary you are running, which is what happens when
+`~/.local/bin` points at a local build — the reason an update can look like it did nothing.
+
+Four different things can go wrong, and the row keeps them apart, because the fix for each is
+different:
+
+| What it says | What it means |
+|---|---|
+| `could not reach GitHub` | offline, a proxy, or a throttled API. Press Enter to retry. |
+| `no releases` | GitHub answered; this repository has published nothing. |
+| `installer too old to ask` | your `install.sh` predates `--check`. Enter updates it, which fixes it. |
+| `no installer at …` | this build did not come from `install.sh` — a `cargo build`, a package manager, a checkout. Nothing is wrong; there is just no installer to drive. |
+
+"Could not reach GitHub" is never shown for a problem that is not the network. That distinction is
+the point: being told your network is down when your installer is simply out of date sends you to
+debug the wrong machine.
+
+The row drives `install.sh` from `$XDG_DATA_HOME/agent-manager/install.sh` — the copy the installer
+keeps of itself — so the dashboard and `install.sh --check` always agree on what the newest release
+is. The launcher wrappers that same installer writes already check once a day on their own; set
+`AGENT_MANAGER_NO_UPDATE=1` if you would rather only ever update from this row.
 
 ### When something looks wrong
 
@@ -506,6 +565,9 @@ curl -fsSL https://raw.githubusercontent.com/hung-phan/pmtui/main/install.sh | b
 ... | bash -s -- --dir /usr/local/bin
 ... | bash -s -- --version v0.1.0
 ... | bash -s -- --no-wrapper
+
+# ask what is published without changing anything (what the Settings Updates row runs)
+... | bash -s -- --check
 
 # update now, or remove everything (your registry and project state are left alone)
 ... | bash -s -- --update

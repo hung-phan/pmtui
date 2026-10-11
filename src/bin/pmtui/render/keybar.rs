@@ -298,6 +298,27 @@ fn keybar_layout(app: &App, width: u16) -> Option<KeybarLayout> {
                     UiMode::Creating(ref form) if form.tier == Tier::Standard
                 ),
             );
+            // A SETTINGS ROW WHOSE `Enter` ACTS names the act. "Change" is a value's word, and this
+            // row has no value to change — it does the one thing its state leaves to do, so the
+            // keybar has to be the one surface that says which.
+            if let UiMode::Settings { cursor, .. } = &app.mode
+                && scope == Scope::Settings
+                && let Some(kind) = crate::settings::SettingKind::ALL.get(*cursor).copied()
+            {
+                let label = match kind {
+                    crate::settings::SettingKind::Updates => {
+                        match crate::update::next(&app.update_status) {
+                            crate::update::Next::Check => "Check for updates",
+                            crate::update::Next::Install { .. } => "Install it",
+                            crate::update::Next::FixInstaller => "Update the installer",
+                        }
+                    }
+                    crate::settings::SettingKind::Theme => "Change",
+                };
+                for chip in chips.iter_mut().filter(|chip| chip.key == "Enter") {
+                    chip.label = label;
+                }
+            }
             if scope == Scope::Board {
                 let paused = app.selected_view().is_some_and(|view| !view.enabled);
                 // The same route `s` takes (`message_route`), so the chip names what the press does.
