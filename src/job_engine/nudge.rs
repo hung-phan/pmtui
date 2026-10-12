@@ -513,14 +513,20 @@ pub fn loop_nudge_prompt_for_engine(input: LoopNudgePromptInput<'_>, engine: Eng
         met, write a `blocked` marker with a `confirm_done` stop, and never treat the goal as \
         finished without human confirmation.";
 
-    // The compact degrade — added only when the native skill is NOT known-installed. It never
-    // introduces a compatibility copy; the canonical skill remains the only source.
-    let degrade = if skill_available {
+    // The compact degrade — added when the native skill is NOT known-installed, and ALWAYS for
+    // TRAE, whose trigger points at it: TRAE has no worker skill contract, so this is the only
+    // place it learns the report schema. Without it a TRAE worker wrote `seq`/`status`/
+    // `next_step` with no `state`, every report failed to parse, and the session was parked
+    // `Stuck` after three wakes. It never introduces a compatibility copy; the canonical skill
+    // remains the only source.
+    let inline_contract = !skill_available || engine == Engine::Trae;
+    let degrade = if !inline_contract {
         String::new()
     } else {
         "\n- If your worker skill is not loaded, work in finite wakes: never sleep or poll in \
          the foreground. Before each wake ends, overwrite the marker with seq, state, status, and \
-         next_step (bump seq; write atomically tmp+rename), then end the turn.\n\
+         next_step (bump seq; write atomically tmp+rename), then end the turn. `state` is \
+         required and is exactly one of `working`, `monitoring` or `blocked`.\n\
          - For slow work, detach only lifecycle-safe, non-interactive work with durable output that \
          is independently observable through a revalidatable handle and enforced hard deadline; \
          write the checkpoint plus a monitoring marker, end the turn, and reconcile on the next \

@@ -703,6 +703,60 @@ fn loop_nudge_prompt_writes_the_marker_instruction() {
     assert!(p2.contains("the human said: go"));
 }
 
+/// TRAE's trigger says "follow the inline fallback below", so the fallback MUST be below — with
+/// the report schema's one required field and its values. A live TRAE worker that got the
+/// pointer without the fallback wrote `seq`/`status`/`next_step` and no `state`; every report
+/// failed to parse, and pmd parked the session `Stuck` after three wakes.
+#[test]
+fn a_trae_nudge_carries_the_inline_report_contract_it_points_to() {
+    let marker = std::path::Path::new("/tmp/proj/.project-state/sessions/s/needs-you.json");
+    let since = SinceLastWake::default();
+    let trae = loop_nudge_prompt_for_engine(
+        LoopNudgePromptInput::new("goal", "", "", "", &since, true, marker),
+        Engine::Trae,
+    );
+    assert!(trae.contains("follow the inline fallback below"), "{trae}");
+    for required in [
+        "If your worker skill is not loaded",
+        "seq, state, status, and next_step",
+        "`state` is required",
+        "`working`, `monitoring` or `blocked`",
+    ] {
+        assert!(trae.contains(required), "missing {required:?}: {trae}");
+    }
+
+    // An engine with an installed skill still gets the schema from the skill, not the nudge.
+    for engine in [Engine::Claude, Engine::Codex] {
+        let prompt = loop_nudge_prompt_for_engine(
+            LoopNudgePromptInput::new("goal", "", "", "", &since, true, marker),
+            engine,
+        );
+        assert!(
+            !prompt.contains("`state` is required"),
+            "{engine:?}: {prompt}"
+        );
+    }
+}
+
+#[test]
+fn a_report_without_state_does_not_parse_and_one_with_state_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("needs-you.json");
+    // The live TRAE report that stalled `aspace-contest-2`.
+    std::fs::write(
+        &path,
+        r#"{"seq":2,"status":"Starting ranked games now.","next_step":"Run ranked games.","ts":"2026-10-13T01:30:00Z"}"#,
+    )
+    .unwrap();
+    assert!(crate::job_engine::marker::parse_report(&path).is_err());
+    std::fs::write(
+        &path,
+        r#"{"seq":2,"state":"working","status":"Starting ranked games now.","next_step":"Run ranked games."}"#,
+    )
+    .unwrap();
+    assert!(crate::job_engine::marker::parse_report(&path).is_ok());
+}
+
 #[test]
 fn loop_nudge_prompt_invokes_the_worker_skill_in_the_engines_native_form() {
     let marker = std::path::Path::new("/tmp/proj/.project-state/sessions/s/needs-you.json");
