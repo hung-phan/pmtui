@@ -280,6 +280,18 @@ test_local_checkout_refuses_an_unmatched_version() (
   [ -z "$marker" ]
 )
 
+# macOS ships bash 3.2, which under a UTF-8 locale reads the bytes of a following non-ASCII
+# character as part of a variable NAME: `"at $src…"` expands `$src\xe2`, and `set -u` aborts the
+# install with `src?: unbound variable`. Every source build on a Mac hit it, including the
+# wrapper's daily auto-update. A name followed by non-ASCII text must be braced: `${src}…`.
+test_no_variable_is_followed_by_non_ascii_text() (
+  hits="$(LC_ALL=C grep -n '\$[A-Za-z_][A-Za-z0-9_]*[^ -~[:space:]]' "$ROOT/install.sh" || true)"
+  if [ -n "$hits" ]; then
+    printf 'brace these variables, e.g. ${src}…:\n%s\n' "$hits" >&2
+    return 1
+  fi
+)
+
 # `--check` answers the dashboard's Settings row, so its THREE outcomes have to stay apart.
 # `latest_tag` already separates them by exit code (0 found / 10 nothing published / 1 could not
 # ask), and flattening that into "no update" would tell the human they are current when the truth
@@ -348,4 +360,5 @@ test_the_self_refresh_runs_before_the_up_to_date_shortcut
 test_wrappers_are_valid_and_leave_no_staging_file
 test_wrapper_reclaims_a_dead_update_lock
 test_local_checkout_refuses_an_unmatched_version
+test_no_variable_is_followed_by_non_ascii_text
 printf 'install.sh tests: ok\n'

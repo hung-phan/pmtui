@@ -398,14 +398,14 @@ build_from_source() { # build_from_source [tag]  -> echoes the installed version
       [ "$head" = "$wanted" ] \
         || die "requested $tag does not match the local checkout HEAD; run the installer outside the checkout"
     fi
-    info "Building from the local checkout at $src…" >&2
+    info "Building from the local checkout at ${src}…" >&2
   else
     src="$STATE_DIR/source"
     if [ -d "$src/.git" ]; then
-      info "Updating source checkout at $src…" >&2
+      info "Updating source checkout at ${src}…" >&2
       git -C "$src" fetch --quiet --tags origin || warn "git fetch failed; building the checkout as-is"
     else
-      info "Cloning $REPO into $src…" >&2
+      info "Cloning $REPO into ${src}…" >&2
       mkdir -p "$STATE_DIR"
       git clone --quiet "https://github.com/$REPO.git" "$src" || die "git clone failed"
     fi
