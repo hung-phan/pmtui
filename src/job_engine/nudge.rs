@@ -288,6 +288,12 @@ impl JobScheduler {
         let last_status = base.last_status.clone().unwrap_or_default();
         let last_plan = base.last_plan.clone().unwrap_or_default();
         let since = self.since_last_wake(base, now, answer_arrived, marker_less_finish);
+        // Structural, like `worker_skill_available`: the spawn skill is installed best effort at
+        // launch, so the nudge names it only when the file is really there.
+        let spawn_skill = self
+            .work_dir
+            .join(crate::skills::SPAWN_SKILL_REL_PATH)
+            .is_file();
         loop_nudge_prompt_for_engine(
             LoopNudgePromptInput::new(
                 &brief,
@@ -297,7 +303,8 @@ impl JobScheduler {
                 &since,
                 self.worker_skill_available(),
                 &self.paths.needs_you(),
-            ),
+            )
+            .with_spawn_skill(spawn_skill),
             self.engine,
         )
     }
@@ -335,9 +342,18 @@ pub struct LoopNudgePromptInput<'a> {
     since: &'a SinceLastWake,
     skill_available: bool,
     marker_path: &'a Path,
+    /// The `pmtui-spawn` skill is installed in the session's root. Structural, never ledger prose.
+    spawn_skill: bool,
 }
 
 impl<'a> LoopNudgePromptInput<'a> {
+    /// Whether the session's root holds the `pmtui-spawn` skill. Off unless set, so a nudge never
+    /// points at a skill that is not there.
+    pub fn with_spawn_skill(mut self, spawn_skill: bool) -> Self {
+        self.spawn_skill = spawn_skill;
+        self
+    }
+
     pub fn new(
         brief: &'a str,
         extra: &'a str,
@@ -355,6 +371,7 @@ impl<'a> LoopNudgePromptInput<'a> {
             since,
             skill_available,
             marker_path,
+            spawn_skill: false,
         }
     }
 }
@@ -415,6 +432,7 @@ pub fn loop_nudge_prompt_for_engine(input: LoopNudgePromptInput<'_>, engine: Eng
         since,
         skill_available,
         marker_path,
+        spawn_skill,
     } = input;
     // An empty brief has TWO causes the harness cannot tell apart — a read that lost a
     // race with a mid-write brief (recovery), and a session deliberately created with no
@@ -537,6 +555,17 @@ pub fn loop_nudge_prompt_for_engine(input: LoopNudgePromptInput<'_>, engine: Eng
         // nothing else could learn it; codex's turn hook now reports that id as a fact and pmd
         // ignores a worker-authored one. Keeping the instruction would ask an agent for something
         // discarded on arrival, which is how a prompt and a policy start disagreeing.
+    };
+    // Claude and Codex find the `pmtui-spawn` skill and use it on their own. A live TRAE worker
+    // could see the skill and run it end to end when told to, but never chose it unprompted, so
+    // TRAE is told it exists — only when the file is really installed.
+    let degrade = if engine == Engine::Trae && spawn_skill {
+        format!(
+            "{degrade}\n- To hand an independent part of the goal to a child job, use your \
+             `pmtui-spawn` skill."
+        )
+    } else {
+        degrade
     };
 
     // The deterministic "Since last wake" block: a FIXED line per whitelisted signal, and the

@@ -703,6 +703,51 @@ fn loop_nudge_prompt_writes_the_marker_instruction() {
     assert!(p2.contains("the human said: go"));
 }
 
+/// TRAE sees the `pmtui-spawn` skill and can run it end to end, but never chose it unprompted, so
+/// its nudge names the skill — and ONLY when it is installed. Claude and Codex choose it alone.
+#[test]
+fn only_a_trae_nudge_names_the_spawn_skill_and_only_when_it_is_installed() {
+    let marker = std::path::Path::new("/tmp/proj/.project-state/sessions/s/needs-you.json");
+    let since = SinceLastWake::default();
+    let line = "use your `pmtui-spawn` skill";
+    let render = |engine, spawn_skill| {
+        loop_nudge_prompt_for_engine(
+            LoopNudgePromptInput::new("goal", "", "", "", &since, true, marker)
+                .with_spawn_skill(spawn_skill),
+            engine,
+        )
+    };
+    assert!(render(Engine::Trae, true).contains(line));
+    assert!(
+        !render(Engine::Trae, false).contains(line),
+        "no skill, no pointer"
+    );
+    for engine in [Engine::Claude, Engine::Codex] {
+        assert!(!render(engine, true).contains(line), "{engine:?}");
+    }
+}
+
+#[test]
+fn the_scheduler_names_the_spawn_skill_only_once_it_is_on_disk() {
+    let fx = setup(Tier::Autopilot, Engine::Trae, Some(300));
+    let base = ledger(&fx);
+    let line = "use your `pmtui-spawn` skill";
+    assert!(
+        !fx.sched
+            .compose_nudge(&base, START, false, false)
+            .contains(line)
+    );
+
+    let skill = fx.sched.work_dir.join(crate::skills::SPAWN_SKILL_REL_PATH);
+    std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
+    std::fs::write(&skill, "---\nname: pmtui-spawn\n---\n").unwrap();
+    assert!(
+        fx.sched
+            .compose_nudge(&base, START, false, false)
+            .contains(line)
+    );
+}
+
 /// TRAE's trigger says "follow the inline fallback below", so the fallback MUST be below — with
 /// the report schema's one required field and its values. A live TRAE worker that got the
 /// pointer without the fallback wrote `seq`/`status`/`next_step` and no `state`; every report
