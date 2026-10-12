@@ -375,37 +375,3 @@ const FIXTURE_CLAUDE_DIALOG_TRUST: &str = concat!(
     "\n",
     " Enter to confirm · Esc to cancel\n",
 );
-
-/// Live TraeX capture (`traex --no-daemon --no-alt-screen` v0.209.1) from a private
-/// tmux socket with a scratch `TRAE_HOME`: the idle composer uses Claude's `❯`
-/// lead, but it is NOT bare. That makes it invisible to both Claude's bare-prompt
-/// predicate and Codex's `›` composer predicate.
-const FIXTURE_TRAE_IDLE: &str = concat!(
-    "────────────────────────────────\n",
-    "❯ Ask TRAE CLI to do anything\n",
-    "────────────────────────────────\n",
-    "  ? for shortcuts\n",
-);
-
-/// The same live TraeX launch before auth, trimmed to the blocking part. It still
-/// paints the composer line above the sign-in chooser, so recognizing the composer
-/// without recognizing this chooser would make pmtui's `s` key type into a login
-/// menu and press Enter.
-const FIXTURE_TRAE_SIGNIN: &str = concat!(
-    "────────────────────────────────\n",
-    "❯ Ask TRAE CLI to do anything\n",
-    "────────────────────────────────\n",
-    "  ? for shortcuts\n",
-    "\n",
-    "  Welcome to TRAE CLI — your intelligent coding companion\n",
-    "\n",
-    "  Sign in to use TRAE CLI\n",
-    "\n",
-    "> 1. ByteDance Employee\n",
-    "     Sign in with Codebase Git or ByteDance SSO\n",
-    "\n",
-    "  2. Enterprise User\n",
-    "     Sign in with email, a custom domain, or a PAT\n",
-    "\n",
-    "  Press Enter to continue\n",
-);

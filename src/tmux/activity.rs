@@ -88,7 +88,7 @@ pub fn classify_pane(capture: &str) -> PaneActivity {
     // two can never disagree about what counts as an input field.
     if window
         .iter()
-        .any(|line| is_claude_composer(line) || is_codex_composer(line) || is_trae_composer(line))
+        .any(|line| is_claude_composer(line) || is_codex_composer(line))
     {
         PaneActivity::Idle
     } else {
@@ -180,7 +180,7 @@ pub fn has_composer_in_tail(capture: &str, tail_lines: usize) -> bool {
     let start = non_empty.len().saturating_sub(tail_lines);
     non_empty[start..]
         .iter()
-        .any(|l| is_claude_composer(l) || is_codex_composer(l) || is_trae_composer(l))
+        .any(|l| is_claude_composer(l) || is_codex_composer(l))
 }
 
 /// A content fingerprint of the TRANSCRIPT REGION of an Idle-classified capture — the
@@ -217,7 +217,7 @@ pub fn idle_fingerprint(capture: &str) -> u64 {
     let lines: Vec<&str> = capture.lines().collect();
     let boundary = lines
         .iter()
-        .rposition(|l| is_claude_composer(l) || is_codex_composer(l) || is_trae_composer(l))
+        .rposition(|l| is_claude_composer(l) || is_codex_composer(l))
         .unwrap_or(lines.len());
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for line in &lines[..boundary] {
@@ -239,9 +239,7 @@ pub fn progress_fingerprint(capture: &str) -> u64 {
     let lines: Vec<&str> = capture.lines().collect();
     let boundary = lines
         .iter()
-        .rposition(|line| {
-            is_claude_composer(line) || is_codex_composer(line) || is_trae_composer(line)
-        })
+        .rposition(|line| is_claude_composer(line) || is_codex_composer(line))
         .unwrap_or(lines.len());
     let mut hash = FNV_OFFSET;
     for line in &lines[..boundary] {
@@ -336,16 +334,4 @@ pub(super) fn is_codex_composer(line: &str) -> bool {
         Some(_) => dialog_option_text(trimmed).is_none(),
         None => false,
     }
-}
-
-/// TraeX's idle composer line. It uses Claude's `❯` lead, but unlike Claude it is not
-/// bare: a fresh idle pane paints `❯ Ask TRAE CLI to do anything`.
-///
-/// Keep this phrase-anchored rather than accepting any non-bare `❯` line. Claude echoes
-/// submitted user messages with the same lead (`❯ Tell me a joke.`), and treating those
-/// transcript rows as composers would turn old scrollback into a false Idle.
-fn is_trae_composer(line: &str) -> bool {
-    line.trim()
-        .strip_prefix('❯')
-        .is_some_and(|rest| rest.trim() == "Ask TRAE CLI to do anything")
 }

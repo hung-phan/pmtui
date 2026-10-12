@@ -4,11 +4,6 @@
 
 use super::*;
 
-const IDLE_TRAE_PANE: &str = "\u{2500}\u{2500}\u{2500}\u{2500}\n\
-     \u{276f} Ask TRAE CLI to do anything\n\
-     \u{2500}\u{2500}\u{2500}\u{2500}\n\
-     ? for shortcuts\n";
-
 const IDLE_CLAUDE_PLACEHOLDER_PANE: &str = "\u{2500}\u{2500}\u{2500}\u{2500}\n\
      \u{276f}\u{a0}Try \"how do I log an error?\"\n\
      \u{2500}\u{2500}\u{2500}\u{2500}\n\
@@ -34,20 +29,6 @@ fn s_sends_the_typed_text_to_the_rows_own_pane_and_nothing_else() {
         "the text did not reach exactly the selected row's pane"
     );
     assert!(matches!(app.mode, UiMode::Normal), "the field stayed open");
-    assert_eq!(app.status, "sent \u{2192} bot");
-}
-
-#[test]
-fn s_sends_to_a_trae_pane_waiting_at_its_placeholder_composer() {
-    let dir = tempfile::tempdir().unwrap();
-    let (mut app, pane, session, _) = send_app(dir.path(), IDLE_TRAE_PANE);
-    send_via_keys(&mut app, "check the traex prompt");
-
-    assert_eq!(
-        pane.sends(),
-        vec![(session, "check the traex prompt".to_string())],
-        "TraeX's non-bare ❯ placeholder prompt must be accepted as a composer"
-    );
     assert_eq!(app.status, "sent \u{2192} bot");
 }
 

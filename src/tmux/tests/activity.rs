@@ -366,17 +366,6 @@ fn codex_composer_is_never_bare_so_only_the_new_predicate_can_see_it() {
 }
 
 #[test]
-fn trae_idle_composer_is_not_a_bare_claude_prompt_but_accepts_text() {
-    assert!(!is_bare_prompt("❯ Ask TRAE CLI to do anything"));
-    assert!(!is_codex_composer("❯ Ask TRAE CLI to do anything"));
-    assert!(
-        has_composer(FIXTURE_TRAE_IDLE),
-        "TraeX idle panes must accept pmtui's s-send gate"
-    );
-    assert_eq!(classify_pane(FIXTURE_TRAE_IDLE), PaneActivity::Idle);
-}
-
-#[test]
 fn current_claude_placeholder_composer_accepts_text() {
     let pane = concat!(
         "────────────────────────────────\n",
