@@ -286,6 +286,8 @@ fn last_prompt_row(lines: &[&str]) -> Option<usize> {
 /// wording changed. Its PLACE does not change: a submitted message echoed in the transcript
 /// carries the same `❯` lead (`❯ Tell me a joke.`) but never sits between two rules.
 ///
+/// The top rule may carry a title ([`is_box_top_rule`]).
+///
 /// Whether the box holds a draft is a separate question that only a STYLED capture can
 /// answer (the hint is dim, typed text is not); see `send_gate::claude_draft_in_box`.
 /// Blank rows are skipped, so this reads a raw capture and a non-empty-filtered one alike.
@@ -296,7 +298,7 @@ pub(super) fn claude_box(lines: &[&str], at: usize) -> Option<usize> {
         return None;
     }
     let above = lines[..at].iter().rev().find(|l| !l.trim().is_empty())?;
-    if !is_box_rule(above) {
+    if !is_box_top_rule(above) {
         return None;
     }
     for (offset, line) in lines[at + 1..].iter().enumerate() {
@@ -318,6 +320,17 @@ pub(super) fn claude_box(lines: &[&str], at: usize) -> Option<usize> {
 pub(super) fn is_box_rule(line: &str) -> bool {
     let rule = line.trim();
     rule.chars().count() >= 8 && rule.chars().all(|c| c == '─')
+}
+
+/// The TOP rule of an input box: a plain [`is_box_rule`], or one with a title set into it —
+/// a run of at least eight `─`, the title, and a closing `─`, as in
+/// `──────── Fix the parser ─`. A terminal agent can label its box with the session or turn
+/// it belongs to, and does so on an idle box as well as a working one; requiring a plain rule
+/// read such a pane as having no prompt at all.
+pub(super) fn is_box_top_rule(line: &str) -> bool {
+    let rule = line.trim();
+    is_box_rule(rule)
+        || (rule.chars().take_while(|&c| c == '─').count() >= 8 && rule.ends_with('─'))
 }
 
 /// codex's COMPOSER line — the analogue of claude's bare prompt, and the reason

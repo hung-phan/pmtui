@@ -131,3 +131,56 @@ fn a_blocker_phrase_in_the_transcript_does_not_block() {
         None
     );
 }
+
+/// A box whose top rule carries a title, as a terminal agent draws it to label the session or
+/// turn the box belongs to. Styled, with a dim hint.
+const TITLED_BOX: &str = concat!(
+    "● Done.\n",
+    "\n",
+    "──────────────────────────────── Fix the parser ─\n",
+    "❯ \x1b[2mFind and fix a bug in @filename\x1b[0m\n",
+    "────────────────────────────────────────────────\n",
+    "  model · Context 94% left\n",
+);
+
+#[test]
+fn a_titled_top_rule_still_opens_the_box() {
+    let plain = unstyled(TITLED_BOX);
+    assert!(has_composer(&plain), "the titled box is a prompt");
+    assert_eq!(
+        crate::tmux::classify_pane(&plain),
+        crate::tmux::PaneActivity::Idle
+    );
+    assert!(
+        !claude_draft_in_box(TITLED_BOX),
+        "the dim hint is not a draft"
+    );
+    let drafted = TITLED_BOX.replace(
+        "\x1b[2mFind and fix a bug in @filename\x1b[0m",
+        "half typed",
+    );
+    assert!(claude_draft_in_box(&drafted), "plain text is a draft");
+}
+
+#[test]
+fn a_blocker_above_a_titled_box_still_blocks() {
+    let pane = concat!(
+        "⚠ Usage limit reached · resets 5pm\n",
+        "──────────────────────────────── Fix the parser ─\n",
+        "❯\u{a0}\n",
+        "────────────────────────────────────────────────\n",
+    );
+    assert_eq!(send_blocker(pane), Some(SendBlocker::UsageLimit));
+}
+
+#[test]
+fn a_titled_rule_needs_a_long_lead_and_a_closing_rule() {
+    for top in [
+        "──── Fix the parser ─",                             // lead too short
+        "──────────────────────────────── Fix the parser",   // no closing `─`
+        "Fix the parser ──────────────────────────────────", // title first
+    ] {
+        let pane = format!("{top}\n❯\u{a0}Try \"x\"\n────────────────────────────────\n");
+        assert!(!has_composer(&pane), "not a box top: {top:?}");
+    }
+}

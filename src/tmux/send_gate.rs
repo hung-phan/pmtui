@@ -14,7 +14,7 @@
 
 use ratatui::style::Modifier;
 
-use super::activity::{claude_box, is_box_rule};
+use super::activity::{claude_box, is_box_top_rule};
 
 /// A pane state that draws Claude's input box but must not receive a typed Message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,7 +61,7 @@ pub fn send_blocker(capture: &str) -> Option<SendBlocker> {
     let at = (0..lines.len())
         .rev()
         .find(|&at| claude_box(&lines, at).is_some())?;
-    let top = (0..at).rev().find(|&i| is_box_rule(lines[i]))?;
+    let top = (0..at).rev().find(|&i| is_box_top_rule(lines[i]))?;
     let notices = lines[..top]
         .iter()
         .rev()
