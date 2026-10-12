@@ -352,3 +352,50 @@ const FIXTURE_CODEX_DIALOG_TRUST: &str = concat!(
     "\n",
     "  Press enter to continue\n",
 );
+
+/// Live TraeX v0.209.1 capture: the hook trust prompt a pmtui launch meets the first time,
+/// because pmtui's turn-complete `Stop` hook is new to TraeX. Its heading has no `?` and its
+/// footer is not `Esc to cancel`, so only the phrase-anchored exception sees it.
+const FIXTURE_TRAE_DIALOG_HOOK_TRUST: &str = concat!(
+    "  Hooks need review\n",
+    "  1 hook is new or changed.\n",
+    "  Hooks can run outside the sandbox after you trust them.\n",
+    "❯ 1. Review hooks\n",
+    "  2. Trust all and continue\n",
+    "  3. Continue without trusting (hooks won't run)\n",
+    "  enter confirm  |  esc go back\n",
+);
+
+/// TraeX v0.209.1 before its first sign-in, trimmed to the blocking part. The input box is
+/// drawn ABOVE the chooser, and the selected choice is marked with a plain ASCII `>`.
+const FIXTURE_TRAE_DIALOG_SIGNIN: &str = concat!(
+    "────────────────────────────────\n",
+    "❯ Ask TRAE CLI to do anything\n",
+    "────────────────────────────────\n",
+    "  ? for shortcuts\n",
+    "\n",
+    "  Welcome to TRAE CLI — your intelligent coding companion\n",
+    "\n",
+    "  Sign in to use TRAE CLI\n",
+    "\n",
+    "> 1. ByteDance Employee\n",
+    "     Sign in with Codebase Git or ByteDance SSO\n",
+    "\n",
+    "  2. Enterprise User\n",
+    "     Sign in with email, a custom domain, or a PAT\n",
+    "\n",
+    "  Press Enter to continue\n",
+);
+
+/// Live TraeX v0.209.1 capture mid-turn. The top rule of the input box carries the turn's
+/// title, and the working line carries `esc to interrupt`.
+const FIXTURE_TRAE_BUSY: &str = concat!(
+    "▍ List the files in src/models with a one-line purpose each, reading each file first.\n",
+    "\n",
+    "◈ Any second now… (17s • ↓ 149 tokens • esc to interrupt)\n",
+    "  └ Tip: Press ctrl+r to search your prompt history.\n",
+    "──────────────────────────────────────────────── List src/models file purposes ─\n",
+    "❯ Explain this codebase\n",
+    "────────────────────────────────────────────────────────────────────────────────\n",
+    "  Test-O-New-Thinking high · Context 94% left · ~/Myspace/pmtui · ▧ Workspace Edit\n",
+);
