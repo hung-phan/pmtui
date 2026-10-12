@@ -994,16 +994,25 @@ impl Driver for TmuxDriver {
                 return Ok(());
             }
             std::thread::sleep(CODEX_SUBMIT_RECHECK_GUARD);
+            // A retry `Enter` lands on whatever is on screen now. If the message has just raised
+            // a dialog — a Codex command approval, say — another `Enter` would CONFIRM its
+            // highlighted option on the person's behalf. A dialog therefore ends the retries.
+            let plain = self.capture_tail(session, 40)?;
+            if super::dialog::classify_dialog(&plain).is_some() {
+                return Ok(());
+            }
             // Styled, so the dim placeholder can be told from a still-typed draft.
             let capture = self.capture_tail_styled(session, 80)?;
             let draft_visible = codex_draft_visible(&capture, text, uses_paste_buffer);
             if !draft_visible && uses_paste_buffer && attempt + 1 < attempts {
-                let prefix: String = text.chars().take(CODEX_DRAFT_MATCH_CHARS).collect();
-                let plain = self.capture_tail(session, 40)?;
-                if !prefix.is_empty() && plain.contains(&prefix) {
-                    continue;
-                }
+                // Retry only while an input prompt is on screen. With none, there is nothing
+                // left to submit, and the `Enter` would go to whatever replaced the prompt —
+                // including a dialog this capture could not recognise.
                 if !super::activity::has_composer(&plain) {
+                    return Ok(());
+                }
+                let prefix: String = text.chars().take(CODEX_DRAFT_MATCH_CHARS).collect();
+                if !prefix.is_empty() && plain.contains(&prefix) {
                     continue;
                 }
             }

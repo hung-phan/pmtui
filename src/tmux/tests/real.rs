@@ -516,6 +516,14 @@ capture-pane)
       count=$(grep -c 'send-keys -t =long: Enter' {log})
       [ "$count" -lt 2 ] && echo '› [Pasted Content 801 chars]' || echo '› Ask Codex to do anything' ;;
     *=second-enter:*) echo '› [Pasted Content 801 chars]' ;;
+    *=approval:*)
+      if grep -q 'send-keys -t =approval: Enter' {log}; then
+        printf '  Would you like to run the following command?\n  $ rm -rf build\n› 1. Yes, proceed (y)\n  2. No, and tell Codex what to do differently (esc)\n  Press enter to confirm or esc to cancel\n'
+      else
+        echo '› [Pasted Content 801 chars]'
+      fi ;;
+    *=no-prompt:*)
+      grep -q 'send-keys -t =no-prompt: Enter' {log} && echo '• Working (0s)' || echo '› [Pasted Content 801 chars]' ;;
     *) echo captured ;;
   esac ;;
 load-buffer)
@@ -1080,6 +1088,25 @@ fn a_tmux_that_cannot_run_is_an_ambiguous_probe_error() {
             matches!(&error, LaunchError::Probe(text) if text.starts_with(context)),
             "{failure}: {error:?}"
         );
+    }
+}
+
+/// The submit retry must never answer a dialog. After the first `Enter`, the scripted Codex pane
+/// shows a command approval with `1. Yes, proceed` highlighted; a second `Enter` would approve
+/// the command on the person's behalf. A pane with no prompt at all gets no retry either.
+#[test]
+fn a_codex_submit_retry_never_presses_enter_on_a_dialog_or_a_pane_without_a_prompt() {
+    let fx = ScriptedTmux::new();
+    for session in ["approval", "no-prompt"] {
+        fx.driver
+            .send_keys(session, &"x".repeat(801))
+            .unwrap_or_else(|error| panic!("{session}: {error:#}"));
+        let calls = std::fs::read_to_string(&fx.log).unwrap();
+        let enters = calls
+            .lines()
+            .filter(|line| line.ends_with(&format!("send-keys -t ={session}: Enter")))
+            .count();
+        assert_eq!(enters, 1, "{session}: a retry Enter was sent\n{calls}");
     }
 }
 
