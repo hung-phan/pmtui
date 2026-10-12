@@ -175,6 +175,61 @@ test_the_release_lookup_cannot_wait_forever() (
   esac
 )
 
+# THE BUG THIS PINS. `write_manifest` copies `${BASH_SOURCE[0]}` over the stored script, which is a
+# no-op when the stored script is what is running — so an update launched by the wrappers (or by the
+# dashboard's Updates row) left the copy frozen at whatever version first installed the machine.
+# Measured on a real machine: binaries at v0.1.5, stored script too old to understand `--check`,
+# and `--update --if-newer` answering "Already up to date" without touching it. Forever.
+test_an_update_refreshes_the_stored_copy_of_the_installer() (
+  local dir staged
+  dir="$(mktemp -d)"
+  trap 'rm -rf "$dir"' EXIT
+  STATE_DIR="$dir/state"
+  mkdir -p "$STATE_DIR"
+  printf '%s\n' "an old installer that cannot answer --check" > "$STATE_DIR/install.sh"
+
+  # Stand in for the network: `download` is the one seam `refresh_self` reaches it through.
+  download() { printf '%s\n' 'install_binary() { :; }' 'latest_tag() { :; }' > "$2"; }
+  refresh_self v9.9.9
+  grep -q '^install_binary()' "$STATE_DIR/install.sh" || {
+    printf 'FAIL: the stored installer was not refreshed\n' >&2; return 1; }
+  [ -x "$STATE_DIR/install.sh" ] || { printf 'FAIL: not executable\n' >&2; return 1; }
+
+  # A FAILED download must leave the working script alone — a machine with no installer at all is
+  # worse than one with an old installer.
+  printf '%s\n' 'install_binary() { :; }' 'latest_tag() { :; }' 'marker=keep' > "$STATE_DIR/install.sh"
+  download() { return 1; }
+  refresh_self v9.9.9
+  grep -q 'marker=keep' "$STATE_DIR/install.sh" || {
+    printf 'FAIL: a failed download destroyed the installer\n' >&2; return 1; }
+
+  # So must a download that is NOT this installer: a proxy error page is a 200 with a body.
+  download() { printf '%s\n' '<html>404</html>' > "$2"; }
+  refresh_self v9.9.9
+  grep -q 'marker=keep' "$STATE_DIR/install.sh" || {
+    printf 'FAIL: an error page replaced the installer\n' >&2; return 1; }
+
+  # And no staging file is left behind on any of those paths.
+  staged="$(find "$STATE_DIR" -name 'install.sh.new.*' | head -n1)"
+  [ -z "$staged" ] || { printf 'FAIL: left a staging file: %s\n' "$staged" >&2; return 1; }
+)
+
+# `--if-newer` RETURNS before `do_install`, so a refresh placed after it would never run on the one
+# path that matters: current binaries, stale script.
+test_the_self_refresh_runs_before_the_up_to_date_shortcut() (
+  local body
+  body="$(declare -f do_update)"
+  case "$body" in
+    *refresh_self*) ;;
+    *) printf 'FAIL: do_update never refreshes the stored installer\n' >&2; return 1 ;;
+  esac
+  # Textual ORDER, because the shortcut is a `return`: whatever comes after it is unreachable.
+  case "${body%%IF_NEWER*}" in
+    *refresh_self*) ;;
+    *) printf 'FAIL: the refresh is behind the --if-newer shortcut\n' >&2; return 1 ;;
+  esac
+)
+
 test_wrappers_are_valid_and_leave_no_staging_file() (
   local dir
   dir="$(mktemp -d)"
@@ -288,6 +343,8 @@ test_a_binary_that_cannot_run_falls_back_to_source
 test_a_binary_without_a_version_flag_still_installs
 test_latest_tag_separates_absent_from_unreachable
 test_the_release_lookup_cannot_wait_forever
+test_an_update_refreshes_the_stored_copy_of_the_installer
+test_the_self_refresh_runs_before_the_up_to_date_shortcut
 test_wrappers_are_valid_and_leave_no_staging_file
 test_wrapper_reclaims_a_dead_update_lock
 test_local_checkout_refuses_an_unmatched_version

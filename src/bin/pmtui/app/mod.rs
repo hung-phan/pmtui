@@ -67,9 +67,9 @@ pub(crate) struct App {
     /// network that is long enough to look like a dashboard that has stopped, so the keypress only
     /// says "checking…" and the loop draws that before blocking.
     pub(crate) pending_check: bool,
-    /// A requested `install.sh --update`, drained by `drain_terminal_requests`. The installer gets
-    /// the real terminal: it is slow, prints a lot, and may ask something.
-    pub(crate) pending_update: bool,
+    /// A requested installer run, drained by `drain_terminal_requests`. The installer gets the real
+    /// terminal either way: it is slow, prints a lot, and may ask something.
+    pub(crate) pending_install: Option<crate::update::InstallerRun>,
     /// Set by a SUCCESSFUL update: the binaries on disk are new and this process is not.
     ///
     /// A new binary is not a new process, so telling the human "restart pmtui" left them to finish
@@ -85,6 +85,10 @@ pub(crate) struct App {
     /// (`agent_manager::selfexec`), which covers the daemons this dashboard never started as well
     /// as its own — and one mechanism cannot race the other.
     pub(crate) relaunch_exe: std::path::PathBuf,
+    /// Where a REPAIR fetches the published installer from, when it is not derived from the one on
+    /// disk. Resolved once at startup from `$PMTUI_REPAIR_URL`, which is how a test points the fetch
+    /// at a local `file://` copy instead of the network.
+    pub(crate) repair_url: Option<String>,
     /// The `install.sh` this dashboard would run, resolved from the environment ONCE at startup.
     ///
     /// A field rather than a lookup at each use because edition 2024 forbids `set_var` in tests: a
@@ -394,9 +398,12 @@ impl App {
             update_status: crate::update::Status::Unchecked,
             update_installed: None,
             pending_check: false,
-            pending_update: false,
+            pending_install: None,
             pending_relaunch: false,
             relaunch_exe: agent_manager::selfexec::current_exe(),
+            repair_url: std::env::var("PMTUI_REPAIR_URL")
+                .ok()
+                .filter(|url| !url.is_empty()),
             installer_path: crate::app::updates::installer_from_env(),
             return_to_board_after_answer: false,
             return_to_board_after_switch: false,
@@ -634,13 +641,14 @@ impl App {
             // A picking row cannot reach here — `settings_open` routed on the gesture — but saying
             // so as a no-op beats an `unreachable!` that a future variant could reach for real.
             crate::settings::SettingKind::Theme => {}
-            crate::settings::SettingKind::Updates => {
-                if crate::update::next(&self.update_status).installs() {
-                    self.request_update();
-                } else {
-                    self.request_check();
-                }
-            }
+            crate::settings::SettingKind::Updates => match crate::update::next(&self.update_status)
+            {
+                crate::update::Next::Check => self.request_check(),
+                crate::update::Next::Install { .. } => self.request_update(),
+                // A too-old installer cannot repair itself by being run, so this is the one action
+                // that fetches a fresh script first.
+                crate::update::Next::FixInstaller => self.request_repair(),
+            },
         }
     }
 

@@ -208,6 +208,55 @@ pub(crate) fn status(check: &Check) -> Status {
     }
 }
 
+/// Where the published installer lives, when the one on disk does not say.
+///
+/// Only a fallback: `repair_url` prefers the `REPO=` line of the installer ALREADY installed, so a
+/// machine that installed from a fork repairs itself from that fork rather than silently being
+/// pointed at upstream.
+pub(crate) const REPO: &str = "hung-phan/pmtui";
+
+/// The `install.sh` to repair a too-old installer from, read from the installer on disk.
+///
+/// A machine stuck with a pre-`--check` script CANNOT repair itself by running it: `--update
+/// --if-newer` answers "Already up to date" and the self-copy is skipped because the running script
+/// is the stored one. Measured, not assumed. So the only way out is a fresh copy of the script, and
+/// the honest place to get it is the repository that installed this machine.
+pub(crate) fn repair_url(installer: &str) -> String {
+    let repo = installer
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("REPO="))
+        .map(|value| value.trim().trim_matches(['"', '\'']))
+        // `owner/name` and nothing else. Anything with whitespace, or without the slash, is a line
+        // this parser does not understand — and guessing at a URL from it would fetch a script from
+        // somewhere nobody chose.
+        .find(|repo| repo.contains('/') && !repo.contains(char::is_whitespace))
+        .unwrap_or(REPO);
+    format!("https://raw.githubusercontent.com/{repo}/main/install.sh")
+}
+
+/// Whether a downloaded file IS this installer.
+///
+/// A proxy error page and a truncated download are both a body with a 200, and replacing a working
+/// installer with one of those is the worst outcome available here. Structural markers rather than a
+/// version string, because those are what every release has in common.
+pub(crate) fn looks_like_installer(text: &str) -> bool {
+    text.lines()
+        .any(|line| line.starts_with("install_binary()"))
+        && text.lines().any(|line| line.starts_with("latest_tag()"))
+}
+
+/// Which installer run the drain owes the human.
+///
+/// Two kinds because a too-old installer needs a DIFFERENT run: the one on disk cannot repair
+/// itself, so the repair fetches the published script first and runs that instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InstallerRun {
+    /// `install.sh --update --if-newer -y`, using the installer already on disk.
+    Update,
+    /// Download the published `install.sh`, then run its update.
+    Repair,
+}
+
 /// What `Enter` on the row does next.
 ///
 /// ONE KEYPRESS, NOT A MENU. The row has at most one sensible action at any moment — ask, or install
@@ -228,13 +277,6 @@ pub(crate) enum Next {
     Install { latest: String },
     /// Run the installer so it replaces its own copy, because the one on disk cannot be asked.
     FixInstaller,
-}
-
-impl Next {
-    /// Whether this runs the installer — and so takes the terminal — rather than only asking.
-    pub(crate) fn installs(&self) -> bool {
-        !matches!(self, Self::Check)
-    }
 }
 
 /// The one action a status leaves to do.

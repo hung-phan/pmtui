@@ -266,11 +266,104 @@ fn an_installer_too_old_to_ask_is_named_rather_than_blamed_on_the_network() {
         !said.contains("could not reach GitHub"),
         "a working network is still being blamed: {said}"
     );
-    // AND THE WAY OUT IS ON SCREEN: the old installer's own `--update` replaces its copy of itself,
-    // so the next press fixes the thing that is broken.
+    // AND THE WAY OUT IS ON SCREEN. Not "update" — a too-old installer cannot repair itself, which
+    // was measured: it answers `--update --if-newer` with "Already up to date" and skips its own
+    // self-copy. So the offer is a REPAIR, which fetches a current script and runs that.
     assert!(
-        said.contains("Update the installer"),
+        said.contains("Repair the installer"),
         "the keybar does not offer the fix: {said}"
+    );
+}
+
+#[test]
+#[ignore = "acceptance: real pmtui update check over tmux"]
+fn a_repair_fetches_a_current_installer_and_runs_it() {
+    if !tmux_available() {
+        eprintln!("skipping settings-update acceptance: tmux not available");
+        return;
+    }
+
+    // THE WHOLE ESCAPE, end to end in a real process: a stuck machine presses Enter twice and comes
+    // back able to check. Fetched over `file://`, so the test needs no network — the only thing a
+    // URL scheme changes here is where `curl` reads from.
+    let host = TmuxSocket::new("am-settings-repair");
+    let inner = TmuxSocket::new("am-settings-repair-inner");
+    let dir = tempfile::tempdir().expect("scratch root");
+    let registry = dir.path().join("registry.json");
+    seed_standard_loop_session(&registry, dir.path(), "alpha");
+    let data = old_installer(dir.path());
+    let log = dir.path().join("installer.log");
+
+    // What the repair will fetch: a script that LOOKS like the installer (it must pass the sniff)
+    // and records how it was called.
+    let published = dir.path().join("published-install.sh");
+    std::fs::write(
+        &published,
+        format!(
+            "#!/bin/sh\ninstall_binary() {{ :; }}\nlatest_tag() {{ :; }}\necho \"fetched $@\" >> '{}'\nexit 0\n",
+            log.display()
+        ),
+    )
+    .expect("write the published installer");
+
+    let command = format!(
+        "env XDG_DATA_HOME='{}' PMTUI_REPAIR_URL='file://{}' '{}' --registry '{}' --socket '{}'",
+        data.display(),
+        published.display(),
+        env!("CARGO_BIN_EXE_pmtui"),
+        registry.display(),
+        inner.name()
+    );
+    let status = Command::new("tmux")
+        .args([
+            "-L",
+            host.name(),
+            "new-session",
+            "-d",
+            "-s",
+            "ui",
+            "-x",
+            "120",
+            "-y",
+            "32",
+            &command,
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("launch scratch pmtui");
+    assert!(status.success());
+    let driver = TmuxDriver::with_socket(host.name());
+    assert!(wait_for_pane_text_within(
+        &driver,
+        "ui",
+        "SESSIONS",
+        Duration::from_secs(5)
+    ));
+
+    open_updates_row(&host, &driver);
+    assert!(send_key(host.name(), "ui", "Enter"));
+    assert!(
+        wait_for_pane_text_within(&driver, "ui", "too old", Duration::from_secs(15)),
+        "the row never reached the stuck state: {}",
+        driver.capture_tail("ui", 40).unwrap_or_default()
+    );
+
+    // THE SECOND PRESS ESCAPES IT.
+    assert!(send_key(host.name(), "ui", "Enter"));
+    assert!(
+        wait_for_pane_text_within(&driver, "ui", "SESSIONS", Duration::from_secs(30)),
+        "pmtui never restarted after the repair: {}",
+        driver.capture_tail("ui", 40).unwrap_or_default()
+    );
+
+    // It ran the FETCHED script, not the stale one on disk — which is the whole point, since the
+    // stale one would have said "Already up to date" and changed nothing.
+    let ran = std::fs::read_to_string(&log).expect("the fetched installer ran");
+    assert!(
+        ran.lines()
+            .any(|line| line == "fetched --update --if-newer -y"),
+        "the repair ran the wrong script or arguments: {ran}"
     );
 }
 
