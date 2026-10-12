@@ -54,7 +54,8 @@ pub(crate) struct SendProbe {
     pub(crate) attached: bool,
     /// The pane is in copy-mode/scrollback.
     pub(crate) in_mode: bool,
-    /// The pane's tail. `None` = the capture failed, which is a REFUSAL (see below).
+    /// The pane's tail, STYLED (`capture_tail_styled`), because only the styles tell Claude's
+    /// dim hint from a person's draft. `None` = the capture failed, which is a REFUSAL (see below).
     pub(crate) capture: Option<String>,
 }
 
@@ -153,20 +154,51 @@ pub(crate) fn send_decision(t: &SendTarget, p: &SendProbe) -> SendPlan {
         // argument `s` does not inherit.
         return SendPlan::Refuse("scrolled back there — send it in that pane".into());
     }
-    let Some(cap) = p.capture.as_deref() else {
+    let Some(styled) = p.capture.as_deref() else {
         return SendPlan::Refuse("can't read the pane — nothing sent".into());
     };
-    if tmux::classify_dialog(cap).is_some() {
-        return SendPlan::Refuse("dialog up — press Enter and answer it there".into());
-    }
-    if !tmux::has_composer_in_tail(cap, SEND_GATE_LINES) {
-        return SendPlan::Refuse("no prompt on screen — press Enter to look".into());
+    if let Some(refusal) = pane_refusal(styled) {
+        return SendPlan::Refuse(refusal.into());
     }
     // Mid-response is FINE and is sent, not refused: the composer accepts it and it
     // becomes the agent's next turn. Refusing here would reproduce "it did nothing", and
     // the send only DELAYS pmd's next nudge (idle confirmations reset naturally).
-    if tmux::classify_pane(cap) == tmux::PaneActivity::Busy && tmux::has_composer(cap) {
+    let cap = tmux::unstyled(styled);
+    if tmux::classify_pane(&cap) == tmux::PaneActivity::Busy && tmux::has_composer(&cap) {
         return SendPlan::Send(format!("sent → {} (it was working)", t.id));
     }
     SendPlan::Send(format!("sent → {}", t.id))
+}
+
+/// Why the pane cannot take a typed Message right now, from a STYLED capture
+/// (`capture_tail_styled`), or `None` when it can.
+///
+/// Shared by [`send_decision`] and `App::deliver`'s final recheck, so the press and the write
+/// can never disagree about what is safe. In order: a dialog (the `Enter` would answer it), a
+/// blocking state drawn around the input box, no prompt at all, and a person's unsent draft in
+/// the box (our text would be glued onto theirs and submitted). The dialog check precedes the
+/// prompt check so its clearer reason wins; `has_composer_in_tail` refuses a dialog anyway.
+pub(crate) fn pane_refusal(styled: &str) -> Option<&'static str> {
+    let cap = tmux::unstyled(styled);
+    if tmux::classify_dialog(&cap).is_some() {
+        return Some("dialog up — press Enter and answer it there");
+    }
+    match tmux::send_blocker(&cap) {
+        Some(tmux::SendBlocker::Survey) => {
+            return Some("the agent is asking for feedback — press Enter and answer it there");
+        }
+        Some(tmux::SendBlocker::UsageLimit) => {
+            return Some("usage limit reached — send it after the limit resets");
+        }
+        None => {}
+    }
+    if !tmux::has_composer_in_tail(&cap, SEND_GATE_LINES) {
+        return Some("no prompt on screen — press Enter to look");
+    }
+    if tmux::claude_draft_in_box(styled) {
+        return Some(
+            "the agent's input box has unsent text — press Enter, then submit or clear it",
+        );
+    }
+    None
 }

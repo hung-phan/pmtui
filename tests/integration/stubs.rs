@@ -181,6 +181,23 @@ pub(crate) const ECHOING_COMPOSER_STUB: &str = "#!/bin/sh\n\
      prompt\n\
      while IFS= read -r l; do printf 'ECHO %s\\n' \"$l\"; prompt; done\n";
 
+/// A stub engine that draws Claude's input box as Claude Code v2.1.296 does on a fresh session:
+/// a `─` rule, `❯` and a hint drawn DIM (SGR 2), a closing rule. It echoes each submitted line and
+/// redraws the box, so the dim style is only visible to a `capture-pane -e` read of a real pane.
+pub(crate) const HINT_BOX_STUB: &str = "#!/bin/sh\n\
+     r='\\342\\224\\200\\342\\224\\200\\342\\224\\200\\342\\224\\200\\342\\224\\200\\342\\224\\200\\342\\224\\200\\342\\224\\200\\342\\224\\200\\342\\224\\200\\342\\224\\200\\342\\224\\200'\n\
+     box() { printf \"$r\\n\\342\\235\\257 \\033[2mTry \\\"how do I log an error?\\\"\\033[0m\\n$r\\n\"; }\n\
+     box\n\
+     while IFS= read -r l; do printf 'ECHO %s\\n' \"$l\"; box; done\n";
+
+/// The same box holding a person's unsent DRAFT, in plain text. `LEAKED` is the tripwire: a send
+/// here would glue its text onto the draft and submit both.
+pub(crate) const DRAFT_BOX_STUB: &str = "#!/bin/sh\n\
+     r='\\342\\224\\200\\342\\224\\200\\342\\224\\200\\342\\224\\200\\342\\224\\200\\342\\224\\200\\342\\224\\200\\342\\224\\200\\342\\224\\200\\342\\224\\200\\342\\224\\200\\342\\224\\200'\n\
+     box() { printf \"$r\\n\\342\\235\\257 refactor the parser but keep\\n$r\\n\"; }\n\
+     box\n\
+     while IFS= read -r l; do printf 'LEAKED %s\\n' \"$l\"; box; done\n";
+
 /// A stub engine that puts a PERMISSION DIALOG on screen and reports anything it is sent.
 ///
 /// `LEAKED` is the tripwire: if `s` ever writes here, the text shows up in the pane and

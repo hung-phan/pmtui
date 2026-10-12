@@ -380,14 +380,43 @@ fn current_claude_placeholder_composer_accepts_text() {
         "Claude's current placeholder prompt must accept pmtui's s-send gate"
     );
     assert_eq!(classify_pane(pane), PaneActivity::Idle);
+    let reworded = pane.replace("Try \"how do I log an error?\"", "Ask anything");
     assert!(
-        has_composer("❯ Try \"write a test for <filepath>\"\n"),
-        "Claude rotates placeholder examples"
+        has_composer(&reworded),
+        "the box is the prompt, whatever hint Claude rotates into it"
     );
     assert!(
         !has_composer("❯ Tell me a joke.\n"),
         "arbitrary echoed user messages must not become composers"
     );
+}
+
+#[test]
+fn claude_box_prompt_survives_a_footer_taller_than_the_activity_window() {
+    let mut pane = String::from(concat!(
+        "────────────────────────────────\n",
+        "❯\u{a0}Try \"fix lint errors\"\n",
+        "────────────────────────────────\n",
+    ));
+    for row in 0..PANE_TAIL_LINES {
+        pane.push_str(&format!("  statusline row {row}\n"));
+    }
+    assert!(!has_composer(&pane), "outside the 16-row activity window");
+    assert!(
+        crate::tmux::has_composer_in_tail(&pane, 40),
+        "the send gate reads the 40 rows it captured"
+    );
+}
+
+#[test]
+fn a_numbered_choice_inside_rules_is_not_a_claude_prompt() {
+    let pane = concat!(
+        "────────────────────────────────\n",
+        "❯ 1. Yes\n",
+        "  2. No\n",
+        "────────────────────────────────\n",
+    );
+    assert!(!has_composer(pane));
 }
 
 #[test]

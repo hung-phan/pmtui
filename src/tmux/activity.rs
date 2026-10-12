@@ -51,9 +51,10 @@ pub(super) const PANE_TAIL_LINES: usize = 16;
 ///   1. Busy if a line contains `esc to interrupt`/`ctrl+c to interrupt` (case-insensitive), OR a Braille
 ///      spinner glyph (`U+2800..=U+28FF`) — both seen in other/older builds — OR is an in-progress
 ///      spinner-led line (see [`is_busy_spinner_line`]).
-///   2. Else Idle if ANY line in the window is an input prompt awaiting text: a bare claude prompt
-///      (`>`/`❯` then whitespace only, [`is_bare_prompt`]) or codex's composer ([`is_codex_composer`],
-///      which is NEVER bare — it carries a rotating placeholder).
+///   2. Else Idle if ANY line in the window is an input prompt ([`is_prompt_row`]): a bare claude
+///      prompt (`>`/`❯` then whitespace only), claude's prompt inside its input box whatever the box
+///      holds, or codex's composer ([`is_codex_composer`], which is NEVER bare — it carries a
+///      rotating placeholder).
 ///   3. Else Busy (conservative default — unknown ⇒ don't nudge).
 pub fn classify_pane(capture: &str) -> PaneActivity {
     let non_empty: Vec<&str> = capture.lines().filter(|l| !l.trim().is_empty()).collect();
@@ -80,16 +81,11 @@ pub fn classify_pane(capture: &str) -> PaneActivity {
             return PaneActivity::Busy;
         }
     }
-    // (2) Confident-Idle: an input prompt anywhere in the window awaits input —
-    // claude's BARE prompt, or codex's composer, which is never bare (see
-    // `is_codex_composer`) and so needs its own predicate rather than a widened
-    // character class in `is_claude_composer`.
-    // Shares its prompt predicate with [`has_composer`] (which pmtui's `s` key gates on) so the
-    // two can never disagree about what counts as an input field.
-    if window
-        .iter()
-        .any(|line| is_claude_composer(line) || is_codex_composer(line))
-    {
+    // (2) Confident-Idle: an input prompt anywhere in the window awaits input.
+    // Shares [`is_prompt_row`] with [`has_composer`] (which pmtui's `s` key gates on) so the
+    // two can never disagree about what counts as an input field. The row's neighbours are
+    // read from the whole capture, so a box rule just above the window still counts.
+    if (start..non_empty.len()).any(|at| is_prompt_row(&non_empty, at)) {
         PaneActivity::Idle
     } else {
         PaneActivity::Busy
@@ -178,9 +174,7 @@ pub fn has_composer_in_tail(capture: &str, tail_lines: usize) -> bool {
         return false;
     }
     let start = non_empty.len().saturating_sub(tail_lines);
-    non_empty[start..]
-        .iter()
-        .any(|l| is_claude_composer(l) || is_codex_composer(l))
+    (start..non_empty.len()).any(|at| is_prompt_row(&non_empty, at))
 }
 
 /// A content fingerprint of the TRANSCRIPT REGION of an Idle-classified capture — the
@@ -206,7 +200,7 @@ pub fn has_composer_in_tail(capture: &str, tail_lines: usize) -> bool {
 /// whose counters tick every second even while the agent waits; hashing them would mean
 /// two captures a recheck apart are NEVER byte-stable and a genuinely idle session would
 /// never be nudged. So the fingerprint stops at the LAST input-prompt line
-/// ([`is_bare_prompt`] / [`is_codex_composer`]): everything above is transcript, and the
+/// ([`is_prompt_row`]): everything above is transcript, and the
 /// prompt line and everything below it (the volatile footer, and codex's own rotating
 /// composer placeholder) are excluded. With no prompt line at all (not an Idle capture —
 /// the gate only calls this on one) it hashes the whole capture, which still changes when
@@ -215,10 +209,7 @@ pub fn has_composer_in_tail(capture: &str, tail_lines: usize) -> bool {
 pub fn idle_fingerprint(capture: &str) -> u64 {
     use std::hash::{Hash, Hasher};
     let lines: Vec<&str> = capture.lines().collect();
-    let boundary = lines
-        .iter()
-        .rposition(|l| is_claude_composer(l) || is_codex_composer(l))
-        .unwrap_or(lines.len());
+    let boundary = last_prompt_row(&lines).unwrap_or(lines.len());
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for line in &lines[..boundary] {
         line.trim_end().hash(&mut hasher);
@@ -237,10 +228,7 @@ pub fn progress_fingerprint(capture: &str) -> u64 {
     const FNV_PRIME: u64 = 0x100000001b3;
 
     let lines: Vec<&str> = capture.lines().collect();
-    let boundary = lines
-        .iter()
-        .rposition(|line| is_claude_composer(line) || is_codex_composer(line))
-        .unwrap_or(lines.len());
+    let boundary = last_prompt_row(&lines).unwrap_or(lines.len());
     let mut hash = FNV_OFFSET;
     for line in &lines[..boundary] {
         let line = line.trim_end();
@@ -275,22 +263,61 @@ pub(super) fn is_bare_prompt(line: &str) -> bool {
     matches!(chars.next(), Some('>') | Some('❯')) && chars.all(char::is_whitespace)
 }
 
-/// Claude's COMPOSER line.
+/// Is the row at `at` an input prompt awaiting text? The ONE prompt predicate shared by
+/// [`classify_pane`], [`has_composer`] and the fingerprints. It takes the row's neighbours
+/// because claude's prompt is recognised by where it sits, not by what it says.
+pub(super) fn is_prompt_row(lines: &[&str], at: usize) -> bool {
+    let line = lines[at];
+    is_bare_prompt(line) || is_codex_composer(line) || claude_box(lines, at).is_some()
+}
+
+/// The index of the last prompt row in `lines`, if any.
+fn last_prompt_row(lines: &[&str]) -> Option<usize> {
+    (0..lines.len()).rev().find(|&at| is_prompt_row(lines, at))
+}
+
+/// Claude's prompt INSIDE ITS INPUT BOX: when the row at `at` is one, the index of the
+/// rule that closes the box.
 ///
-/// Older captures showed a bare `❯`; current Claude Code can render a rotating placeholder
-/// hint after the prompt lead, for example `❯ Try "how do I log an error?"`. Keep the
-/// non-bare case shape-anchored: Claude transcript echoes use the same `❯` lead, so an
-/// arbitrary `❯ <text>` line is not proof that the pane is accepting input.
-fn is_claude_composer(line: &str) -> bool {
-    if is_bare_prompt(line) {
-        return true;
+/// Claude draws its input box as a `─` rule, the `❯` row, any continuation rows of a
+/// multi-line draft (indented, unmarked), and a closing `─` rule. What the `❯` row holds
+/// varies — nothing, a rotating dim hint (`❯ Try "how do I log an error?"` on a fresh
+/// session, measured on v2.1.296), or a draft — so matching its WORDS broke every time the
+/// wording changed. Its PLACE does not change: a submitted message echoed in the transcript
+/// carries the same `❯` lead (`❯ Tell me a joke.`) but never sits between two rules.
+///
+/// Whether the box holds a draft is a separate question that only a STYLED capture can
+/// answer (the hint is dim, typed text is not); see `send_gate::claude_draft_in_box`.
+/// Blank rows are skipped, so this reads a raw capture and a non-empty-filtered one alike.
+/// A numbered `❯ 1. Yes` row is a dialog choice, never a prompt.
+pub(super) fn claude_box(lines: &[&str], at: usize) -> Option<usize> {
+    let row = lines[at].trim();
+    if !row.starts_with('❯') || dialog_option_text(row).is_some() {
+        return None;
     }
-    line.trim().strip_prefix('❯').is_some_and(|rest| {
-        let placeholder = rest.trim();
-        placeholder
-            .strip_prefix("Try \"")
-            .is_some_and(|example| example.ends_with('"') && example.len() > 1)
-    })
+    let above = lines[..at].iter().rev().find(|l| !l.trim().is_empty())?;
+    if !is_box_rule(above) {
+        return None;
+    }
+    for (offset, line) in lines[at + 1..].iter().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if is_box_rule(line) {
+            return Some(at + 1 + offset);
+        }
+        // A draft's continuation row is indented; anything else means this is no box.
+        if !line.starts_with(char::is_whitespace) {
+            return None;
+        }
+    }
+    None
+}
+
+/// A horizontal box rule: a run of at least eight `─` and nothing else.
+pub(super) fn is_box_rule(line: &str) -> bool {
+    let rule = line.trim();
+    rule.chars().count() >= 8 && rule.chars().all(|c| c == '─')
 }
 
 /// codex's COMPOSER line — the analogue of claude's bare prompt, and the reason

@@ -156,7 +156,7 @@ impl App {
             // gate below is the one that fails closed.
             attached: d.has_clients(&t.session).unwrap_or(false),
             in_mode: d.pane_in_mode(&t.session).unwrap_or(false),
-            capture: d.capture_tail(&t.session, SEND_GATE_LINES).ok(),
+            capture: d.capture_tail_styled(&t.session, SEND_GATE_LINES).ok(),
         };
         send_decision(t, &probe)
     }
@@ -231,11 +231,9 @@ impl App {
         }
         let capture = self
             .agent_tmux
-            .capture_tail(&t.session, SEND_GATE_LINES)
+            .capture_tail_styled(&t.session, SEND_GATE_LINES)
             .context("re-read pane before send")?;
-        if tmux::classify_dialog(&capture).is_some()
-            || !tmux::has_composer_in_tail(&capture, SEND_GATE_LINES)
-        {
+        if pane_refusal(&capture).is_some() {
             anyhow::bail!("the pane changed while the message was waiting");
         }
         self.agent_tmux.send_keys(&t.session, &payload)

@@ -4,10 +4,33 @@
 
 use super::*;
 
-const IDLE_CLAUDE_PLACEHOLDER_PANE: &str = "\u{2500}\u{2500}\u{2500}\u{2500}\n\
-     \u{276f}\u{a0}Try \"how do I log an error?\"\n\
-     \u{2500}\u{2500}\u{2500}\u{2500}\n\
-     \u{23f5}\u{23f5} auto mode on (shift+tab to cycle) \u{b7} \u{2190} for agents\n";
+/// A fresh Claude Code v2.1.296 session as `capture-pane -e` returns it: the empty input box
+/// shows a rotating hint, drawn dim (`ESC[2m`).
+const IDLE_CLAUDE_PLACEHOLDER_PANE: &str = concat!(
+    "\x1b[38;5;244m────────────────────────────────\n",
+    "\x1b[39m❯ \x1b[2mTry \"how do I log an error?\"\n",
+    "\x1b[38;5;244m────────────────────────────────\n",
+    "\x1b[39m  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n",
+);
+
+/// The same box holding a person's unsent draft: plain text, not dim.
+const CLAUDE_DRAFT_PANE: &str = concat!(
+    "\x1b[38;5;244m────────────────────────────────\n",
+    "\x1b[39m❯\u{a0}refactor the parser but keep\n",
+    "\x1b[38;5;244m────────────────────────────────\n",
+    "\x1b[39m  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n",
+);
+
+/// Claude's inline survey, which draws the input box but takes digit keys as answers.
+const CLAUDE_SURVEY_PANE: &str = concat!(
+    "● Done.\n",
+    "\n",
+    "How is Claude doing this session? (optional)\n",
+    "1: Bad    2: Fine   3: Good   0: Dismiss\n",
+    "────────────────────────────────\n",
+    "❯\u{a0}\n",
+    "────────────────────────────────\n",
+);
 
 fn prompt_with_long_footer(prompt: &str, footer_lines: usize) -> String {
     let mut pane = format!("transcript above\n{prompt}\n");
@@ -44,6 +67,40 @@ fn s_sends_to_a_claude_pane_waiting_at_its_placeholder_composer() {
         "Claude's non-bare placeholder prompt must be accepted as a composer"
     );
     assert_eq!(app.status, "sent \u{2192} bot");
+}
+
+#[test]
+fn s_refuses_a_claude_box_holding_someone_elses_draft() {
+    // Typing appends to the draft and our Enter submits both as one garbled message.
+    let dir = tempfile::tempdir().unwrap();
+    let (mut app, pane, _, _) = send_app(dir.path(), CLAUDE_DRAFT_PANE);
+    send_via_keys(&mut app, "run the tests");
+
+    assert!(
+        pane.sends().is_empty(),
+        "bytes reached a draft: {:?}",
+        pane.sends()
+    );
+    assert!(
+        app.status.contains("input box has unsent text"),
+        "status: {:?}",
+        app.status
+    );
+}
+
+#[test]
+fn s_refuses_a_pane_showing_claudes_survey() {
+    // The survey takes digit keys, so a Message with a digit would answer it.
+    let dir = tempfile::tempdir().unwrap();
+    let (mut app, pane, _, _) = send_app(dir.path(), CLAUDE_SURVEY_PANE);
+    send_via_keys(&mut app, "try option 2");
+
+    assert!(pane.sends().is_empty(), "bytes reached the survey");
+    assert!(
+        app.status.contains("asking for feedback"),
+        "status: {:?}",
+        app.status
+    );
 }
 
 #[test]
