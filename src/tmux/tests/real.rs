@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
+
 use tempfile::tempdir;
 
 use crate::tmux::codex::{
@@ -20,7 +21,7 @@ use crate::tmux::{
     Driver, Observation, PaneDialog, StepHandle, TmuxDriver, classify_dialog, observe,
 };
 use crate::tmux::{
-    LAUNCH_COMMAND_MAX_BYTES, LaunchError, LaunchOutcome, ManagedEnv, launch_command,
+    LAUNCH_COMMAND_MAX_BYTES, LaunchError, LaunchOutcome, ManagedEnv, launch_command, shell_command,
 };
 
 #[test]
@@ -33,6 +34,10 @@ fn shq_escapes_single_quotes() {
 fn launch_command_is_the_quoted_argv_tmux_receives() {
     assert_eq!(
         launch_command(&["claude".into(), "--".into(), "it's".into()]),
+        "exec 'claude' '--' 'it'\\''s'"
+    );
+    assert_eq!(
+        shell_command(&["claude".into(), "--".into(), "it's".into()]),
         "'claude' '--' 'it'\\''s'"
     );
 }
@@ -653,11 +658,14 @@ fn missing_tmux_binary_reports_spawn_errors_without_panicking() {
 /// anything it does not own.
 #[test]
 fn request_stop_signals_the_panes_own_group_and_tolerates_a_missing_pane() {
+    use std::os::unix::process::CommandExt;
+
     let fx = ScriptedTmux::new();
 
     // A process group of our own: signalled, and gone afterwards.
-    let mut child = Command::new("setsid")
-        .args(["sh", "-c", "sleep 30"])
+    let mut child = Command::new("sh")
+        .process_group(0)
+        .args(["-c", "sleep 30"])
         .spawn()
         .expect("spawn a scratch process group");
     std::fs::write(&fx.own_pid, child.id().to_string()).unwrap();
@@ -736,6 +744,7 @@ fn interactive_launch_passes_each_managed_var_with_dash_e_before_the_command() {
             "PMTUI_STATE_DIR=/x/.project-state/sessions/s1-0a1b2c3d",
             "-e",
             "PMTUI_BIN=/bin/pmtui",
+            "exec",
             "'true'",
         ],
         "every managed var sits after the size flags and before the command: {args:?}"

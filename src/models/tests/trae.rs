@@ -7,7 +7,7 @@ use std::process::Command;
 const DISCOVERY_EXPECTATION: &str = "PM_TEST_TRAE_DISCOVERY_EXPECTATION";
 
 fn write_trae_stub(directory: &Path, script: &str) {
-    let path = directory.join("traecli");
+    let path = directory.join("traex");
     std::fs::write(&path, script).expect("write TRAE stub");
     let mut permissions = std::fs::metadata(&path)
         .expect("read TRAE stub metadata")
@@ -40,7 +40,7 @@ fn parses_models_from_json_array() {
     let got = trae::parse(
         r#"[
             {"name":"seed-1","real_name":"Seed 1","description":"fast","context_window":200000},
-            {"name":"seed-2","description":"large","context_window":1000000},
+            {"name":"seed-2","config_name":"Seed Two","description":"large","context_window":1000000},
             {"name":"","real_name":"Missing"},
             {"description":"Missing name"}
         ]"#,
@@ -53,7 +53,7 @@ fn parses_models_from_json_array() {
                 value: "seed-1".into(),
             },
             ModelInfo {
-                label: "seed-2 - large".into(),
+                label: "Seed Two - large".into(),
                 value: "seed-2".into(),
             },
         ]
@@ -71,7 +71,7 @@ fn discovers_models_from_successful_command() {
     let bin = tempfile::tempdir().expect("temporary TRAE bin directory");
     write_trae_stub(
         bin.path(),
-        "#!/bin/sh\nprintf '%s\\n' '[{\"name\":\"seed-1\",\"real_name\":\"Seed 1\",\"description\":\"fast\",\"context_window\":200000},{\"name\":\"seed-2\",\"description\":\"large\",\"context_window\":1000000}]'\n",
+        "#!/bin/sh\nprintf '%s\\n' '[{\"name\":\"seed-1\",\"real_name\":\"Seed 1\",\"description\":\"fast\",\"context_window\":200000},{\"name\":\"seed-2\",\"config_name\":\"Seed Two\",\"description\":\"large\",\"context_window\":1000000}]'\n",
     );
 
     run_discovery_probe(bin.path(), "configured");
@@ -106,7 +106,7 @@ fn discovery_probe() {
                     value: "seed-1".into(),
                 },
                 ModelInfo {
-                    label: "seed-2 - large".into(),
+                    label: "Seed Two - large".into(),
                     value: "seed-2".into(),
                 },
             ]

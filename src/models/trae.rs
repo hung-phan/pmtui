@@ -1,4 +1,4 @@
-//! TRAE models come from `traecli models --json`, a JSON array whose `name` is the launch value.
+//! TRAE models come from `traex models --json`, a JSON array whose `name` is the launch value.
 //! Discovery is best-effort: a missing CLI, non-zero exit, or malformed output yields no choices.
 
 use super::ModelInfo;
@@ -9,12 +9,14 @@ struct Entry {
     #[serde(default)]
     name: String,
     #[serde(default)]
+    config_name: String,
+    #[serde(default)]
     real_name: String,
     #[serde(default)]
     description: String,
 }
 
-/// Parse `traecli models --json` output. PURE (no process spawn) so it is unit-tested on fixtures.
+/// Parse `traex models --json` output. PURE (no process spawn) so it is unit-tested on fixtures.
 pub(super) fn parse(body: &str) -> Vec<ModelInfo> {
     let Ok(entries) = serde_json::from_str::<Vec<Entry>>(body) else {
         return Vec::new();
@@ -24,7 +26,9 @@ pub(super) fn parse(body: &str) -> Vec<ModelInfo> {
         .filter(|entry| !entry.name.trim().is_empty())
         .map(|entry| {
             let name = entry.name;
-            let title = if entry.real_name.trim().is_empty() {
+            let title = if !entry.config_name.trim().is_empty() {
+                entry.config_name
+            } else if entry.real_name.trim().is_empty() {
                 name.clone()
             } else {
                 entry.real_name
@@ -40,7 +44,7 @@ pub(super) fn parse(body: &str) -> Vec<ModelInfo> {
 }
 
 pub(super) fn discover() -> Vec<ModelInfo> {
-    match std::process::Command::new("traecli")
+    match std::process::Command::new("traex")
         .args(["models", "--json"])
         .output()
     {

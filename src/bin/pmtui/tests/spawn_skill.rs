@@ -1,5 +1,5 @@
 //! Every terminal the dashboard launches with `PMTUI_BIN` ships the pmtui-spawn skill into its
-//! project root first: the canonical `.agents/skills/pmtui-spawn/SKILL.md` for both engines, plus
+//! project root first: the canonical `.agents/skills/pmtui-spawn/SKILL.md` for every engine, plus
 //! Claude's exact `.claude/skills/pmtui-spawn` alias. A launch that names no pmtui ships nothing,
 //! and a failed install never blocks the launch.
 
@@ -115,10 +115,7 @@ fn resume_and_restart_ship_the_skill_before_the_terminal_starts() {
         let mut app = app_with_driver(vec![], UiMode::Normal, Box::new(pane.clone()));
         app.pmtui_bin = Some(PathBuf::from(PMTUI));
         let session = session_name("bot", dir.path());
-        pane.arm_launch_error(
-            &session,
-            tmux::LaunchError::NotOnPath(engine.label().into()),
-        );
+        pane.arm_launch_error(&session, tmux::LaunchError::NotOnPath(engine.bin().into()));
 
         let outcome = app.start_undriven_session(
             "bot",

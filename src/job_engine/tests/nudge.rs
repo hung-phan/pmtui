@@ -718,6 +718,13 @@ fn loop_nudge_prompt_invokes_the_worker_skill_in_the_engines_native_form() {
     assert!(!codex.contains("/agent-manager-worker"));
     assert!(codex.contains("`agent-manager-worker` skill"));
 
+    let trae = loop_nudge_prompt_for_engine(input(true), Engine::Trae);
+    assert!(!trae.contains("/agent-manager-worker"));
+    assert!(
+        trae.contains("follow the inline fallback below"),
+        "TRAE has no proven Autopilot skill contract: {trae}"
+    );
+
     let claude_without_skill = loop_nudge_prompt_for_engine(input(false), Engine::Claude);
     assert!(!claude_without_skill.contains("/agent-manager-worker"));
     assert!(claude_without_skill.contains("follow the inline fallback below"));

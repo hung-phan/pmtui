@@ -12,7 +12,7 @@ use crate::state::ProjectPaths;
 use crate::tmux::ManagedEnv;
 
 /// The worker loop protocol Milestone E moves OUT of the per-wake nudge and into the canonical
-/// project skill auto-discovered by either engine.
+/// project skill auto-discovered by Codex and TraeX.
 pub const WORKER_SKILL_MD: &str = include_str!("../skills/agent-manager-worker/SKILL.md");
 
 /// The supervisor-consult reasoning protocol (Milestone E, Task 5). Appended to the consult's
@@ -26,7 +26,7 @@ pub const WORKER_SKILL_NAME: &str = "agent-manager-worker";
 /// Claude reaches the same directory through [`CLAUDE_WORKER_SKILL_LINK_REL_PATH`].
 pub const WORKER_SKILL_REL_PATH: &str = ".agents/skills/agent-manager-worker/SKILL.md";
 
-/// Codex's canonical repository skill path.
+/// Codex and TraeX's canonical repository skill path.
 pub const CODEX_WORKER_SKILL_REL_PATH: &str = ".agents/skills/agent-manager-worker/SKILL.md";
 
 /// Claude's project skills directory relative to the project root.
@@ -46,7 +46,7 @@ pub const SPAWN_SKILL_MD: &str = include_str!("../skills/pmtui-spawn/SKILL.md");
 /// The spawn skill's name, and its directory under `.agents/skills/` and `.claude/skills/`.
 pub const SPAWN_SKILL_NAME: &str = "pmtui-spawn";
 
-/// The canonical spawn SKILL.md path relative to a project root, shared by Claude and Codex.
+/// The canonical spawn SKILL.md path relative to a project root, shared by Claude, Codex, and TraeX.
 pub const SPAWN_SKILL_REL_PATH: &str = ".agents/skills/pmtui-spawn/SKILL.md";
 
 /// Claude's spawn-skill directory alias relative to the project root.

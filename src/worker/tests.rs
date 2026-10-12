@@ -72,6 +72,28 @@ fn standard_persistent_commands_keep_human_posture_and_install_turn_hook() {
         !codex.iter().any(|arg| arg == "--sandbox"),
         "a Standard session keeps the host's sandbox posture: {codex:?}"
     );
+
+    let trae = build_standard_command(
+        Engine::Trae,
+        &Resume::Continue("trae-session".into()),
+        Some(&signal),
+        None,
+    );
+    let config_at = trae.iter().position(|arg| arg == "-c").unwrap();
+    let resume_at = trae.iter().position(|arg| arg == "resume").unwrap();
+    assert!(config_at < resume_at, "{trae:?}");
+    assert!(
+        trae[config_at + 1].contains("hooks.Stop"),
+        "Standard TraeX should carry the same Stop hook for later Autopilot: {trae:?}"
+    );
+    assert!(
+        !trae.iter().any(|arg| arg == "--permission-mode"),
+        "a Standard TraeX session keeps human-controlled permissions: {trae:?}"
+    );
+    assert!(
+        !trae.iter().any(|arg| arg == "--sandbox"),
+        "a Standard TraeX session keeps the host sandbox posture: {trae:?}"
+    );
 }
 
 #[test]
@@ -358,7 +380,7 @@ fn codex_fresh_ignores_pinned_session_id() {
 }
 
 #[test]
-fn trae_headless_command_uses_pinned_or_resumed_session_with_safe_permissions() {
+fn trae_headless_command_uses_traex_exec_json_with_pinned_or_resumed_session() {
     let fresh = build_command(
         Engine::Trae,
         "work",
@@ -371,14 +393,14 @@ fn trae_headless_command_uses_pinned_or_resumed_session_with_safe_permissions() 
     assert_eq!(
         fresh,
         vec![
-            "traecli",
-            "-p",
-            "--permission-mode",
-            "default",
+            "traex",
+            "exec",
+            "--sandbox",
+            "workspace-write",
+            "--skip-git-repo-check",
+            "--json",
             "--session-id",
             "trae-session",
-            "--output-format",
-            "stream-json",
             "--add-dir",
             "/repo/extra",
             "--",
@@ -395,16 +417,16 @@ fn trae_headless_command_uses_pinned_or_resumed_session_with_safe_permissions() 
     );
     assert!(
         resumed
-            .windows(2)
-            .any(|w| w == ["--resume", "trae-session"]),
+            .windows(3)
+            .any(|w| w == ["exec", "resume", "trae-session"]),
         "{resumed:?}"
     );
     assert!(
-        !fresh
-            .iter()
-            .chain(resumed.iter())
-            .any(|arg| matches!(arg.as_str(), "-y" | "--yolo" | "bypass_permissions")),
-        "TRAE launches must not bypass permissions: fresh={fresh:?}, resumed={resumed:?}"
+        !fresh.iter().chain(resumed.iter()).any(|arg| matches!(
+            arg.as_str(),
+            "-p" | "--output-format" | "--permission-mode" | "-y" | "--yolo" | "bypass_permissions"
+        )),
+        "TRAE exec launches must use the 2.0 contract without unsafe or v1-only flags: fresh={fresh:?}, resumed={resumed:?}"
     );
 }
 
@@ -798,6 +820,70 @@ fn loop_command_codex_injects_the_notify_program_appending_to_the_turn_signal() 
     assert!(
         !off.iter().any(|a| a == "-c"),
         "no turn-signal ⇒ no injected notify: {off:?}"
+    );
+}
+
+#[test]
+fn loop_command_trae_gets_auto_permission_mode_without_sandbox() {
+    let sig = PathBuf::from("/proj/.project-state/sessions/s/.daemon/turn-complete");
+    let argv = build_loop_command(
+        Engine::Trae,
+        &Resume::Continue("trae-session".into()),
+        &[PathBuf::from("/proj/root")],
+        Some(sig.as_path()),
+        Some("seed-1"),
+    );
+
+    assert_eq!(&argv[..4], ["env", "-u", "CLAUDECODE", "traex"]);
+    assert!(argv.windows(2).any(|w| w == ["-m", "seed-1"]), "{argv:?}");
+    assert!(
+        argv.windows(2).any(|w| w == ["--permission-mode", "auto"]),
+        "{argv:?}"
+    );
+    assert!(
+        argv.windows(2).any(|w| w == ["resume", "trae-session"]),
+        "{argv:?}"
+    );
+    assert!(
+        !argv.iter().any(|arg| arg == "--sandbox"),
+        "TraeX rejects permission-mode and sandbox overrides together: {argv:?}"
+    );
+    assert!(
+        !argv.iter().any(|arg| matches!(
+            arg.as_str(),
+            "-y" | "--yolo" | "bypass_permissions" | "--dangerously-bypass-hook-trust"
+        )),
+        "Autopilot must not bypass TraeX safety gates: {argv:?}"
+    );
+    assert!(
+        !argv.iter().any(|arg| arg == "--add-dir"),
+        "the cwd is already the workspace; add-dir support is not part of the measured TraeX loop contract: {argv:?}"
+    );
+}
+
+#[test]
+fn loop_command_trae_injects_a_stable_stop_hook() {
+    let sig = PathBuf::from("/proj/.project-state/sessions/s/.daemon/turn-complete");
+    let argv = build_loop_command(
+        Engine::Trae,
+        &Resume::Fresh {
+            session_id: Some("trae-session".into()),
+        },
+        &[],
+        Some(sig.as_path()),
+        None,
+    );
+
+    let config_at = argv.iter().position(|arg| arg == "-c").expect("-c present");
+    let config = &argv[config_at + 1];
+    assert!(config.contains("hooks.Stop"), "{config}");
+    assert!(
+        config.contains("PMTUI_BIN") && config.contains("hook turn-complete"),
+        "the trusted command should be stable and path-free: {config}"
+    );
+    assert!(
+        !config.contains(&*sig.to_string_lossy()),
+        "TraeX hook trust is hash-based, so per-session paths must stay out of the command: {config}"
     );
 }
 

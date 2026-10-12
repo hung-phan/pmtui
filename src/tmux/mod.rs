@@ -40,7 +40,7 @@ pub use launch::{
     ENV_BIN, ENV_SESSION, ENV_STATE_DIR, LaunchError, LaunchOutcome, ManagedEnv,
     pmtui_bin_for_current_process,
 };
-pub use real::{LAUNCH_COMMAND_MAX_BYTES, TmuxDriver, launch_command};
+pub use real::{LAUNCH_COMMAND_MAX_BYTES, TmuxDriver, launch_command, shell_command};
 // POSIX shell escaping, shared with `worker::launch`'s turn-hook builder so a project
 // root with a shell metacharacter can't malform the hook command.
 pub(crate) use real::shq;

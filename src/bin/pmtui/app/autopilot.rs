@@ -52,12 +52,6 @@ impl App {
                 if next == Tier::Autopilot && self.refuse_unstartable(entry) {
                     return;
                 }
-                if next == Tier::Autopilot && entry.engine == Some(Engine::Trae) {
-                    self.status =
-                        format!("{id}: TRAE Autopilot is not supported yet; mode unchanged");
-                    self.refresh();
-                    return;
-                }
                 // INTO AUTOPILOT on an agent-loop row: ask for the goal first and let
                 // `submit_goal_edit` do BOTH writes. Nothing is written here, so `Esc` in that
                 // field leaves the session exactly as it was.

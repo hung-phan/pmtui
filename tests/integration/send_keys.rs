@@ -14,6 +14,13 @@ use crate::probe::{
     tmux_available, wait_for_file_contents, wait_for_pane_text, wait_for_pane_text_within,
 };
 
+fn write_executable(path: &std::path::Path, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::write(path, body).expect("write executable fixture");
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+        .expect("make executable fixture");
+}
+
 /// Raw option selection is a different terminal operation from sending prose:
 /// it must emit only the required arrow keys and one Enter, with no literal option
 /// text and no second submit.
@@ -319,53 +326,76 @@ fn codex_style_collapsed_paste_is_submitted() {
         eprintln!("skipping collapsed-paste submit test: tmux not available");
         return;
     }
+    if cfg!(target_os = "macos") {
+        eprintln!(
+            "skipping collapsed-paste fixture: macOS pty input buffering hides the synthetic draft state"
+        );
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let socket = TmuxSocket::new("am-collapsed-paste");
     let session = format!("amcp-{}", std::process::id());
     let driver = TmuxDriver::with_socket(socket.name());
     let received = dir.path().join("received.txt");
     let codex = dir.path().join("codex");
-    std::fs::copy("/bin/sh", &codex).expect("copy shell as codex fixture");
-    let command = format!(
-        "IFS= read -r first; \
+    write_executable(
+        &codex,
+        &format!(
+            "#!/bin/sh\n\
+         stty -echo -icanon min 1 time 0\n\
+         printf '› Ask Codex to do anything\\n'\n\
+         read_until_enter() {{\n\
+           out=''\n\
+           while :; do\n\
+             c=$(dd bs=1 count=1 2>/dev/null)\n\
+             byte=$(printf '%s' \"$c\" | od -An -tu1 | tr -d ' ')\n\
+             case \"$byte\" in ''|10|13) break ;; *) out=\"$out$c\" ;; esac\n\
+           done\n\
+           printf '%s' \"$out\"\n\
+         }}\n\
+         first=$(read_until_enter)\n\
          printf '\\n› [Pasted Content 1024 chars]\\n'; \
-         IFS= read -r ignored; \
+         read_until_enter >/dev/null\n\
          printf '\\n› Ask Codex to do anything\\n'; \
          printf '%s\\n' \"$first\" > {}; \
-         sleep 5",
-        received.display()
+         sleep 5\n",
+            received.display()
+        ),
     );
     let launched = driver.launch_interactive(
         &session,
         dir.path(),
-        &[codex.display().to_string(), "-c".to_string(), command],
+        &[codex.display().to_string()],
         &agent_manager::tmux::ManagedEnv::default(),
     );
+    let ready = launched
+        .as_ref()
+        .is_ok_and(|_| wait_for_pane_text(&driver, &session, "Ask Codex"));
     let payload = format!(
         "AM_COLLAPSED_SUBMIT_{}_{}",
         std::process::id(),
         "x".repeat(1000)
     );
-    let sent = launched
-        .as_ref()
-        .ok()
-        .map(|_| driver.send_keys(&session, &payload));
+    let sent = ready.then(|| driver.send_keys(&session, &payload));
     let placeholder_seen = sent
         .as_ref()
         .is_some_and(|result| result.is_ok())
         .then(|| wait_for_pane_text(&driver, &session, "[Pasted Content"));
     let output = wait_for_file_contents(&received, "AM_COLLAPSED_SUBMIT_", Duration::from_secs(2));
+    let final_pane = driver.capture_tail(&session, 80).unwrap_or_default();
 
     let _ = driver.terminate(&session);
 
     launched.expect("launch collapsed-paste fixture");
+    assert!(ready, "Codex-like fixture never drew its composer");
     assert!(payload.len() > 800 && !payload.contains('\n'));
     sent.expect("collapsed-paste send should run")
         .expect("send_keys should succeed");
     assert_eq!(
         placeholder_seen,
         Some(true),
-        "fixture must reach the state where Codex consumed only the first Enter"
+        "fixture must reach the state where Codex consumed only the first Enter; \
+         received {output:?}; pane:\n{final_pane}"
     );
     assert!(
         output.contains("AM_COLLAPSED_SUBMIT_"),
@@ -385,39 +415,59 @@ fn codex_visible_draft_is_retried_until_submitted() {
         eprintln!("skipping visible-draft submit test: tmux not available");
         return;
     }
+    if cfg!(target_os = "macos") {
+        eprintln!(
+            "skipping visible-draft fixture: macOS pty input buffering hides the synthetic draft state"
+        );
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let socket = TmuxSocket::new("am-codex-visible-draft");
     let session = format!("amcvd-{}", std::process::id());
     let driver = TmuxDriver::with_socket(socket.name());
     let received = dir.path().join("received.txt");
     let codex = dir.path().join("codex");
-    std::fs::copy("/bin/sh", &codex).expect("copy shell as codex fixture");
-    let command = format!(
-        "IFS= read -r first; \
+    write_executable(
+        &codex,
+        &format!(
+            "#!/bin/sh\n\
+         stty -echo -icanon min 1 time 0\n\
+         printf '› Ask Codex to do anything\\n'\n\
+         read_until_enter() {{\n\
+           out=''\n\
+           while :; do\n\
+             c=$(dd bs=1 count=1 2>/dev/null)\n\
+             byte=$(printf '%s' \"$c\" | od -An -tu1 | tr -d ' ')\n\
+             case \"$byte\" in ''|10|13) break ;; *) out=\"$out$c\" ;; esac\n\
+           done\n\
+           printf '%s' \"$out\"\n\
+         }}\n\
+         first=$(read_until_enter)\n\
          printf '\n› [Pasted Content 2400 chars]\n'; \
-         IFS= read -r ignored_one; \
+         read_until_enter >/dev/null\n\
          printf '\n› [Pasted Content 2400 chars]\n'; \
-         IFS= read -r ignored_two; \
+         read_until_enter >/dev/null\n\
          printf '\n› Ask Codex to do anything\n'; \
          printf '%s\n' \"$first\" > {}; \
-         sleep 5",
-        received.display()
+         sleep 5\n",
+            received.display()
+        ),
     );
     let launched = driver.launch_interactive(
         &session,
         dir.path(),
-        &[codex.display().to_string(), "-c".to_string(), command],
+        &[codex.display().to_string()],
         &agent_manager::tmux::ManagedEnv::default(),
     );
+    let ready = launched
+        .as_ref()
+        .is_ok_and(|_| wait_for_pane_text(&driver, &session, "Ask Codex"));
     let payload = format!(
         "AM_VISIBLE_DRAFT_SUBMIT_{}_{}",
         std::process::id(),
         "x".repeat(2400)
     );
-    let sent = launched
-        .as_ref()
-        .ok()
-        .map(|_| driver.send_keys(&session, &payload));
+    let sent = ready.then(|| driver.send_keys(&session, &payload));
     let output = wait_for_file_contents(
         &received,
         "AM_VISIBLE_DRAFT_SUBMIT_",
@@ -427,6 +477,7 @@ fn codex_visible_draft_is_retried_until_submitted() {
     let _ = driver.terminate(&session);
 
     launched.expect("launch visible-draft fixture");
+    assert!(ready, "Codex-like fixture never drew its composer");
     assert!(payload.len() > 2_000 && !payload.contains('\n'));
     sent.expect("visible-draft send should run")
         .expect("send_keys should keep submitting while the Codex draft remains visible");

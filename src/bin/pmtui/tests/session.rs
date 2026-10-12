@@ -37,7 +37,9 @@ fn build_chat_codex_resumes_interactively_without_exec() {
 #[test]
 fn build_chat_trae_resumes_interactively_without_headless_flags() {
     let argv = build_chat(Engine::Trae, "trae-session", None, test_turn_signal());
-    assert_eq!(argv, vec!["traecli", "--resume", "trae-session"]);
+    assert_eq!(argv[0], "traex");
+    assert!(argv.iter().any(|arg| arg == "-c"), "{argv:?}");
+    assert_eq!(&argv[argv.len() - 2..], ["resume", "trae-session"]);
     assert!(
         !argv.iter().any(|arg| arg == "-p"),
         "interactive TRAE chat is not print mode: {argv:?}"
@@ -83,18 +85,15 @@ fn build_chat_inserts_model_when_some_omits_when_none() {
         codex_at < m_at && m_at < cx_resume_at,
         "-m after codex, before resume: {cx:?}"
     );
-    // traecli: `-c model.name=<m>` after `traecli`, before `--resume`.
+    // traex: `-m <m>` after `traex`, before `resume`.
     let trae = build_chat(Engine::Trae, "trae-1", Some("seed-1"), test_turn_signal());
+    assert!(trae.windows(2).any(|w| w == ["-m", "seed-1"]), "{trae:?}");
+    let m_at = trae.iter().position(|a| a == "-m").unwrap();
+    let trae_at = trae.iter().position(|a| a == "traex").unwrap();
+    let trae_resume_at = trae.iter().position(|a| a == "resume").unwrap();
     assert!(
-        trae.windows(2).any(|w| w == ["-c", "model.name=seed-1"]),
-        "{trae:?}"
-    );
-    let c_at = trae.iter().position(|a| a == "-c").unwrap();
-    let trae_at = trae.iter().position(|a| a == "traecli").unwrap();
-    let trae_resume_at = trae.iter().position(|a| a == "--resume").unwrap();
-    assert!(
-        trae_at < c_at && c_at < trae_resume_at,
-        "-c after traecli, before --resume: {trae:?}"
+        trae_at < m_at && m_at < trae_resume_at,
+        "-m after traex, before resume: {trae:?}"
     );
     // None ⇒ no flag on either engine.
     assert!(
@@ -110,7 +109,7 @@ fn build_chat_inserts_model_when_some_omits_when_none() {
     assert!(
         !build_chat(Engine::Trae, "trae-1", None, test_turn_signal())
             .iter()
-            .any(|a| a == "-c")
+            .any(|a| a == "-m")
     );
 }
 
@@ -141,22 +140,24 @@ fn build_chat_create_inserts_model_when_some_omits_when_none() {
             .any(|a| a == "--model")
     );
 
-    let trae = build_chat_create(Engine::Trae, "new-uuid-1", Some("seed-1"), test_turn_signal());
-    assert!(
-        trae.windows(2).any(|w| w == ["-c", "model.name=seed-1"]),
-        "{trae:?}"
+    let trae = build_chat_create(
+        Engine::Trae,
+        "new-uuid-1",
+        Some("seed-1"),
+        test_turn_signal(),
     );
-    let c_at = trae.iter().position(|a| a == "-c").unwrap();
-    let trae_at = trae.iter().position(|a| a == "traecli").unwrap();
+    assert!(trae.windows(2).any(|w| w == ["-m", "seed-1"]), "{trae:?}");
+    let m_at = trae.iter().position(|a| a == "-m").unwrap();
+    let trae_at = trae.iter().position(|a| a == "traex").unwrap();
     let sid_at = trae.iter().position(|a| a == "--session-id").unwrap();
     assert!(
-        trae_at < c_at && c_at < sid_at,
-        "-c after traecli, before --session-id: {trae:?}"
+        trae_at < m_at && m_at < sid_at,
+        "-m after traex, before --session-id: {trae:?}"
     );
     assert!(
         !build_chat_create(Engine::Trae, "new-uuid-1", None, test_turn_signal())
             .iter()
-            .any(|a| a == "-c")
+            .any(|a| a == "-m")
     );
 }
 
@@ -180,7 +181,7 @@ fn build_chat_and_create_omit_model_when_empty_or_whitespace() {
         assert!(
             !build_chat(Engine::Trae, "trae-1", Some(m), test_turn_signal())
                 .iter()
-                .any(|a| a == "-c"),
+                .any(|a| a == "-m"),
             "build_chat trae m={m:?}"
         );
         assert!(
@@ -192,7 +193,7 @@ fn build_chat_and_create_omit_model_when_empty_or_whitespace() {
         assert!(
             !build_chat_create(Engine::Trae, "new-uuid-1", Some(m), test_turn_signal(),)
                 .iter()
-                .any(|a| a == "-c"),
+                .any(|a| a == "-m"),
             "build_chat_create trae m={m:?}"
         );
     }
@@ -289,7 +290,9 @@ fn build_chat_create_claude_uses_session_id_not_resume_or_headless() {
 #[test]
 fn build_chat_create_trae_uses_session_id_not_resume_or_headless() {
     let argv = build_chat_create(Engine::Trae, "new-trae-id", None, test_turn_signal());
-    assert_eq!(argv, vec!["traecli", "--session-id", "new-trae-id"]);
+    assert_eq!(argv[0], "traex");
+    assert!(argv.iter().any(|arg| arg == "-c"), "{argv:?}");
+    assert_eq!(&argv[argv.len() - 2..], ["--session-id", "new-trae-id"]);
     assert!(
         !argv.iter().any(|a| a == "-p"),
         "create is interactive: no -p"
@@ -742,9 +745,10 @@ fn production_editor_wrappers_spawn_the_selected_editor() {
     assert_eq!(editor_command_from(None, Some("editor".into())), "editor");
     assert_eq!(editor_command_from(None, None), "vi");
 
+    let editor = "true";
     let mut send_handoff = RecordingHandoff::default();
     assert_eq!(
-        edit_send_message(&mut send_handoff, "draft", "/bin/true")
+        edit_send_message(&mut send_handoff, "draft", editor)
             .unwrap()
             .as_deref(),
         Some("draft")
@@ -753,7 +757,7 @@ fn production_editor_wrappers_spawn_the_selected_editor() {
 
     let mut directive_handoff = RecordingHandoff::default();
     assert_eq!(
-        edit_directive(&mut directive_handoff, "keep this", "/bin/true")
+        edit_directive(&mut directive_handoff, "keep this", editor)
             .unwrap()
             .as_deref(),
         Some("keep this")
@@ -762,7 +766,7 @@ fn production_editor_wrappers_spawn_the_selected_editor() {
 
     let mut brief_handoff = RecordingHandoff::default();
     assert_eq!(
-        edit_brief(&mut brief_handoff, "ship it", "/bin/true")
+        edit_brief(&mut brief_handoff, "ship it", editor)
             .unwrap()
             .as_deref(),
         Some("ship it")

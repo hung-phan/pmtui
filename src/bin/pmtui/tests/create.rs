@@ -34,6 +34,7 @@ fn submit_create_seeds_agent_loop_at_selected_tier() {
         (Engine::Claude, Tier::Standard),
         (Engine::Trae, Tier::Standard),
         (Engine::Codex, Tier::Autopilot),
+        (Engine::Trae, Tier::Autopilot),
     ] {
         let dir = tempfile::tempdir().unwrap();
         let reg_path = dir.path().join("registry.json");
@@ -116,43 +117,6 @@ fn submit_create_seeds_agent_loop_at_selected_tier() {
 
         assert!(matches!(app.mode, UiMode::Normal));
     }
-}
-
-#[test]
-fn submit_create_refuses_trae_autopilot_until_hooks_are_supported() {
-    let dir = tempfile::tempdir().unwrap();
-    let reg_path = dir.path().join("registry.json");
-    let project = std::fs::canonicalize({
-        let path = dir.path().join("project");
-        std::fs::create_dir_all(&path).unwrap();
-        path
-    })
-    .unwrap();
-    let mut app = creating_loop_app(
-        &reg_path,
-        &project,
-        Engine::Trae,
-        Tier::Autopilot,
-        "ship the goal",
-        job_engine::DEFAULT_CADENCE_S,
-    );
-
-    app.submit_create();
-
-    assert!(
-        matches!(app.mode, UiMode::Creating(_)),
-        "the form must stay open for correction"
-    );
-    assert!(
-        app.status.contains("TRAE Autopilot is not supported"),
-        "{}",
-        app.status
-    );
-    assert!(Registry::load(&reg_path).unwrap().projects.is_empty());
-    assert!(
-        !project.join(state::STATE_DIR).exists(),
-        "a refused create must not seed session state"
-    );
 }
 
 #[test]

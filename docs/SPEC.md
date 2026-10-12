@@ -44,8 +44,8 @@ An agent that works alone has two opposite faults:
 - it becomes idle, blocked, repetitive or unavailable, and does not make this clear.
 
 agent-manager manages Claude, Codex, and TRAE CLI sessions around a goal that a person writes.
-Autopilot keeps Claude and Codex sessions at work; TRAE CLI is Standard-only until its hooks are
-proven. It sends only the decisions that a person must make to that person.
+TRAE CLI launches use the current `traex` binary. Autopilot keeps Claude, Codex, and TRAE CLI sessions
+at work. It sends only the decisions that a person must make to that person.
 
 agent-manager adds automation above the permission modes of the engines. It does not replace those modes,
 and it does not give permission to use a tool.
@@ -82,7 +82,6 @@ yourself.
 - a workflow engine that makes its own plan;
 - publishing, merging, deployment, use of credentials, payments or destructive actions without a person;
 - a statement that a project is complete, without a person;
-- TRAE CLI Autopilot until hook delivery and idle reporting are proven;
 - any way around the permission, trust or command approval of Claude, Codex, or TRAE CLI; or
 - a dashboard that hides the agent from the person.
 
@@ -520,6 +519,16 @@ For each Autopilot session that is enabled, the supervisor:
 
 The supervisor MUST NOT make a second conversation for Autopilot. The person and the supervisor use one
 persistent terminal.
+
+The supervisor MAY install an engine hook that records a completed turn. Claude uses a Stop hook. Codex
+uses its notify hook. TRAE CLI uses a `hooks.Stop` command that runs `pmtui hook turn-complete`; that
+command derives the signal path from the managed-session environment, so the trusted hook command is stable
+across sessions. The product MUST NOT bypass hook trust. If the engine asks a person to review the hook, the
+prompt stays in the terminal for that person.
+
+Project-local skills MUST be written once under `.agents/skills/`, which Codex and TraeX discover. Claude
+MAY also receive exact per-skill compatibility symlinks under `.claude/skills/`. The product MUST NOT
+create or edit the user's `AGENTS.md` to deliver a skill.
 
 If an Autopilot session waits for a decision from a person, and the product cannot read its mode setting,
 the supervisor stays available. It MUST NOT type until it can read the setting again. An explicit Standard

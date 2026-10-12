@@ -63,9 +63,6 @@ impl JobScheduler {
         if alive {
             return Ok(EnsureOutcome::AlreadyUp);
         }
-        if self.engine == Engine::Trae {
-            anyhow::bail!("TRAE Autopilot is not supported yet");
-        }
         // The spawn skill ships only with a terminal pmd itself starts, and only when that
         // terminal names pmtui (`PMTUI_BIN`): an adopted pane keeps its launcher's environment.
         self.install_spawn_skill();

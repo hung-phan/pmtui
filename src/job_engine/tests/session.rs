@@ -208,22 +208,33 @@ fn codex_launches_fresh_interactive_without_a_pinned_id() {
 }
 
 #[test]
-fn trae_autopilot_launch_is_refused_before_building_a_loop_command() {
+fn trae_autopilot_launches_a_persistent_loop_session() {
     let mut fx = setup(Tier::Autopilot, Engine::Trae, Some(300));
-    let error = fx.sched.tick(&fx.driver, &fx.clock).unwrap_err();
+    let sess = loop_session(&fx);
 
+    let out = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+
+    assert_eq!(
+        out,
+        JobTick::Monitoring {
+            until: START + LAUNCH_GRACE_S
+        }
+    );
+    let argv = launched_argv(&fx, &sess).expect("TraeX loop launched");
+    assert_eq!(&argv[..4], ["env", "-u", "CLAUDECODE", "traex"]);
     assert!(
-        format!("{error:#}").contains("TRAE Autopilot is not supported"),
-        "{error:#}"
+        argv.windows(2).any(|w| w == ["--permission-mode", "auto"]),
+        "{argv:?}"
     );
     assert!(
-        fx.driver.launched().is_empty(),
-        "the daemon must not construct or launch a TRAE loop argv"
+        argv.iter().any(|arg| arg == "-c"),
+        "the turn-complete Stop hook is installed: {argv:?}"
     );
     assert_eq!(
         ledger(&fx).run,
-        JobRun::Idle,
-        "a refused launch must leave the ledger unchanged"
+        JobRun::Monitoring {
+            until: START + LAUNCH_GRACE_S
+        }
     );
 }
 
@@ -629,6 +640,26 @@ fn ensure_session_installs_the_native_codex_skill() {
 }
 
 #[test]
+fn ensure_session_installs_the_native_trae_skill() {
+    let mut fx = setup(Tier::Autopilot, Engine::Trae, Some(300));
+    fx.sched.tick(&fx.driver, &fx.clock).unwrap(); // JustLaunched
+    assert_eq!(
+        std::fs::read_to_string(fx.paths.canonical_worker_skill_file()).unwrap(),
+        crate::skills::WORKER_SKILL_MD,
+        "TraeX discovers the shared .agents/skills project skill"
+    );
+    assert!(
+        fx.sched.worker_skill_available(),
+        "a successful native TraeX install takes the lean nudge branch"
+    );
+    assert!(!fx.paths.claude_project_skill_dir().exists());
+    assert!(
+        !fx.paths.root.join("AGENTS.md").exists(),
+        "pmd never creates the user's AGENTS.md"
+    );
+}
+
+#[test]
 fn claude_install_overrides_a_legacy_skill_directory() {
     let mut fx = setup(Tier::Autopilot, Engine::Claude, Some(300));
     std::fs::create_dir_all(fx.paths.claude_project_skill_file().parent().unwrap()).unwrap();
@@ -693,7 +724,7 @@ fn worker_skill_lands_on_first_adoption_of_an_already_up_pane() {
 
 #[test]
 fn pmd_ships_the_spawn_skill_only_with_a_launch_that_names_pmtui() {
-    for engine in [Engine::Claude, Engine::Codex] {
+    for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         // No pmtui beside pmd: the terminal gets no PMTUI_BIN, so no spawn skill either.
         let mut fx = setup(Tier::Standard, engine, Some(300));
         fx.sched.tick(&fx.driver, &fx.clock).unwrap();

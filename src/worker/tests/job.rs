@@ -136,25 +136,37 @@ fn the_codex_job_writes_its_last_message_to_a_file() {
     assert_eq!(flag(&argv, "-s").as_deref(), Some("workspace-write"));
 }
 
-/// TRAE's job shape is a pinned, stream-json print-mode run. It cannot consume the Claude/Codex
-/// schema flags, so the result parser reads its final `type=result` event instead.
+/// TRAE's job shape follows TRAE CLI 2.0: `traex exec --json`, a pinned exec session, and the same
+/// schema + last-message file contract Codex uses.
 #[test]
-fn the_trae_job_is_stream_json_pinned_and_uses_default_permissions() {
+fn the_trae_job_uses_traex_exec_json_schema_and_safe_workspace_sandbox() {
     let argv = argv(Engine::Trae, Some("seed-1"));
     assert_eq!(argv[0], "env", "{argv:?}");
-    assert_eq!(flag(&argv, "--permission-mode").as_deref(), Some("default"));
+    assert!(argv.windows(2).any(|w| w == ["traex", "exec"]), "{argv:?}");
     assert_eq!(flag(&argv, "--session-id").as_deref(), Some(SESSION_ID));
-    assert_eq!(
-        flag(&argv, "--output-format").as_deref(),
-        Some("stream-json")
+    assert_eq!(flag(&argv, "--sandbox").as_deref(), Some("workspace-write"));
+    assert!(
+        argv.iter().any(|arg| arg == "--skip-git-repo-check"),
+        "{argv:?}"
     );
-    assert_eq!(flag(&argv, "-c").as_deref(), Some("model.name=seed-1"));
+    assert!(argv.iter().any(|arg| arg == "--json"), "{argv:?}");
+    assert_eq!(
+        flag(&argv, "--output-schema").as_deref(),
+        Some("/s/job-schema.json")
+    );
+    assert_eq!(flag(&argv, "-o").as_deref(), Some("/s/job.last"));
+    assert_eq!(flag(&argv, "-m").as_deref(), Some("seed-1"));
     assert!(
         !argv.iter().any(|arg| matches!(
             arg.as_str(),
-            "-y" | "--yolo" | "bypass_permissions" | "--json-schema" | "--output-schema" | "-o"
+            "-p" | "--output-format"
+                | "--permission-mode"
+                | "-y"
+                | "--yolo"
+                | "bypass_permissions"
+                | "--json-schema"
         )),
-        "TRAE jobs must stay permission-safe and stream-result based: {argv:?}"
+        "TRAE jobs must stay permission-safe and avoid v1-only flags: {argv:?}"
     );
 }
 
@@ -170,8 +182,8 @@ fn a_chosen_model_is_passed_per_engine() {
         Some("gpt-5")
     );
     assert_eq!(
-        flag(&argv(Engine::Trae, Some("seed")), "-c").as_deref(),
-        Some("model.name=seed")
+        flag(&argv(Engine::Trae, Some("seed")), "-m").as_deref(),
+        Some("seed")
     );
     assert!(
         !argv(Engine::Claude, None)
@@ -179,5 +191,5 @@ fn a_chosen_model_is_passed_per_engine() {
             .any(|arg| arg == "--model")
     );
     assert!(!argv(Engine::Codex, None).iter().any(|arg| arg == "-m"));
-    assert!(!argv(Engine::Trae, None).iter().any(|arg| arg == "-c"));
+    assert!(!argv(Engine::Trae, None).iter().any(|arg| arg == "-m"));
 }

@@ -56,6 +56,7 @@
 //!
 //! Usage: pmtui [--registry <path>] [--socket <name>]
 //!        pmtui spawn --message <text> [options]
+//!        pmtui hook turn-complete
 //!
 //! The command line is parsed into an [`Action`] before anything else happens, so `spawn`
 //! runs without terminal setup, the dashboard singleton, the registry, or tmux.
@@ -204,6 +205,7 @@ fn parse_args_from(argv: &[String]) -> Result<Args> {
 enum Action {
     Dashboard(Args),
     Spawn(spawn_cli::SpawnCli),
+    HookTurnComplete,
     Help,
     SpawnHelp,
 }
@@ -214,6 +216,19 @@ fn parse_action(argv: &[String]) -> std::result::Result<Action, spawn_cli::Usage
     if argv.first().is_some_and(|arg| arg == "spawn") {
         return spawn_cli::parse(&argv[1..])
             .map(|parsed| parsed.map_or(Action::SpawnHelp, Action::Spawn));
+    }
+    if argv.first().is_some_and(|arg| arg == "hook") {
+        return match argv.get(1).map(String::as_str) {
+            Some("turn-complete") if argv.len() == 2 => Ok(Action::HookTurnComplete),
+            Some(other) => Err(spawn_cli::UsageError {
+                message: format!("hook: unknown hook {other:?}"),
+                json: spawn_cli::wants_json(argv),
+            }),
+            None => Err(spawn_cli::UsageError {
+                message: "hook: expected turn-complete".into(),
+                json: spawn_cli::wants_json(argv),
+            }),
+        };
     }
     match parse_args_from(argv) {
         Ok(args) if args.help => Ok(Action::Help),
@@ -229,6 +244,7 @@ const HELP: &str = concat!(
     "pmtui — agent-manager dashboard\n\n",
     "Usage: pmtui [--registry <path>] [--socket <name>]\n",
     "       pmtui spawn --message <text> [options]\n\n",
+    "       pmtui hook turn-complete\n\n",
     "--registry <path>  registry JSON (default: ~/.config/pmd/registry.json)\n",
     "--socket <name>    private tmux server socket (default: pmd)\n",
     "spawn              from inside a managed session, ask the dashboard for a Standard child\n",
@@ -287,6 +303,13 @@ fn dispatch(
             emit(out, &format!("{text}\n"));
             Ok(spawn_cli::exit_code(&output))
         }
+        Ok(Action::HookTurnComplete) => match run_turn_complete_hook(spawn.env) {
+            Ok(()) => Ok(0),
+            Err(error) => {
+                emit(err, &format!("hook turn-complete: {error:#}\n"));
+                Ok(1)
+            }
+        },
         Ok(Action::Help) => {
             print_help(err);
             Ok(0)
@@ -311,6 +334,26 @@ fn dispatch(
             Ok(2)
         }
     }
+}
+
+fn run_turn_complete_hook(env: &dyn Fn(&str) -> Option<String>) -> Result<()> {
+    let state_dir = env(tmux::ENV_STATE_DIR)
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .with_context(|| format!("{} is not set", tmux::ENV_STATE_DIR))?;
+    let daemon_dir = state_dir.join(".daemon");
+    std::fs::create_dir_all(&daemon_dir)
+        .with_context(|| format!("create_dir_all {}", daemon_dir.display()))?;
+    let path = daemon_dir.join("turn-complete");
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .with_context(|| format!("open {}", path.display()))?;
+    file.write_all(b".")
+        .with_context(|| format!("write {}", path.display()))?;
+    file.sync_data()
+        .with_context(|| format!("sync {}", path.display()))
 }
 
 #[cfg(test)]

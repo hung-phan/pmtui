@@ -210,7 +210,7 @@ fn create_form_adjustments_respect_numeric_and_cycle_boundaries() {
     f.field = CreateForm::ENGINE;
     f.engine = Engine::Codex;
     f.adjust(false);
-    assert_eq!(f.engine, Engine::Claude);
+    assert_eq!(f.engine, Engine::Trae);
 
     f.field = CreateForm::AUTONOMY;
     f.tier = Tier::Standard;

@@ -280,6 +280,23 @@ fn codex_install_writes_only_the_canonical_body() {
 }
 
 #[test]
+fn trae_install_writes_only_the_canonical_body() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = ProjectPaths::for_session(dir.path(), "bot");
+
+    install_spawn_skill(&paths, Engine::Trae).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(paths.canonical_spawn_skill_file()).unwrap(),
+        SPAWN_SKILL_MD
+    );
+    assert!(
+        !paths.claude_root_dir().exists(),
+        "TraeX discovers .agents/skills natively and needs no Claude directory"
+    );
+}
+
+#[test]
 fn install_refreshes_a_stale_body_and_leaves_the_worker_skill_alone() {
     let dir = tempfile::tempdir().unwrap();
     let paths = ProjectPaths::for_session(dir.path(), "bot");

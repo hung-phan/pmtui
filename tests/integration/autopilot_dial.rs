@@ -44,6 +44,10 @@ fn r_restart_standard_codex_resumes_the_exact_live_user_rollout() {
         eprintln!("skipping Codex restart test: tmux not available");
         return;
     }
+    if !cfg!(target_os = "linux") {
+        eprintln!("skipping Codex restart test: exact live rollout discovery uses Linux /proc");
+        return;
+    }
     let fx = enter_fixture("cxr", PmdSibling::Missing);
     let (sock, host) = (fx.host_socket.clone(), fx.host_session.clone());
     let launches = fx.dir.path().join("codex-launches.log");

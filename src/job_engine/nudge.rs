@@ -474,6 +474,11 @@ pub fn loop_nudge_prompt_for_engine(input: LoopNudgePromptInput<'_>, engine: Eng
              schema. Do whatever needs attention right now."
                 .to_string()
         }
+        (Engine::Trae, true) => {
+            "Continue the goal and follow the inline fallback below because TRAE has no proven \
+             Autopilot worker skill contract. Do whatever needs attention right now."
+                .to_string()
+        }
         (_, false) => {
             "Continue the goal and follow the inline fallback below because the native worker \
              skill is unavailable. Do whatever needs attention right now."

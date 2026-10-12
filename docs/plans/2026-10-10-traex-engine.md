@@ -2,6 +2,10 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
+> **2026-10-12 update:** TRAE CLI 2.0 supersedes the v1 command snippets below. Runtime launches now
+> call `traex`; headless jobs use `traex exec --json` with `--output-schema` and `-o`; model selection
+> uses `-m`; `--agent traex` is the supported command surface.
+
 **Goal:** Add TRAE CLI as a selectable pmtui engine for Standard sessions, spawned jobs, result parsing, and model discovery, while keeping TRAE Autopilot disabled.
 
 **Architecture:** Extend the existing engine enum and per-engine adapters instead of adding a parallel path. TRAE uses caller-chosen session ids like Claude for Standard and job launches, but it does not get loop/autopilot command support until its hook contract is proven.
@@ -20,13 +24,13 @@
 
 **Step 1: Write failing tests**
 
-Add assertions that `Engine::ALL` is `[Claude, Codex, Trae]`, `Engine::Trae.label()` is `traecli`, and serde round-trips `"trae"`.
+Add assertions that `Engine::ALL` is `[Claude, Codex, Trae]`, `Engine::Trae.label()` is `traex`, and serde round-trips `"trae"`.
 
 Add spawn CLI tests for:
 
 ```rust
-assert_eq!(parse(&["--message", "x", "--agent", "traecli"]), Some(Engine::Trae));
-assert!(usage_for_bad_agent.contains("claude, codex or traecli"));
+assert_eq!(parse(&["--message", "x", "--agent", "traex"]), Some(Engine::Trae));
+assert!(usage_for_bad_agent.contains("claude, codex or traex"));
 ```
 
 **Step 2: Run focused tests**
@@ -42,7 +46,7 @@ Expected: fail because `Engine::Trae` does not exist.
 
 **Step 3: Implement minimal enum support**
 
-Add `Trae` to `Engine`, update `Engine::ALL`, `Engine::bin`, and spawn CLI error text. Keep the serde value as `"trae"`, while the launch label stays `traecli`.
+Add `Trae` to `Engine`, update `Engine::ALL`, `Engine::bin`, and spawn CLI error text. Keep the serde value as `"trae"`, while the launch label is `traex`.
 
 **Step 4: Verify**
 
@@ -70,7 +74,7 @@ build_command(Engine::Trae, "work", PermissionMode::Auto, &[dir], Resume::Fresh 
 Expected shape:
 
 ```text
-traecli -p --permission-mode default --session-id sid --output-format stream-json --add-dir <dir> -- work
+traex exec --json --sandbox workspace-write --skip-git-repo-check --session-id sid --add-dir <dir> -- work
 ```
 
 Cover `Resume::Continue("sid")` using `--resume sid`, model override using `-c model.name=<model>`, and the absence of `-y`, `--yolo`, or `bypass_permissions`.
@@ -78,8 +82,8 @@ Cover `Resume::Continue("sid")` using `--resume sid`, model override using `-c m
 Cover Standard create/resume:
 
 ```text
-traecli --session-id sid
-traecli --resume sid
+traex --session-id sid
+traex resume sid
 ```
 
 Cover `build_loop_command(Engine::Trae, ...)` returning an explicit unsupported result or a panic that callers never reach. Prefer a typed unsupported return only if the local function signatures already make that easy; otherwise gate TRAE before loop launch.
@@ -206,7 +210,7 @@ Run the focused test again. Expected: pass.
 
 **Step 1: Write failing tests**
 
-Stub `PATH` with a `traecli` script that prints:
+Stub `PATH` with a `traex` script that prints:
 
 ```json
 [
@@ -229,7 +233,7 @@ Expected: fail because no adapter exists.
 
 **Step 3: Implement adapter**
 
-Run `traecli models --json`, parse a list of objects with `name`, optional `real_name`, optional `description`, and optional `context_window`. Return empty on command failure or malformed output.
+Run `traex models --json`, parse a list of objects with `name`, optional `config_name`, optional `real_name`, optional `description`, and optional `context_window`. Return empty on command failure or malformed output.
 
 **Step 4: Verify**
 
@@ -245,7 +249,7 @@ Run the focused test again. Expected: pass.
 
 **Step 1: Update docs**
 
-Document that `--agent` accepts `claude|codex|traecli`, TRAE supports Standard and job launches, and TRAE Autopilot is intentionally disabled until hook delivery is verified.
+Document that `--agent` accepts `claude|codex|traex`, TRAE supports Standard and job launches, and TRAE Autopilot is intentionally disabled until hook delivery is verified.
 
 **Step 2: Run docs-adjacent tests**
 

@@ -260,7 +260,7 @@ impl ProjectPaths {
     pub fn codex_project_skill_file(&self) -> PathBuf {
         self.canonical_worker_skill_file()
     }
-    /// The canonical project skill path for either worker engine.
+    /// The canonical project skill path for any worker engine that reads repository skills.
     pub fn native_worker_skill_file(&self, _engine: crate::registry::Engine) -> PathBuf {
         self.canonical_worker_skill_file()
     }

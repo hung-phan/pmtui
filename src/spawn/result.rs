@@ -11,6 +11,7 @@
 //!   `--json-schema` puts our fields in its `structured_output`.
 //! - codex: `--output-schema` shapes the final message and `-o <path>` writes it to a file, with
 //!   `turn.completed` / `turn.failed` in the `--json` stream saying which way the turn went.
+//! - traex: `exec --json` follows the same terminator + last-message-file contract as codex.
 //!
 //! Two parse rules are borrowed from that same prior art: the LAST valid payload wins (a run that
 //! reported once and kept going must report its final outcome), and anything malformed is REJECTED
@@ -143,7 +144,7 @@ pub fn read_job_result(engine: Engine, log: &str, result_file: Option<&str>) -> 
     match engine {
         Engine::Claude => claude_result(log),
         Engine::Codex => codex_result(log, result_file),
-        Engine::Trae => trae_result(log),
+        Engine::Trae => codex_result(log, result_file).or_else(|| trae_result(log)),
     }
 }
 
@@ -175,7 +176,7 @@ fn claude_result(log: &str) -> Option<JobResult> {
     }
 }
 
-/// TRAE's stream-json result is Claude-like: the LAST `type=result` event states the run outcome.
+/// Compatibility for TRAE v1-style logs: the LAST `type=result` event states the run outcome.
 fn trae_result(log: &str) -> Option<JobResult> {
     let last = json_lines(log)
         .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("result"))
