@@ -4,7 +4,7 @@
 //! because a false Idle is the dangerous direction — it types a nudge into a
 //! working agent — so no predicate here can be changed without the others in view.
 
-use super::dialog::dialog_option_text;
+use super::dialog::{classify_dialog, dialog_option_text};
 
 /// Whether an interactive claude pane is mid-response or idle at its prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +61,9 @@ pub fn classify_pane(capture: &str) -> PaneActivity {
     if non_empty.is_empty() {
         return PaneActivity::Busy;
     }
+    if classify_dialog(capture).is_some() {
+        return PaneActivity::Busy;
+    }
     let start = non_empty.len().saturating_sub(PANE_TAIL_LINES);
     let window = &non_empty[start..];
     // (1) Busy FIRST: the prompt is on screen mid-response too, so these are the
@@ -80,12 +83,12 @@ pub fn classify_pane(capture: &str) -> PaneActivity {
     // (2) Confident-Idle: an input prompt anywhere in the window awaits input —
     // claude's BARE prompt, or codex's composer, which is never bare (see
     // `is_codex_composer`) and so needs its own predicate rather than a widened
-    // character class in `is_bare_prompt`.
-    // Shares its predicate with [`has_composer`] (which pmtui's `s` key gates on) so the
+    // character class in `is_claude_composer`.
+    // Shares its prompt predicate with [`has_composer`] (which pmtui's `s` key gates on) so the
     // two can never disagree about what counts as an input field.
     if window
         .iter()
-        .any(|line| is_bare_prompt(line) || is_codex_composer(line))
+        .any(|line| is_claude_composer(line) || is_codex_composer(line) || is_trae_composer(line))
     {
         PaneActivity::Idle
     } else {
@@ -149,26 +152,35 @@ pub(super) fn is_busy_spinner_line(line: &str) -> bool {
 /// Is a COMPOSER on screen — i.e. is there anything in this pane that would accept a
 /// typed message?
 ///
-/// Exactly clause (2) of [`classify_pane`], factored out so a caller that needs to know
-/// "would `send_keys` land in a text field?" cannot drift from the classifier. Used by
-/// pmtui's `s` key, whose trailing `Enter` must never be delivered to a select widget:
-/// with a numbered dialog on screen there is no composer, the characters go to the
-/// widget's keyboard accelerators, and the Enter CONFIRMS whatever option was
-/// pre-highlighted (see [`classify_dialog`](super::classify_dialog), and `job_engine`'s `park_dialog`, which
-/// exists because "typing a choice into a live agent is the riskiest action in the
-/// system").
+/// Exactly clause (2) of [`classify_pane`]'s activity window, factored out so a caller
+/// that needs to know "would `send_keys` land in a text field?" cannot drift from the
+/// classifier's prompt vocabulary.
 ///
 /// Deliberately independent of Busy/Idle: claude and codex both keep their composer on
 /// screen while generating, so a mid-response pane still has one.
 pub fn has_composer(capture: &str) -> bool {
+    has_composer_in_tail(capture, PANE_TAIL_LINES)
+}
+
+/// Like [`has_composer`], but lets a caller use the full pane tail it explicitly captured.
+///
+/// Used by pmtui's `s` key, whose trailing `Enter` must never be delivered to a select widget:
+/// with a numbered dialog on screen there is no composer, the characters go to the widget's
+/// keyboard accelerators, and the Enter CONFIRMS whatever option was pre-highlighted (see
+/// [`classify_dialog`](super::classify_dialog), and `job_engine`'s `park_dialog`, which exists
+/// because "typing a choice into a live agent is the riskiest action in the system").
+pub fn has_composer_in_tail(capture: &str, tail_lines: usize) -> bool {
     let non_empty: Vec<&str> = capture.lines().filter(|l| !l.trim().is_empty()).collect();
     if non_empty.is_empty() {
         return false;
     }
-    let start = non_empty.len().saturating_sub(PANE_TAIL_LINES);
+    if classify_dialog(capture).is_some() {
+        return false;
+    }
+    let start = non_empty.len().saturating_sub(tail_lines);
     non_empty[start..]
         .iter()
-        .any(|l| is_bare_prompt(l) || is_codex_composer(l))
+        .any(|l| is_claude_composer(l) || is_codex_composer(l) || is_trae_composer(l))
 }
 
 /// A content fingerprint of the TRANSCRIPT REGION of an Idle-classified capture — the
@@ -205,7 +217,7 @@ pub fn idle_fingerprint(capture: &str) -> u64 {
     let lines: Vec<&str> = capture.lines().collect();
     let boundary = lines
         .iter()
-        .rposition(|l| is_bare_prompt(l) || is_codex_composer(l))
+        .rposition(|l| is_claude_composer(l) || is_codex_composer(l) || is_trae_composer(l))
         .unwrap_or(lines.len());
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for line in &lines[..boundary] {
@@ -227,7 +239,9 @@ pub fn progress_fingerprint(capture: &str) -> u64 {
     let lines: Vec<&str> = capture.lines().collect();
     let boundary = lines
         .iter()
-        .rposition(|line| is_bare_prompt(line) || is_codex_composer(line))
+        .rposition(|line| {
+            is_claude_composer(line) || is_codex_composer(line) || is_trae_composer(line)
+        })
         .unwrap_or(lines.len());
     let mut hash = FNV_OFFSET;
     for line in &lines[..boundary] {
@@ -261,6 +275,24 @@ fn is_volatile_busy_line(line: &str) -> bool {
 pub(super) fn is_bare_prompt(line: &str) -> bool {
     let mut chars = line.trim().chars();
     matches!(chars.next(), Some('>') | Some('❯')) && chars.all(char::is_whitespace)
+}
+
+/// Claude's COMPOSER line.
+///
+/// Older captures showed a bare `❯`; current Claude Code can render a rotating placeholder
+/// hint after the prompt lead, for example `❯ Try "how do I log an error?"`. Keep the
+/// non-bare case shape-anchored: Claude transcript echoes use the same `❯` lead, so an
+/// arbitrary `❯ <text>` line is not proof that the pane is accepting input.
+fn is_claude_composer(line: &str) -> bool {
+    if is_bare_prompt(line) {
+        return true;
+    }
+    line.trim().strip_prefix('❯').is_some_and(|rest| {
+        let placeholder = rest.trim();
+        placeholder
+            .strip_prefix("Try \"")
+            .is_some_and(|example| example.ends_with('"') && example.len() > 1)
+    })
 }
 
 /// codex's COMPOSER line — the analogue of claude's bare prompt, and the reason
@@ -304,4 +336,16 @@ pub(super) fn is_codex_composer(line: &str) -> bool {
         Some(_) => dialog_option_text(trimmed).is_none(),
         None => false,
     }
+}
+
+/// TraeX's idle composer line. It uses Claude's `❯` lead, but unlike Claude it is not
+/// bare: a fresh idle pane paints `❯ Ask TRAE CLI to do anything`.
+///
+/// Keep this phrase-anchored rather than accepting any non-bare `❯` line. Claude echoes
+/// submitted user messages with the same lead (`❯ Tell me a joke.`), and treating those
+/// transcript rows as composers would turn old scrollback into a false Idle.
+fn is_trae_composer(line: &str) -> bool {
+    line.trim()
+        .strip_prefix('❯')
+        .is_some_and(|rest| rest.trim() == "Ask TRAE CLI to do anything")
 }

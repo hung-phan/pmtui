@@ -138,6 +138,26 @@ fn codex_approval_dialog_yields_the_question_and_all_three_options() {
 }
 
 #[test]
+fn trae_signin_chooser_is_a_human_only_dialog_even_with_a_composer_above_it() {
+    let d = classify_dialog(FIXTURE_TRAE_SIGNIN).expect("TraeX sign-in chooser recognised");
+    assert_eq!(d.question, "Sign in to use TRAE CLI");
+    assert_eq!(d.selected_index, Some(0));
+    assert_eq!(d.mode, PaneDialogMode::Single);
+    assert_eq!(
+        d.class,
+        PaneDialogClass::HumanOnly,
+        "auth routing is a human decision"
+    );
+    assert_eq!(
+        d.options,
+        vec![
+            "ByteDance Employee Sign in with Codebase Git or ByteDance SSO".to_string(),
+            "Enterprise User Sign in with email, a custom domain, or a PAT".to_string(),
+        ]
+    );
+}
+
+#[test]
 fn dialog_identity_includes_authority_bearing_context() {
     let first = classify_dialog(concat!(
         " Would you like to run the following command?\n",
@@ -443,6 +463,30 @@ fn codex_trust_dialog_yields_the_question_and_both_options() {
     assert_eq!(
         classify_pane(FIXTURE_CODEX_DIALOG_TRUST),
         PaneActivity::Busy
+    );
+}
+
+#[test]
+fn claude_workspace_trust_dialog_is_human_only() {
+    let d = classify_dialog(FIXTURE_CLAUDE_DIALOG_TRUST).expect("Claude trust dialog recognised");
+    assert_eq!(
+        d.question,
+        "Quick safety check: Is this a project you created or one you trust?"
+    );
+    assert_eq!(
+        d.options,
+        vec![
+            "No, exit".to_string(),
+            "Yes, I trust this folder".to_string()
+        ]
+    );
+    assert_eq!(d.selected_index, Some(0));
+    assert_eq!(d.mode, PaneDialogMode::Single);
+    assert_eq!(d.class, PaneDialogClass::HumanOnly);
+    assert_eq!(
+        classify_pane(FIXTURE_CLAUDE_DIALOG_TRUST),
+        PaneActivity::Busy,
+        "trust is a blocking dialog, not an idle composer"
     );
 }
 

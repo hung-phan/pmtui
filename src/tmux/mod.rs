@@ -27,7 +27,9 @@ pub mod fake;
 #[cfg(test)]
 mod tests;
 
-pub use activity::{PaneActivity, classify_pane, has_composer, progress_fingerprint};
+pub use activity::{
+    PaneActivity, classify_pane, has_composer, has_composer_in_tail, progress_fingerprint,
+};
 // The heartbeat confirmation gate's content-stability helper. `pub` (not `pub(crate)`)
 // because pmtui — a SEPARATE crate from this lib — runs the same two-observation gate
 // read-only in its refresh to tell a working Standard agent from one idle at its prompt.

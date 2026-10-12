@@ -184,15 +184,18 @@ pub(super) const DIALOG_MAX_QUESTION_GAP: usize = 4;
 /// Scanning BACKWARDS returns the LOWEST matching block, i.e. the live dialog
 /// rather than an older one still visible further up the transcript.
 ///
-/// ONE PHRASE-ANCHORED EXCEPTION runs afterwards, only on a window these rules have
+/// PHRASE-ANCHORED EXCEPTIONS run afterwards, only on a window these rules have
 /// already declined: codex's **startup trust dialog**
-/// ([`classify_codex_trust_dialog`]). Two clauses above reject it — its `?` sits
-/// mid-line in a wrapped paragraph, and its footer is `Press enter to continue`, not
+/// ([`classify_codex_trust_dialog`]), Claude's workspace trust dialog
+/// ([`classify_claude_trust_dialog`]) and TraeX's sign-in chooser
+/// ([`classify_trae_signin_dialog`]). Two clauses above reject the codex trust dialog — its `?`
+/// sits mid-line in a wrapped paragraph, and its footer is `Press enter to continue`, not
 /// `Esc to cancel` — and neither clause is widened to let it in, because "a mid-line
 /// `?` plus a bare press-enter footer" describes a large amount of ordinary prose and
 /// a false dialog escalates a session that is working fine. The exception matches that
-/// dialog's own literal wording instead, so the rules above stay exactly as narrow as
-/// they were.
+/// dialog's own literal wording instead. Claude's trust dialog and TraeX's auth chooser are
+/// similar: they block input, but their option shapes are not the general numbered block.
+/// The exceptions therefore keep the general rules exactly as narrow as they were.
 pub fn classify_dialog(capture: &str) -> Option<PaneDialog> {
     let non_empty: Vec<&str> = capture.lines().filter(|l| !l.trim().is_empty()).collect();
     let start = non_empty.len().saturating_sub(DIALOG_TAIL_LINES);
@@ -250,6 +253,8 @@ pub fn classify_dialog(capture: &str) -> Option<PaneDialog> {
         }
     }
     classify_codex_trust_dialog(window)
+        .or_else(|| classify_claude_trust_dialog(window))
+        .or_else(|| classify_trae_signin_dialog(window))
 }
 
 /// Content anchors that identify authority-changing prompts even if a future CLI
@@ -389,6 +394,9 @@ fn dialog_block_boundary(line: &str) -> bool {
 /// to the bug, so [`FIXTURE_CODEX_DIALOG_TRUST`] is the tripwire that says so.
 pub(super) const CODEX_TRUST_QUESTION: &str = "do you trust the contents of this directory?";
 const CODEX_TRUST_FOLDER_QUESTION: &str = "trust this folder?";
+const CLAUDE_TRUST_QUESTION: &str =
+    "quick safety check: is this a project you created or one you trust?";
+const TRAE_SIGNIN_QUESTION: &str = "sign in to use trae cli";
 
 /// Recognise codex's startup trust dialog on a window whose general rules
 /// ([`classify_dialog`]) already found nothing.
@@ -455,6 +463,112 @@ fn classify_codex_trust_dialog(window: &[&str]) -> Option<PaneDialog> {
     None
 }
 
+/// Recognise Claude's startup workspace trust dialog on a window whose general rules already found
+/// nothing. Like the codex trust dialog, this is human-only: a person decides whether project-local
+/// files may influence the agent before any ordinary Message can be sent.
+fn classify_claude_trust_dialog(window: &[&str]) -> Option<PaneDialog> {
+    for q in (0..window.len()).rev() {
+        let trimmed = window[q].trim();
+        let lower = trimmed.to_ascii_lowercase();
+        let Some(at) = lower.find(CLAUDE_TRUST_QUESTION) else {
+            continue;
+        };
+        let options = collect_claude_trust_options(&window[q + 1..]);
+        if options.options.len() < DIALOG_MIN_OPTIONS {
+            continue;
+        }
+        let has_security_anchor = window[q + 1..]
+            .iter()
+            .any(|line| line.trim().eq_ignore_ascii_case("Security guide"));
+        let has_enter_footer = window[q + 1..].iter().any(|line| {
+            line.trim()
+                .eq_ignore_ascii_case("Enter to confirm · Esc to cancel")
+        });
+        if !has_security_anchor || !has_enter_footer {
+            continue;
+        }
+        let end = at + CLAUDE_TRUST_QUESTION.len();
+        let question = trimmed.get(at..end).unwrap_or(trimmed);
+        return Some(PaneDialog {
+            question: question.to_string(),
+            options: options.options,
+            selected_index: options.selected_index,
+            mode: PaneDialogMode::Single,
+            checked_indices: Vec::new(),
+            class: PaneDialogClass::HumanOnly,
+            context_hash: dialog_context_hash(window, q, q + 1),
+        });
+    }
+    None
+}
+
+fn collect_claude_trust_options(lines: &[&str]) -> CollectedOptions {
+    let mut options = Vec::new();
+    let mut selected_index = None;
+    let mut start = 0;
+    let mut end = 0;
+    for (offset, line) in lines.iter().enumerate() {
+        let mut rest = line.trim_start();
+        let selected = rest.starts_with('❯');
+        if let Some(after_marker) = rest.strip_prefix('❯') {
+            rest = after_marker.trim_start();
+        }
+        let label = rest.trim();
+        if !matches!(label, "No, exit" | "Yes, I trust this folder") {
+            continue;
+        }
+        if options.is_empty() {
+            start = offset;
+        }
+        if selected {
+            selected_index = Some(options.len());
+        }
+        options.push(label.to_string());
+        end = offset + 1;
+    }
+    CollectedOptions {
+        options,
+        selected_index,
+        start,
+        end,
+        checked_indices: Vec::new(),
+        checkbox_count: 0,
+        submit_control: false,
+    }
+}
+
+/// Recognise TraeX's startup sign-in chooser on a window whose general rules already found
+/// nothing. The chooser is human-only: choosing an auth route is account context, not a
+/// machine-delegable project decision.
+fn classify_trae_signin_dialog(window: &[&str]) -> Option<PaneDialog> {
+    for q in (0..window.len()).rev() {
+        let trimmed = window[q].trim();
+        if trimmed.to_ascii_lowercase() != TRAE_SIGNIN_QUESTION {
+            continue;
+        }
+        let collected = collect_dialog_options(window, q);
+        if collected.options.len() < DIALOG_MIN_OPTIONS {
+            continue;
+        }
+        let has_enter_footer = window[collected.end..]
+            .iter()
+            .any(|line| line.trim().eq_ignore_ascii_case("Press Enter to continue"));
+        if !has_enter_footer {
+            continue;
+        }
+        return Some(PaneDialog {
+            question: trimmed.to_string(),
+            options: collected.options,
+            selected_index: collected.selected_index,
+            mode: PaneDialogMode::Single,
+            checked_indices: Vec::new(),
+            class: PaneDialogClass::HumanOnly,
+            context_hash: dialog_context_hash(window, q, collected.start),
+        });
+    }
+    None
+}
+
 fn dialog_context_hash(window: &[&str], question: usize, options_start: usize) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325;
     if let Some(heading) = question.checked_sub(1).and_then(|index| window.get(index))
@@ -497,12 +611,13 @@ struct ParsedDialogOption<'a> {
 fn dialog_option(line: &str) -> Option<ParsedDialogOption<'_>> {
     let mut rest = line.trim_start();
     // The currently-selected option carries a marker; the rest are padded. claude
-    // draws `❯` U+276F, codex draws `›` U+203A — and without the codex marker its
+    // draws `❯` U+276F, codex draws `›` U+203A, and TraeX's sign-in chooser draws
+    // ASCII `>` — and without the codex marker its
     // selected choice fell through to the digit test (the marker is not a digit),
     // returned `None`, and took the whole option block with it, so `classify_dialog`
     // never fired on a codex approval dialog at all.
-    let selected = rest.starts_with(['❯', '›']);
-    if let Some(after_marker) = rest.strip_prefix(['❯', '›']) {
+    let selected = rest.starts_with(['❯', '›', '>']);
+    if let Some(after_marker) = rest.strip_prefix(['❯', '›', '>']) {
         rest = after_marker.trim_start();
     }
     // `<n>` — at least one ASCII digit, then a literal `.`, then the text.

@@ -449,6 +449,10 @@ The dashboard keeps a message that the person did not send, for each session. It
 the cursor when the session opens the composer again. A send that works clears the message. A refusal or a
 failure keeps it. The product MUST NOT send a draft again after the dashboard exits.
 
+Before it sends, the dashboard MUST re-read the pane and prove that the pane is accepting text in a
+composer. This gate may scan the whole tail captured for the send, because prompts can sit above engine
+footer lines, but it MUST still fail closed when the pane shows a dialog.
+
 An open composer stays with its session. While the composer is open, a key MUST NOT move the selection, and
 a pointer action MUST NOT move it.
 

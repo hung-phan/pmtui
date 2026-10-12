@@ -4,6 +4,24 @@
 
 use super::*;
 
+const IDLE_TRAE_PANE: &str = "\u{2500}\u{2500}\u{2500}\u{2500}\n\
+     \u{276f} Ask TRAE CLI to do anything\n\
+     \u{2500}\u{2500}\u{2500}\u{2500}\n\
+     ? for shortcuts\n";
+
+const IDLE_CLAUDE_PLACEHOLDER_PANE: &str = "\u{2500}\u{2500}\u{2500}\u{2500}\n\
+     \u{276f}\u{a0}Try \"how do I log an error?\"\n\
+     \u{2500}\u{2500}\u{2500}\u{2500}\n\
+     \u{23f5}\u{23f5} auto mode on (shift+tab to cycle) \u{b7} \u{2190} for agents\n";
+
+fn prompt_with_long_footer(prompt: &str, footer_lines: usize) -> String {
+    let mut pane = format!("transcript above\n{prompt}\n");
+    for i in 0..footer_lines {
+        pane.push_str(&format!("  status footer row {i}\n"));
+    }
+    pane
+}
+
 #[test]
 fn s_sends_the_typed_text_to_the_rows_own_pane_and_nothing_else() {
     let dir = tempfile::tempdir().unwrap();
@@ -16,6 +34,50 @@ fn s_sends_the_typed_text_to_the_rows_own_pane_and_nothing_else() {
         "the text did not reach exactly the selected row's pane"
     );
     assert!(matches!(app.mode, UiMode::Normal), "the field stayed open");
+    assert_eq!(app.status, "sent \u{2192} bot");
+}
+
+#[test]
+fn s_sends_to_a_trae_pane_waiting_at_its_placeholder_composer() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut app, pane, session, _) = send_app(dir.path(), IDLE_TRAE_PANE);
+    send_via_keys(&mut app, "check the traex prompt");
+
+    assert_eq!(
+        pane.sends(),
+        vec![(session, "check the traex prompt".to_string())],
+        "TraeX's non-bare ❯ placeholder prompt must be accepted as a composer"
+    );
+    assert_eq!(app.status, "sent \u{2192} bot");
+}
+
+#[test]
+fn s_sends_to_a_claude_pane_waiting_at_its_placeholder_composer() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut app, pane, session, _) = send_app(dir.path(), IDLE_CLAUDE_PLACEHOLDER_PANE);
+    send_via_keys(&mut app, "hello world!");
+
+    assert_eq!(
+        pane.sends(),
+        vec![(session, "hello world!".to_string())],
+        "Claude's non-bare placeholder prompt must be accepted as a composer"
+    );
+    assert_eq!(app.status, "sent \u{2192} bot");
+}
+
+#[test]
+fn s_accepts_a_prompt_visible_above_a_long_footer() {
+    let dir = tempfile::tempdir().unwrap();
+    let pane_text = prompt_with_long_footer("\u{276f}\u{a0}", 24);
+    let (mut app, pane, session, _) = send_app(dir.path(), &pane_text);
+
+    send_via_keys(&mut app, "the prompt is still visible");
+
+    assert_eq!(
+        pane.sends(),
+        vec![(session, "the prompt is still visible".to_string())],
+        "the send gate must use the full capture it asked tmux for, not only the activity window"
+    );
     assert_eq!(app.status, "sent \u{2192} bot");
 }
 

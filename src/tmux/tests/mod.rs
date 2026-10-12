@@ -352,3 +352,60 @@ const FIXTURE_CODEX_DIALOG_TRUST: &str = concat!(
     "\n",
     "  Press enter to continue\n",
 );
+
+/// Live Claude capture of the startup workspace trust dialog. It is a blocking human-only
+/// choice, but it is not a numbered dialog: the options are plain labels below a security
+/// guide line, so the general dialog parser deliberately rejects it.
+const FIXTURE_CLAUDE_DIALOG_TRUST: &str = concat!(
+    "────────────────────────────────────────────────────────────────────────────────\n",
+    " Accessing workspace:\n",
+    "\n",
+    " /private/tmp/pmtui-fixed-test.j1Boib\n",
+    "\n",
+    " Quick safety check: Is this a project you created or one you trust? (Like your own code,\n",
+    " a well-known open source project, or work from your team). If not, take a moment to\n",
+    " review what's in this folder first.\n",
+    "\n",
+    " Claude Code'll be able to read, edit, and execute files here.\n",
+    "\n",
+    " Security guide\n",
+    "\n",
+    " ❯ No, exit\n",
+    "   Yes, I trust this folder\n",
+    "\n",
+    " Enter to confirm · Esc to cancel\n",
+);
+
+/// Live TraeX capture (`traex --no-daemon --no-alt-screen` v0.209.1) from a private
+/// tmux socket with a scratch `TRAE_HOME`: the idle composer uses Claude's `❯`
+/// lead, but it is NOT bare. That makes it invisible to both Claude's bare-prompt
+/// predicate and Codex's `›` composer predicate.
+const FIXTURE_TRAE_IDLE: &str = concat!(
+    "────────────────────────────────\n",
+    "❯ Ask TRAE CLI to do anything\n",
+    "────────────────────────────────\n",
+    "  ? for shortcuts\n",
+);
+
+/// The same live TraeX launch before auth, trimmed to the blocking part. It still
+/// paints the composer line above the sign-in chooser, so recognizing the composer
+/// without recognizing this chooser would make pmtui's `s` key type into a login
+/// menu and press Enter.
+const FIXTURE_TRAE_SIGNIN: &str = concat!(
+    "────────────────────────────────\n",
+    "❯ Ask TRAE CLI to do anything\n",
+    "────────────────────────────────\n",
+    "  ? for shortcuts\n",
+    "\n",
+    "  Welcome to TRAE CLI — your intelligent coding companion\n",
+    "\n",
+    "  Sign in to use TRAE CLI\n",
+    "\n",
+    "> 1. ByteDance Employee\n",
+    "     Sign in with Codebase Git or ByteDance SSO\n",
+    "\n",
+    "  2. Enterprise User\n",
+    "     Sign in with email, a custom domain, or a PAT\n",
+    "\n",
+    "  Press Enter to continue\n",
+);

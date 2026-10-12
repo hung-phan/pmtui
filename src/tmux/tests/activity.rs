@@ -366,6 +366,42 @@ fn codex_composer_is_never_bare_so_only_the_new_predicate_can_see_it() {
 }
 
 #[test]
+fn trae_idle_composer_is_not_a_bare_claude_prompt_but_accepts_text() {
+    assert!(!is_bare_prompt("❯ Ask TRAE CLI to do anything"));
+    assert!(!is_codex_composer("❯ Ask TRAE CLI to do anything"));
+    assert!(
+        has_composer(FIXTURE_TRAE_IDLE),
+        "TraeX idle panes must accept pmtui's s-send gate"
+    );
+    assert_eq!(classify_pane(FIXTURE_TRAE_IDLE), PaneActivity::Idle);
+}
+
+#[test]
+fn current_claude_placeholder_composer_accepts_text() {
+    let pane = concat!(
+        "────────────────────────────────\n",
+        "❯\u{a0}Try \"how do I log an error?\"\n",
+        "────────────────────────────────\n",
+        "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n",
+    );
+
+    assert!(!is_bare_prompt("❯\u{a0}Try \"how do I log an error?\""));
+    assert!(
+        has_composer(pane),
+        "Claude's current placeholder prompt must accept pmtui's s-send gate"
+    );
+    assert_eq!(classify_pane(pane), PaneActivity::Idle);
+    assert!(
+        has_composer("❯ Try \"write a test for <filepath>\"\n"),
+        "Claude rotates placeholder examples"
+    );
+    assert!(
+        !has_composer("❯ Tell me a joke.\n"),
+        "arbitrary echoed user messages must not become composers"
+    );
+}
+
+#[test]
 fn codex_busy_marker_beats_the_composer_and_the_echoed_user_message() {
     // The composer is on screen mid-turn, and the submitted message is echoed with its
     // own `›` lead — so TWO `›`-led lines are present while codex is working. Only the
