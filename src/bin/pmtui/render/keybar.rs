@@ -310,7 +310,7 @@ fn keybar_layout(app: &App, width: u16) -> Option<KeybarLayout> {
                         match crate::update::next(&app.update_status) {
                             crate::update::Next::Check => "Check for updates",
                             crate::update::Next::Install { .. } => "Install it",
-                            crate::update::Next::FixInstaller => "Update the installer",
+                            crate::update::Next::FixInstaller => "Repair the installer",
                         }
                     }
                     crate::settings::SettingKind::Theme => "Change",

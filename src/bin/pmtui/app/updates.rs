@@ -42,6 +42,98 @@ pub(crate) fn installer_in(
     data.join("agent-manager/install.sh")
 }
 
+/// Where a repair should fetch the published installer from, for this dashboard.
+///
+/// Read from the installer ON DISK so a machine installed from a fork repairs itself from that fork.
+/// `$PMTUI_REPAIR_URL` overrides it, which is how the acceptance test points the fetch at a local
+/// `file://` copy instead of the network.
+pub(crate) fn repair_source(app: &App) -> String {
+    // THE FIELD, never the environment, and never a default that reaches the network. Reading
+    // `$PMTUI_REPAIR_URL` here instead let a unit test — which cannot set it — fall through to the
+    // live URL and run the REAL installer against the machine running the suite. The fixture now
+    // injects a `file://` sentinel, so an unset test cannot reach GitHub at all.
+    if let Some(url) = &app.repair_url {
+        return url.clone();
+    }
+    let installer = std::fs::read_to_string(&app.installer_path).unwrap_or_default();
+    crate::update::repair_url(&installer)
+}
+
+/// Download the published `install.sh` to a temp file and return its path.
+///
+/// Shelled out to `curl`/`wget` rather than linking an HTTP stack: `install.sh` resolves releases
+/// the same way, and the dashboard having no HTTP client of its own is a property worth keeping.
+/// Runs inside the terminal handoff, so the human watches the download they asked for.
+///
+/// The download is SNIFFED before it is handed to `bash`. A proxy error page and a truncated
+/// response are both a body with a 200, and running one of those as root-adjacent shell is the worst
+/// outcome available here.
+pub(crate) fn fetch_installer(url: &str) -> anyhow::Result<PathBuf> {
+    // A FRESH, UNIQUE DESTINATION EVERY TIME. A path keyed only on the pid is reused, and `curl -f`
+    // leaves the previous file in place when a download fails — so a failed fetch would sniff and
+    // then RUN whatever a previous fetch left behind. Found by a test whose download was deliberate
+    // junk and which "succeeded" by executing the good script from the fetch before it.
+    let dir = std::env::temp_dir().join(format!(
+        "pmtui-repair-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_nanos())
+            .unwrap_or_default()
+    ));
+    std::fs::create_dir_all(&dir)?;
+    let script = dir.join("install.sh");
+    println!("fetching {url}");
+    let argv = download_argv(which("curl"), url, &script);
+    let fetched = Command::new(&argv[0]).args(&argv[1..]).status()?;
+    if !fetched.success() {
+        // Never leave a partial body behind for anything else to find.
+        let _ = std::fs::remove_file(&script);
+        anyhow::bail!("could not download {url} ({fetched})");
+    }
+    let text = std::fs::read_to_string(&script)?;
+    if !crate::update::looks_like_installer(&text) {
+        let _ = std::fs::remove_file(&script);
+        anyhow::bail!("what {url} returned is not the installer — refusing to run it");
+    }
+    Ok(script)
+}
+
+/// The download command, preferring `curl` and falling back to `wget` exactly as `install.sh` does.
+///
+/// Both forms are time-capped for the same reason `latest_tag` is: this runs inside the terminal
+/// handoff, and an unbounded fetch would park the dashboard with no way back.
+///
+/// Pure, and taking the answer to "is curl here?" as an ARGUMENT, because the machine running the
+/// tests has curl — so the `wget` branch is otherwise a branch nothing can reach, which is the same
+/// as not knowing whether it works.
+pub(crate) fn download_argv(have_curl: bool, url: &str, dest: &Path) -> Vec<std::ffi::OsString> {
+    let mut argv: Vec<std::ffi::OsString> = if have_curl {
+        ["curl", "-fsSL", "-m", "30", "-o"]
+            .iter()
+            .map(Into::into)
+            .collect()
+    } else {
+        ["wget", "-q", "--timeout=30", "--tries=1", "-O"]
+            .iter()
+            .map(Into::into)
+            .collect()
+    };
+    argv.push(dest.into());
+    argv.push(url.into());
+    argv
+}
+
+/// Whether `program` is on `PATH`, so the fetch can prefer `curl` and fall back to `wget` the way
+/// `install.sh` does.
+fn which(program: &str) -> bool {
+    Command::new("sh")
+        .arg("-c")
+        .arg(format!("command -v {program} >/dev/null 2>&1"))
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 /// The installer invocation for [`crate::session::drain_terminal_requests`].
 ///
 /// `--if-newer` is passed even though the row only offers an update once something looked newer:
@@ -107,7 +199,7 @@ impl App {
             // NOT "could not reach GitHub" — that is the diagnosis this state exists to stop. The
             // network is fine; the installer on disk is older than the question.
             crate::update::Status::InstallerTooOld => {
-                "the installed install.sh is too old to check — Enter updates it".into()
+                "the installed install.sh is too old to check — Enter fetches a current one".into()
             }
             crate::update::Status::Unreachable | crate::update::Status::Unchecked => {
                 "could not reach GitHub".into()
@@ -125,7 +217,21 @@ impl App {
             self.status = missing_installer(&self.installer_path);
             return;
         }
-        self.pending_update = true;
+        self.pending_install = Some(crate::update::InstallerRun::Update);
+    }
+
+    /// `Repair the installer`: fetch the published script and run THAT.
+    ///
+    /// The one action that does not simply run what is on disk, because what is on disk is the
+    /// problem: a pre-`--check` installer answers `--update --if-newer` with "Already up to date"
+    /// and skips its own self-copy, so running it again changes nothing, forever. Measured on a real
+    /// machine before this existed.
+    pub(crate) fn request_repair(&mut self) {
+        if !self.installer_path.is_file() {
+            self.status = missing_installer(&self.installer_path);
+            return;
+        }
+        self.pending_install = Some(crate::update::InstallerRun::Repair);
     }
 }
 

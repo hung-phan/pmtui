@@ -176,6 +176,38 @@ latest_tag_api() {
   fi
 }
 
+# Refresh `$STATE_DIR/install.sh` from the published script.
+#
+# WHY THIS IS NOT just the `cp` in `write_manifest`: when the wrappers (or the dashboard's Updates
+# row) run `bash $STATE_DIR/install.sh --update`, `${BASH_SOURCE[0]}` IS that path, so the copy was
+# skipped — correctly, since copying a file onto itself is nothing — and the stored script stayed
+# frozen at whatever version first installed the machine. Binaries updated for months while the
+# script did not, which is how a machine ended up unable to answer `--check` while running current
+# binaries. A stale copy of ourselves is its own bug, so it gets its own fix.
+#
+# Staged then renamed, like `install_binary`: an atomic same-filesystem rename never truncates the
+# live path, and the shell executing this file keeps its own inode. FAIL-OPEN throughout — a failed
+# refresh must leave a working installer in place, because the alternative is a machine with no way
+# to install anything.
+refresh_self() { # refresh_self [tag]
+  local ref="${1:-main}" staged="$STATE_DIR/install.sh.new.$$"
+  mkdir -p "$STATE_DIR" 2>/dev/null || return 0
+  download "https://raw.githubusercontent.com/$REPO/$ref/install.sh" "$staged" 2>/dev/null || {
+    rm -f "$staged" 2>/dev/null
+    return 0
+  }
+  # Verify it IS this installer before trusting it: a proxy error page or a truncated download is a
+  # 200 with a body, and replacing a working script with one of those would be the worst outcome
+  # here. Structural markers, not a version string — those are what every release has in common.
+  if grep -q '^install_binary()' "$staged" && grep -q '^latest_tag()' "$staged"; then
+    chmod +x "$staged" 2>/dev/null
+    mv -f "$staged" "$STATE_DIR/install.sh" 2>/dev/null || rm -f "$staged" 2>/dev/null
+  else
+    rm -f "$staged" 2>/dev/null
+  fi
+  return 0
+}
+
 # The newest published release tag on stdout.
 #
 # Exit status SEPARATES THREE OUTCOMES, because conflating them lied to the user: 0 = found,
@@ -612,6 +644,12 @@ do_update() {
   detect_platform
   local cur=""
   [ -f "$STATE_DIR/version" ] && cur="$(cat "$STATE_DIR/version" 2>/dev/null || echo "")"
+
+  # FIRST, and unconditionally: the `--if-newer` arms below RETURN, so anything after them is never
+  # reached on the common path — which is exactly where a machine with current binaries and a stale
+  # script would be stuck forever, told "Already up to date" by a script too old to be asked
+  # anything.
+  refresh_self
 
   if [ "$IF_NEWER" -eq 1 ]; then
     case "$cur" in

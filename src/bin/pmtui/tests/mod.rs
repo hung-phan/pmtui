@@ -665,10 +665,14 @@ fn app_with_driver(projects: Vec<ProjectView>, mode: UiMode, agent_tmux: Box<dyn
         update_status: crate::update::Status::Unchecked,
         update_installed: None,
         pending_check: false,
-        pending_update: false,
+        pending_install: None,
         pending_relaunch: false,
         // NEVER the test binary: a successful `exec` here would replace the test runner.
         relaunch_exe: std::path::PathBuf::from("/nonexistent/pmtui"),
+        // A SENTINEL, not `None`: `None` derives the real repository's URL from the installer on
+        // disk, and a test that forgot to override it once fetched and RAN the live installer
+        // against the machine running the suite. `file://` cannot reach a network.
+        repair_url: Some("file:///nonexistent/pmtui-test/install.sh".to_string()),
         installer_path: std::path::PathBuf::from("/nonexistent/install.sh"),
         return_to_board_after_answer: false,
         return_to_board_after_switch: false,
@@ -1082,10 +1086,14 @@ fn creating_loop_app(
         update_status: crate::update::Status::Unchecked,
         update_installed: None,
         pending_check: false,
-        pending_update: false,
+        pending_install: None,
         pending_relaunch: false,
         // NEVER the test binary: a successful `exec` here would replace the test runner.
         relaunch_exe: std::path::PathBuf::from("/nonexistent/pmtui"),
+        // A SENTINEL, not `None`: `None` derives the real repository's URL from the installer on
+        // disk, and a test that forgot to override it once fetched and RAN the live installer
+        // against the machine running the suite. `file://` cannot reach a network.
+        repair_url: Some("file:///nonexistent/pmtui-test/install.sh".to_string()),
         installer_path: std::path::PathBuf::from("/nonexistent/install.sh"),
         return_to_board_after_answer: false,
         return_to_board_after_switch: false,

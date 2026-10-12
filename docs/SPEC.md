@@ -508,8 +508,18 @@ that installs.
   the third sends a person with a working network to go and debug their network.
 - An installer too old to answer is judged on the ANSWER, not on its words: one that answers states
   both the version it installed and the newest one, so an installer that states neither did not
-  understand the question. Its own update still works and replaces its copy of itself, so the
-  product names that as the way out.
+  understand the question.
+- AN INSTALLER KEEPS ITS OWN COPY CURRENT. An update MUST refresh the stored installer before it
+  decides whether anything else needs updating, because that decision can stop the update — which
+  left machines updating their programs for months while the script that installs them stayed as
+  first installed, until it could no longer answer at all. A refresh that fails leaves the working
+  installer in place, and a download that is not the installer is never stored.
+- An installer too old to answer CANNOT repair itself, so the product does not ask it to: the way
+  out is to obtain a current installer and run that one. The product obtains it from the repository
+  the installed one names, so a fork is not silently repointed; it MUST verify that what arrived is
+  the installer before running it, because a refused request and a truncated download are both a
+  reply; and the person watches it happen in their terminal, because a product that fetched and ran
+  a program without showing it would be asking for trust it has not earned.
 - The product compares versions by number. A version that it cannot compare is a fact, never a verdict,
   and the product still offers the update, because the installer decides and declines on its own.
 - The product names the version that the installer last installed WHEN that version disagrees with the

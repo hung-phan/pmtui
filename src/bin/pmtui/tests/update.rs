@@ -165,7 +165,7 @@ fn a_tag_that_cannot_be_compared_is_a_fact_not_a_verdict() {
         }
     );
     assert!(
-        next(&status).installs(),
+        matches!(next(&status), Next::Install { .. }),
         "an unknown shape still offers the update"
     );
 }
@@ -325,7 +325,10 @@ fn a_build_that_was_not_installed_by_the_installer_says_so() {
     // nothing.
     app.status = "untouched".into();
     app.request_update();
-    assert!(!app.pending_update, "nothing to run means nothing to queue");
+    assert_eq!(
+        app.pending_install, None,
+        "nothing to run means nothing to queue"
+    );
     assert!(app.status.contains("no installer at"), "{}", app.status);
 }
 
@@ -352,7 +355,6 @@ fn an_installer_that_answers_nothing_is_too_old_rather_than_offline() {
     // replaces its copy of itself.
     let next = next(&app.update_status);
     assert_eq!(next, Next::FixInstaller);
-    assert!(next.installs(), "the way out runs the installer");
 
     // Exit 0 with nothing printed is the same failure to answer, not an empty answer.
     app.installer_path = stub_installer(dir.path(), "", 0);
@@ -385,7 +387,6 @@ fn enter_does_the_one_thing_each_state_leaves_to_do() {
     ] {
         let next = next(&status);
         assert_eq!(next, Next::Check, "{status:?}");
-        assert!(!next.installs(), "{status:?} must not take the terminal");
     }
 
     // A tag that could not be compared still offers the install: the comparison here is
@@ -406,7 +407,6 @@ fn enter_does_the_one_thing_each_state_leaves_to_do() {
             },
             "{status:?}"
         );
-        assert!(next.installs());
     }
 }
 
@@ -419,7 +419,10 @@ fn updating_queues_the_installer_and_the_drain_runs_it() {
     app.installer_path = stub_installer(dir.path(), "", 0);
 
     app.request_update();
-    assert!(app.pending_update);
+    assert_eq!(
+        app.pending_install,
+        Some(crate::update::InstallerRun::Update)
+    );
 
     let mut handoff = UpdateHandoff::default();
     drain_terminal_requests(&mut app, &mut handoff, "/bin/true");
@@ -428,7 +431,10 @@ fn updating_queues_the_installer_and_the_drain_runs_it() {
     // second restore only happens because this test's `relaunch_exe` cannot be executed — on a real
     // success there is no process left to restore for.
     assert_eq!(handoff.events, ["suspend", "restore", "suspend", "restore"]);
-    assert!(!app.pending_update, "the request is consumed, not repeated");
+    assert_eq!(
+        app.pending_install, None,
+        "the request is consumed, not repeated"
+    );
     assert!(!app.pending_relaunch, "and so is the refresh");
     // A NEW BINARY IS NOT A NEW PROCESS. When the restart cannot happen, the message must still say
     // the update LANDED — otherwise someone goes looking for a problem with the install.
@@ -438,6 +444,187 @@ fn updating_queues_the_installer_and_the_drain_runs_it() {
         app.status
     );
     assert!(app.status.contains("quit and reopen it"), "{}", app.status);
+}
+
+#[test]
+fn a_repair_fetches_the_installer_from_wherever_this_machine_installed_from() {
+    use crate::update::{looks_like_installer, repair_url};
+
+    // A FORK MUST NOT BE REPOINTED AT UPSTREAM. The installer on disk says where it came from, so
+    // that is where a repair fetches from; the constant is only for a script that does not say.
+    let forked = repair_url("REPO=\"someone/their-fork\"\nmore=stuff\n");
+    assert_eq!(
+        forked,
+        "https://raw.githubusercontent.com/someone/their-fork/main/install.sh"
+    );
+    assert_eq!(
+        repair_url("REPO='other/name'\n"),
+        "https://raw.githubusercontent.com/other/name/main/install.sh"
+    );
+    // A line this parser does not understand is not a guess to act on.
+    for unreadable in [
+        "",
+        "REPO=\n",
+        "REPO=notarepo\n",
+        "REPO=\"two words/here there\"\n",
+    ] {
+        assert!(
+            repair_url(unreadable).contains(crate::update::REPO),
+            "{unreadable:?} must fall back to the known repository"
+        );
+    }
+
+    // AND THE DASHBOARD READS IT FROM THE INSTALLER ON DISK when nothing overrides it. Only the
+    // derived string is asserted — nothing is fetched — because this is the one path that would
+    // reach the network in production, and a test of it once ran the real installer.
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("install.sh");
+    std::fs::write(&script, "#!/bin/sh\nREPO=\"someone/their-fork\"\n").unwrap();
+    let mut app = app_with(Vec::new(), UiMode::Normal);
+    app.installer_path = script;
+    app.repair_url = None;
+    assert_eq!(
+        crate::app::updates::repair_source(&app),
+        "https://raw.githubusercontent.com/someone/their-fork/main/install.sh"
+    );
+
+    // A build with no installer has nothing to repair and nothing to read a repository from, so the
+    // request is refused rather than fetching from a guess.
+    app.installer_path = std::path::PathBuf::from("/nonexistent/install.sh");
+    app.request_repair();
+    assert_eq!(app.pending_install, None);
+    assert!(app.status.contains("no installer at"), "{}", app.status);
+
+    // AND THE DOWNLOAD IS SNIFFED. A proxy error page and a truncated response are both a body with
+    // a 200, and handing one of those to `bash` is the worst thing available here.
+    assert!(looks_like_installer(
+        "#!/usr/bin/env bash\ninstall_binary() { :; }\nlatest_tag() { :; }\n"
+    ));
+    for not_it in [
+        "<html>404 not found</html>",
+        "",
+        "install_binary() { :; }\n",
+        "latest_tag() { :; }\n",
+        "  install_binary() { :; }\n  latest_tag() { :; }\n",
+    ] {
+        assert!(!looks_like_installer(not_it), "accepted {not_it:?}");
+    }
+}
+
+#[test]
+fn the_download_is_time_capped_on_whichever_tool_is_present() {
+    use crate::app::updates::download_argv;
+
+    let dest = std::path::Path::new("/tmp/out.sh");
+    let curl = download_argv(true, "https://example/install.sh", dest);
+    assert_eq!(curl[0], "curl");
+    assert!(curl.iter().any(|arg| arg == "-m"), "{curl:?}");
+    // The destination and the URL are the LAST two, in that order — swapping them would download
+    // the destination path.
+    assert_eq!(curl[curl.len() - 2], dest);
+    assert_eq!(curl[curl.len() - 1], "https://example/install.sh");
+
+    // The machine running these tests has curl, so this is the only way to know the fallback is
+    // even well-formed.
+    let wget = download_argv(false, "https://example/install.sh", dest);
+    assert_eq!(wget[0], "wget");
+    assert!(wget.iter().any(|arg| arg == "--timeout=30"), "{wget:?}");
+    assert!(wget.iter().any(|arg| arg == "--tries=1"), "{wget:?}");
+    assert_eq!(wget[wget.len() - 2], dest);
+    assert_eq!(wget[wget.len() - 1], "https://example/install.sh");
+}
+
+#[test]
+fn a_repair_runs_the_script_it_fetched_rather_than_the_one_on_disk() {
+    use crate::session::drain_terminal_requests;
+
+    // THE DEAD END THIS ESCAPES, measured on a real machine before it existed: a pre-`--check`
+    // installer answers `--update --if-newer` with "Already up to date" and skips its own self-copy,
+    // so running it again changes nothing, forever. The repair therefore fetches a fresh script and
+    // runs THAT. Driven over `file://`, so the test needs no network.
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("argv.log");
+    let published = dir.path().join("published-install.sh");
+    std::fs::write(
+        &published,
+        format!(
+            "#!/bin/sh\ninstall_binary() {{ :; }}\nlatest_tag() {{ :; }}\necho \"fresh $@\" >> '{}'\nexit 0\n",
+            log.display()
+        ),
+    )
+    .unwrap();
+
+    let mut app = app_with(Vec::new(), UiMode::Normal);
+    // The installer on disk is the old one, and it must NOT be the script that runs.
+    app.installer_path = old_installer(dir.path());
+    app.update_status = Status::InstallerTooOld;
+    app.repair_url = Some(format!("file://{}", published.display()));
+
+    app.mode = UiMode::Settings {
+        cursor: 1,
+        open: None,
+    };
+    handle_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(
+        app.pending_install,
+        Some(crate::update::InstallerRun::Repair),
+        "a too-old installer must queue a REPAIR, not another doomed update"
+    );
+
+    let mut handoff = UpdateHandoff::default();
+    drain_terminal_requests(&mut app, &mut handoff, "/bin/true");
+
+    let ran = std::fs::read_to_string(&log).expect("the fetched installer ran");
+    assert_eq!(
+        ran.trim(),
+        "fresh --update --if-newer -y",
+        "the repair ran the wrong script, or with the wrong arguments: {ran}"
+    );
+    // A successful repair refreshes onto the new build like any other install. The drain consumes
+    // that request in the same pass, so the observable is the message it leaves behind — and this
+    // fixture's `relaunch_exe` cannot be executed, which is the only reason there is one to read.
+    assert!(
+        app.status.contains("the new version is installed"),
+        "a repair must finish the job like an update: {}",
+        app.status
+    );
+}
+
+#[test]
+fn a_repair_refuses_to_run_something_that_is_not_the_installer() {
+    use crate::session::drain_terminal_requests;
+
+    // The one case where failing LOUDLY matters more than self-healing: whatever came back is about
+    // to be handed to `bash`.
+    let dir = tempfile::tempdir().unwrap();
+    let junk = dir.path().join("not-the-installer.sh");
+    std::fs::write(&junk, "<html>404 not found</html>\n").unwrap();
+
+    let mut app = app_with(Vec::new(), UiMode::Normal);
+    app.installer_path = old_installer(dir.path());
+    app.repair_url = Some(format!("file://{}", junk.display()));
+    app.request_repair();
+
+    let mut handoff = UpdateHandoff::default();
+    drain_terminal_requests(&mut app, &mut handoff, "/bin/true");
+    assert!(
+        app.status.contains("is not the installer"),
+        "{}",
+        app.status
+    );
+    assert!(!app.pending_relaunch, "nothing was installed");
+
+    // A URL that cannot be fetched at all is reported too, rather than silently doing nothing.
+    app.repair_url = Some(format!("file://{}/missing.sh", dir.path().display()));
+    app.request_repair();
+    let mut handoff = UpdateHandoff::default();
+    drain_terminal_requests(&mut app, &mut handoff, "/bin/true");
+    assert!(
+        app.status.contains("could not download") || app.status.contains("could not run"),
+        "{}",
+        app.status
+    );
+    assert!(!app.pending_relaunch);
 }
 
 #[test]
@@ -563,13 +750,17 @@ fn one_enter_does_it_and_the_preferences_learn_nothing() {
         latest: "v9.0.0".to_string(),
     };
     handle_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
-    assert!(app.pending_update, "the update is queued for the handoff");
+    assert_eq!(
+        app.pending_install,
+        Some(crate::update::InstallerRun::Update),
+        "the update is queued for the handoff"
+    );
     assert!(matches!(app.mode, UiMode::Settings { open: None, .. }));
     assert!(!app.settings_path.exists());
 
     // And an option can never reach the commit path for this row, because the row has none — but if
     // one did, it must change nothing rather than be written down as a preference.
-    app.pending_update = false;
+    app.pending_install = None;
     app.status = "untouched".into();
     app.commit_setting(
         crate::settings::SettingKind::Updates,
@@ -580,7 +771,7 @@ fn one_enter_does_it_and_the_preferences_learn_nothing() {
         },
     );
     assert_eq!(app.status, "untouched");
-    assert!(!app.pending_update);
+    assert_eq!(app.pending_install, None);
     assert!(!app.settings_path.exists());
 }
 

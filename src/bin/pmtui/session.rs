@@ -383,15 +383,26 @@ pub(crate) fn drain_terminal_requests(
         });
         finish_pending_attach(app, &label, result);
     }
-    if std::mem::take(&mut app.pending_update) {
+    if let Some(run) = app.pending_install.take() {
         let script = app.installer_path.clone();
         let args = crate::app::updates::update_args();
-        // The installer gets the REAL terminal, like `$EDITOR` and attach: it downloads, verifies a
+        let repair = crate::app::updates::repair_source(app);
+        // The installer gets the REAL TERMINAL, like `$EDITOR` and attach: it downloads, verifies a
         // checksum, smoke-tests the binaries and may ask something, and a human who just asked to
         // replace their own tools should watch that happen rather than stare at a frozen dashboard.
+        // A repair's download is handed over for the same reason, plus one more — a dashboard that
+        // fetched and ran a script without showing it would be asking for trust it has not earned.
         let status = with_terminal_handoff(
             handoff,
-            Box::new(|| {
+            Box::new(move || {
+                let script = match run {
+                    crate::update::InstallerRun::Update => script,
+                    // A too-old installer cannot repair itself, so the published script is fetched
+                    // and run INSTEAD of the one on disk — which that script then replaces.
+                    crate::update::InstallerRun::Repair => {
+                        crate::app::updates::fetch_installer(&repair)?
+                    }
+                };
                 std::process::Command::new("bash")
                     .arg(&script)
                     .args(args)

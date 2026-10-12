@@ -310,12 +310,20 @@ different:
 |---|---|
 | `could not reach GitHub` | offline, a proxy, or a throttled API. Press Enter to retry. |
 | `no releases` | GitHub answered; this repository has published nothing. |
-| `installer too old to ask` | your `install.sh` predates `--check`. Enter updates it, which fixes it. |
+| `installer too old to ask` | your `install.sh` predates `--check`. Enter fetches a current one and runs it, which fixes it for good. |
 | `no installer at …` | this build did not come from `install.sh` — a `cargo build`, a package manager, a checkout. Nothing is wrong; there is just no installer to drive. |
 
 "Could not reach GitHub" is never shown for a problem that is not the network. That distinction is
 the point: being told your network is down when your installer is simply out of date sends you to
 debug the wrong machine.
+
+`installer too old to ask` is the one state whose fix is not simply "run the installer again", and
+it is worth knowing why. A script from before `--check` cannot repair itself: `--update --if-newer`
+answers *Already up to date* and its self-copy step is skipped, because the script doing the copying
+**is** the stored one. So pressing Enter there downloads a current `install.sh` — from the repository
+your own installer names, so a fork stays a fork — checks that what came back really is the
+installer, and runs that instead. You watch all of it in your terminal. Afterwards the stored script
+keeps itself current, so this is a one-time repair.
 
 The row drives `install.sh` from `$XDG_DATA_HOME/agent-manager/install.sh` — the copy the installer
 keeps of itself — so the dashboard and `install.sh --check` always agree on what the newest release

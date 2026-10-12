@@ -164,7 +164,15 @@ server and daemon when the test ends.
   apart by the CONTRACT (an installer that answers prints both `current=` and `latest=`, so neither
   key means the question was not understood) and never by its error wording, which belongs to one
   release. That bug shipped: every machine installed before this feature was told its network was
-  down. The installer is resolved from `$XDG_DATA_HOME`/`$HOME` through `installer_in`, taken as
+  down. AND IT CANNOT REPAIR ITSELF, measured: `--update --if-newer` returns "Already up to date"
+  before `write_manifest`, whose self-copy is skipped anyway because `${BASH_SOURCE[0]}` IS the
+  stored script — so `refresh_self` runs FIRST in `do_update`, unconditionally, and `Next::
+  FixInstaller` fetches the published script (from the `REPO=` the installed one names, so a fork
+  stays a fork), SNIFFS it (`looks_like_installer`; an error page is a body too) and runs that
+  instead. Each fetch gets a unique destination and deletes it on failure — `curl -f` leaves the
+  previous file behind, so a reused path meant a failed download could run an earlier one's script.
+  A test that forgot to override `App::repair_url` once fetched and RAN the live installer against
+  the machine running the suite, so the fixture injects a `file://` sentinel rather than `None`. The installer is resolved from `$XDG_DATA_HOME`/`$HOME` through `installer_in`, taken as
   arguments so both branches are testable, and read ONCE into `App::installer_path`.
 - A REPLACED BINARY IS NO USE TO A LOADED PROCESS, and `src/selfexec.rs` is the one place that
   knows it. A successful update re-execs pmtui (`relaunch`, carrying `args_os`) while the terminal
