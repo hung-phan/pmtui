@@ -333,25 +333,25 @@ fn effective_id_prefers_ledger_then_registry_seed_then_what_the_engine_reported(
     // observation. All absent ⇒ None.
     let captured = Some("captured");
     assert_eq!(
-        effective_id(Some("ledger"), Some("seed"), captured),
+        effective_id(Engine::Claude, Some("ledger"), Some("seed"), captured),
         Some("ledger".to_string())
     );
     assert_eq!(
-        effective_id(None, Some("seed"), captured),
+        effective_id(Engine::Claude, None, Some("seed"), captured),
         Some("seed".to_string())
     );
     assert_eq!(
-        effective_id(Some("ledger"), None, captured),
+        effective_id(Engine::Claude, Some("ledger"), None, captured),
         Some("ledger".to_string())
     );
     // Ranking it last is what makes the new source purely ADDITIVE: it can only ever decide a row
     // where both decisions are empty — which is every codex row, since codex has no caller-chosen
     // id for either of them to record.
     assert_eq!(
-        effective_id(None, None, captured),
+        effective_id(Engine::Claude, None, None, captured),
         Some("captured".to_string())
     );
-    assert_eq!(effective_id(None, None, None), None);
+    assert_eq!(effective_id(Engine::Claude, None, None, None), None);
 }
 
 #[test]
@@ -361,7 +361,7 @@ fn a_codex_row_whose_hook_reported_an_id_resumes_instead_of_opening_a_second_con
     // opened a SECOND conversation, orphaning the first. The hook's own `thread_id` is the only
     // thing that could have said otherwise.
     let captured = "0199dddd-1111-7aaa-8bbb-ccccdddddddd";
-    let eff = effective_id(None, None, Some(captured));
+    let eff = effective_id(Engine::Codex, None, None, Some(captured));
     assert_eq!(
         agent_loop_enter(None, eff.as_deref(), false),
         EnterAction::Chat(captured.to_string()),
@@ -375,7 +375,7 @@ fn second_enter_on_seed_only_session_resumes_not_re_mints() {
     // None), a second Enter must Chat the SEEDED id via the resume path — never
     // mint a second conversation. effective_id feeds agent_loop_enter, so a
     // seed-only state is Chat(seed), not WaitingFirstWake.
-    let eff = effective_id(None, Some("seed-42"), None);
+    let eff = effective_id(Engine::Claude, None, Some("seed-42"), None);
     assert_eq!(
         agent_loop_enter(None, eff.as_deref(), false),
         EnterAction::Chat("seed-42".to_string())
@@ -1129,4 +1129,25 @@ fn editor_temp_write_failure_stops_before_terminal_handoff() {
     assert!(error.to_string().contains("write send temp"), "{error:#}");
     assert!(handoff.events.is_empty());
     assert!(!editor_ran.get());
+}
+
+#[test]
+fn a_trae_row_resumes_only_the_thread_its_hook_reported() {
+    // TraeX keeps pmtui's `--session-id` as a thread NAME, and `traex resume <uuid>` cannot open a
+    // name, so a ledger or registry id must never reach Enter for a TraeX row.
+    let reported = "01a133c3-b12f-7033-ae77-38f3294fb68e";
+    assert_eq!(
+        effective_id(
+            Engine::Trae,
+            Some("ledger-name"),
+            Some("seed-name"),
+            Some(reported)
+        ),
+        Some(reported.to_string())
+    );
+    assert_eq!(
+        effective_id(Engine::Trae, Some("ledger-name"), Some("seed-name"), None),
+        None,
+        "no reported thread yet: nothing to resume"
+    );
 }

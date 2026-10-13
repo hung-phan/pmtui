@@ -968,7 +968,9 @@ happen again. A restart MUST NOT do any of these:
   that closed.
 - To resume or to restart a conversation needs an exact identity.
 - Some engines do not accept an identity from the product. For those, the product MUST learn the identity
-  the engine assigned, and MUST keep it with the session.
+  the engine assigned, and MUST keep it with the session. An engine that accepts a name from the product
+  but cannot resume by that name is in this group, and the product MUST resume it only by the identity
+  the engine reported.
   - It MUST take that identity from what the engine itself reports. It MUST NOT read the private files of
     a running engine to guess it.
   - To restart such a session MUST resume the identity it learned. A restart MUST NOT start a second

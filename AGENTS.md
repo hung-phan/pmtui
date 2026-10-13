@@ -175,6 +175,11 @@ server and daemon when the test ends.
   win. Never read a running engine's own files to guess an identity; `/proc` scraping is Linux-only and
   races the engine's startup. An id arrives only after the first completed turn, and one that does not
   parse is "not known yet" — never an argument.
+- TraeX RESUMES ONLY THE THREAD ITS HOOK REPORTED. It accepts `--session-id <uuid>` but stores it as a
+  thread NAME, and `traex resume <uuid>` looks a UUID up as a thread id only, so a name never resumes.
+  `pmtui hook turn-complete` writes the `session_id` of the `Stop` payload to the same
+  `ProjectPaths::codex_conversation_id` file Codex uses; pmd adopts it on every tick, and a TraeX
+  session with no reported thread starts a new conversation rather than resuming a name.
 - No machine declares a project done. The human closes the session.
 
 ## Spawn Command Surface

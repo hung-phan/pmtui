@@ -303,7 +303,7 @@ fn dispatch(
             emit(out, &format!("{text}\n"));
             Ok(spawn_cli::exit_code(&output))
         }
-        Ok(Action::HookTurnComplete) => match run_turn_complete_hook(spawn.env) {
+        Ok(Action::HookTurnComplete) => match run_turn_complete_hook(spawn.env, &hook_payload()) {
             Ok(()) => Ok(0),
             Err(error) => {
                 emit(err, &format!("hook turn-complete: {error:#}\n"));
@@ -336,7 +336,35 @@ fn dispatch(
     }
 }
 
-fn run_turn_complete_hook(env: &dyn Fn(&str) -> Option<String>) -> Result<()> {
+/// The most of a hook payload worth reading. TraeX's `Stop` payload carries the turn's last
+/// assistant message, so it can be long; the id sits in front of it and a cut-off payload only
+/// costs the id for this one turn.
+const HOOK_PAYLOAD_MAX: u64 = 1 << 20;
+
+/// What the engine piped to the hook, or nothing when stdin is a terminal — a person running the
+/// command by hand — so the hook never waits for input nobody will type.
+fn hook_payload() -> String {
+    use std::io::{IsTerminal, Read};
+    let stdin = std::io::stdin();
+    if stdin.is_terminal() {
+        return String::new();
+    }
+    let mut payload = String::new();
+    let _ = stdin
+        .lock()
+        .take(HOOK_PAYLOAD_MAX)
+        .read_to_string(&mut payload);
+    payload
+}
+
+/// TraeX's `Stop` hook. It records the thread id TraeX REPORTS (`session_id` in the payload)
+/// beside the turn signal, then appends one byte to the turn signal.
+///
+/// The id is what makes the conversation resumable: TraeX keeps a `--session-id` we give it as a
+/// thread NAME, and `traex resume` of that UUID fails, turn or no turn. The id is written FIRST, so
+/// a reader that sees the turn also sees the id. A payload with no usable id records nothing and
+/// still signals the turn: the turn is the fact pmd waits for, and the id is only "not known yet".
+fn run_turn_complete_hook(env: &dyn Fn(&str) -> Option<String>, payload: &str) -> Result<()> {
     let state_dir = env(tmux::ENV_STATE_DIR)
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
@@ -344,6 +372,12 @@ fn run_turn_complete_hook(env: &dyn Fn(&str) -> Option<String>) -> Result<()> {
     let daemon_dir = state_dir.join(".daemon");
     std::fs::create_dir_all(&daemon_dir)
         .with_context(|| format!("create_dir_all {}", daemon_dir.display()))?;
+    if let Some(id) = reported_thread_id(payload) {
+        // `ProjectPaths::codex_conversation_id`, the file pmd and pmtui both read the reported id from.
+        let path = daemon_dir.join("conversation-id");
+        agent_manager::state::write_text_atomic(&path, &id)
+            .with_context(|| format!("write {}", path.display()))?;
+    }
     let path = daemon_dir.join("turn-complete");
     let mut file = std::fs::OpenOptions::new()
         .create(true)
@@ -354,6 +388,13 @@ fn run_turn_complete_hook(env: &dyn Fn(&str) -> Option<String>) -> Result<()> {
         .with_context(|| format!("write {}", path.display()))?;
     file.sync_data()
         .with_context(|| format!("sync {}", path.display()))
+}
+
+/// The validated `session_id` of a hook payload, or `None` when there is none or it is not a UUID.
+fn reported_thread_id(payload: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(payload).ok()?;
+    let raw = value.get("session_id")?.as_str()?;
+    agent_manager::state::codex_identity::parse(raw).map(str::to_string)
 }
 
 #[cfg(test)]

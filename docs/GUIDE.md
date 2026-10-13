@@ -177,9 +177,9 @@ typed in full, type the `/` and its children become candidates.
 
 ### Engine sessions and their conversations
 
-Claude and TRAE CLI let pmtui name a conversation up front. Codex does not — it assigns its own.
-So a Codex session learns its identity from the engine itself, reported when its **first turn
-finishes**. Until then the session has no conversation to go back to, which is why a brand-new
+Claude lets pmtui name a conversation up front. Codex does not — it assigns its own. TRAE CLI
+accepts a name but cannot resume by it. So Codex and TRAE CLI sessions learn their identity from the
+engine itself, reported when their **first turn finishes**. Until then the session has no conversation to go back to, which is why a brand-new
 Codex row shows none.
 
 Once it has one, `Enter` resumes that conversation and a restart keeps it. Before this, neither the

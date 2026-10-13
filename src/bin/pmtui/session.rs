@@ -155,7 +155,8 @@ pub(crate) fn install_spawn_skill(root: &Path, engine: Engine, env: &tmux::Manag
 ///   run inside a Claude Code session — exactly like the poll worker and the
 ///   verified spike; without it the child refuses to start a nested session.
 /// - `Engine::Codex` → `codex resume <id>` (NO `exec`; that is the headless path).
-/// - `Engine::Trae` → `traex resume <id>` (NO `-p`; in TRAE 2.0 that selects a profile).
+/// - `Engine::Trae` → `traex resume <id>` (NO `-p`; in TRAE 2.0 that selects a profile). `<id>` is
+///   the thread id TraeX's hook reported, never a `--session-id` name: TraeX cannot resume a name.
 pub(crate) fn build_chat(
     engine: Engine,
     conversation_id: &str,

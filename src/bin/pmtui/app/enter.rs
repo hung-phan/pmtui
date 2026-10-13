@@ -120,6 +120,7 @@ impl App {
             // never-woken and get a SECOND conversation on Enter.
             let captured = read_captured_conversation_id(&session_paths);
             let effective = effective_id(
+                engine,
                 ledger_cid.as_deref(),
                 registry_cid.as_deref(),
                 captured.as_deref(),

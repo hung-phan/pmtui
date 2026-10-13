@@ -230,6 +230,21 @@ impl JobScheduler {
     /// Self-heals the rare created-but-crashed-pre-turn case: the create hits "already in
     /// use", dies, but the flag is already cleared, so the next relaunch resumes.
     fn resolve_conversation_id(&mut self, next: &mut AgentLoopState) -> Resume {
+        // TraeX RESUMES ONLY THE ID ITS OWN HOOK REPORTED. A `--session-id` we gave it is stored
+        // as a thread NAME, and `traex resume <uuid>` looks a UUID up as a thread id only, so a
+        // name in the ledger or the registry never resumes, turn or no turn (measured on traex
+        // 0.209.1). Until the hook reports a thread, start one; nothing is lost, because a
+        // conversation that never completed a turn has nothing to resume.
+        if self.engine == Engine::Trae {
+            next.resume_unconfirmed = false;
+            return match crate::state::codex_identity::read(&self.paths) {
+                Some(id) => {
+                    next.conversation_id = Some(id.clone());
+                    Resume::Continue(id)
+                }
+                None => self.mint_or_fresh(next),
+            };
+        }
         if let Some(id) = next.conversation_id.clone() {
             // Reached only when the session is NOT alive (AlreadyUp early-returns above),
             // so an unconfirmed cid here means the prior seed-resume launch died: the seed

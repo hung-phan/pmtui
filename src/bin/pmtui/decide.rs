@@ -132,18 +132,27 @@ pub(crate) fn agent_loop_enter(
 /// exactly the codex case, which has no caller-chosen id to record in either. Before this, a codex
 /// session that had run for hours still looked never-woken, so Enter opened a SECOND conversation
 /// and the first became unreachable.
+///
+/// TraeX is the exception: ONLY the captured id counts. pmtui may name a TraeX conversation with
+/// `--session-id`, but TraeX stores that as a thread NAME, and `traex resume <uuid>` looks a UUID up
+/// as a thread id only — so a recorded name never resumes, with or without a turn (measured on
+/// traex 0.209.1). The thread id its `Stop` hook reports is the one value it resumes.
 pub(crate) fn effective_id(
+    engine: Engine,
     ledger_cid: Option<&str>,
     registry_cid: Option<&str>,
     captured_cid: Option<&str>,
 ) -> Option<String> {
+    if engine == Engine::Trae {
+        return captured_cid.map(str::to_string);
+    }
     ledger_cid
         .or(registry_cid)
         .or(captured_cid)
         .map(str::to_string)
 }
 
-/// The id codex's own turn hook recorded for this session, validated.
+/// The id the engine's own turn hook recorded for this session (codex or TraeX), validated.
 ///
 /// A thin alias over [`agent_manager::state::codex_identity`], which pmd reads too — ONE rule,
 /// two readers, so the dashboard and the daemon can never disagree about which conversation a

@@ -490,6 +490,7 @@ impl App {
         });
         let captured_cid = crate::decide::read_captured_conversation_id(&paths);
         let existing = crate::decide::effective_id(
+            engine,
             ledger_cid.as_deref(),
             registry_cid.as_deref(),
             captured_cid.as_deref(),
