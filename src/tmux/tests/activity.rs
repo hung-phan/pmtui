@@ -366,6 +366,86 @@ fn codex_composer_is_never_bare_so_only_the_new_predicate_can_see_it() {
 }
 
 #[test]
+fn current_claude_placeholder_composer_accepts_text() {
+    let pane = concat!(
+        "────────────────────────────────\n",
+        "❯\u{a0}Try \"how do I log an error?\"\n",
+        "────────────────────────────────\n",
+        "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n",
+    );
+
+    assert!(!is_bare_prompt("❯\u{a0}Try \"how do I log an error?\""));
+    assert!(
+        has_composer(pane),
+        "Claude's current placeholder prompt must accept pmtui's s-send gate"
+    );
+    assert_eq!(
+        classify_pane(pane),
+        PaneActivity::Busy,
+        "plain text cannot tell this hint from a draft; `classify_pane_styled` can"
+    );
+    let reworded = pane.replace("Try \"how do I log an error?\"", "Ask anything");
+    assert!(
+        has_composer(&reworded),
+        "the box is the prompt, whatever hint Claude rotates into it"
+    );
+    assert!(
+        !has_composer("❯ Tell me a joke.\n"),
+        "arbitrary echoed user messages must not become composers"
+    );
+}
+
+#[test]
+fn claude_box_prompt_survives_a_footer_taller_than_the_activity_window() {
+    let mut pane = String::from(concat!(
+        "────────────────────────────────\n",
+        "❯\u{a0}Try \"fix lint errors\"\n",
+        "────────────────────────────────\n",
+    ));
+    for row in 0..PANE_TAIL_LINES {
+        pane.push_str(&format!("  statusline row {row}\n"));
+    }
+    // Deliberate: the activity window stays at 16 rows so a stale spinner further up cannot veto
+    // Idle, while the send gate only asks whether a box exists, never whether the agent is idle.
+    assert!(!has_composer(&pane), "outside the 16-row activity window");
+    assert!(
+        crate::tmux::has_composer_in_tail(&pane, 40),
+        "the send gate reads the 40 rows it captured"
+    );
+}
+
+#[test]
+fn a_box_holding_a_draft_is_busy_in_plain_text() {
+    let pane = concat!(
+        "⏺ Done.\n",
+        "────────────────────────────────\n",
+        "❯ wait, do not deploy yet\n",
+        "────────────────────────────────\n",
+        "  ⏵⏵ auto mode on (shift+tab to cycle)\n",
+    );
+    assert!(
+        has_composer(pane),
+        "it is still a prompt the send gate can see"
+    );
+    assert_eq!(
+        classify_pane(pane),
+        PaneActivity::Busy,
+        "a nudge typed here would be submitted together with the person's draft"
+    );
+}
+
+#[test]
+fn a_numbered_choice_inside_rules_is_not_a_claude_prompt() {
+    let pane = concat!(
+        "────────────────────────────────\n",
+        "❯ 1. Yes\n",
+        "  2. No\n",
+        "────────────────────────────────\n",
+    );
+    assert!(!has_composer(pane));
+}
+
+#[test]
 fn codex_busy_marker_beats_the_composer_and_the_echoed_user_message() {
     // The composer is on screen mid-turn, and the submitted message is echoed with its
     // own `›` lead — so TWO `›`-led lines are present while codex is working. Only the

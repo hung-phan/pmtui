@@ -184,15 +184,17 @@ pub(super) const DIALOG_MAX_QUESTION_GAP: usize = 4;
 /// Scanning BACKWARDS returns the LOWEST matching block, i.e. the live dialog
 /// rather than an older one still visible further up the transcript.
 ///
-/// ONE PHRASE-ANCHORED EXCEPTION runs afterwards, only on a window these rules have
+/// PHRASE-ANCHORED EXCEPTIONS run afterwards, only on a window these rules have
 /// already declined: codex's **startup trust dialog**
-/// ([`classify_codex_trust_dialog`]). Two clauses above reject it — its `?` sits
-/// mid-line in a wrapped paragraph, and its footer is `Press enter to continue`, not
+/// ([`classify_codex_trust_dialog`]) and Claude's workspace trust dialog
+/// ([`classify_claude_trust_dialog`]). Two clauses above reject the codex trust dialog — its `?`
+/// sits mid-line in a wrapped paragraph, and its footer is `Press enter to continue`, not
 /// `Esc to cancel` — and neither clause is widened to let it in, because "a mid-line
 /// `?` plus a bare press-enter footer" describes a large amount of ordinary prose and
 /// a false dialog escalates a session that is working fine. The exception matches that
-/// dialog's own literal wording instead, so the rules above stay exactly as narrow as
-/// they were.
+/// dialog's own literal wording instead. Claude's trust dialog is similar: it blocks input,
+/// but its options are plain labels, not the general numbered block.
+/// The exceptions therefore keep the general rules exactly as narrow as they were.
 pub fn classify_dialog(capture: &str) -> Option<PaneDialog> {
     let non_empty: Vec<&str> = capture.lines().filter(|l| !l.trim().is_empty()).collect();
     let start = non_empty.len().saturating_sub(DIALOG_TAIL_LINES);
@@ -249,7 +251,7 @@ pub fn classify_dialog(capture: &str) -> Option<PaneDialog> {
             });
         }
     }
-    classify_codex_trust_dialog(window)
+    classify_codex_trust_dialog(window).or_else(|| classify_claude_trust_dialog(window))
 }
 
 /// Content anchors that identify authority-changing prompts even if a future CLI
@@ -389,6 +391,8 @@ fn dialog_block_boundary(line: &str) -> bool {
 /// to the bug, so [`FIXTURE_CODEX_DIALOG_TRUST`] is the tripwire that says so.
 pub(super) const CODEX_TRUST_QUESTION: &str = "do you trust the contents of this directory?";
 const CODEX_TRUST_FOLDER_QUESTION: &str = "trust this folder?";
+const CLAUDE_TRUST_QUESTION: &str =
+    "quick safety check: is this a project you created or one you trust?";
 
 /// Recognise codex's startup trust dialog on a window whose general rules
 /// ([`classify_dialog`]) already found nothing.
@@ -453,6 +457,99 @@ fn classify_codex_trust_dialog(window: &[&str]) -> Option<PaneDialog> {
         });
     }
     None
+}
+
+/// Recognise Claude's startup workspace trust dialog on a window whose general rules already found
+/// nothing. Like the codex trust dialog, this is human-only: a person decides whether project-local
+/// files may influence the agent before any ordinary Message can be sent.
+///
+/// Every anchor must sit where the live dialog draws it (`FIXTURE_CLAUDE_DIALOG_TRUST`): the two
+/// options within [`CLAUDE_TRUST_MAX_SPAN`] rows below the question, `Security guide` between the
+/// question and the options, and the `Enter to confirm` footer within
+/// [`DIALOG_MAX_QUESTION_GAP`] rows after them. Four literal anchors scattered over a transcript
+/// that merely shows the dialog's text are not the dialog.
+fn classify_claude_trust_dialog(window: &[&str]) -> Option<PaneDialog> {
+    for q in (0..window.len()).rev() {
+        let trimmed = window[q].trim();
+        let lower = trimmed.to_ascii_lowercase();
+        let Some(at) = lower.find(CLAUDE_TRUST_QUESTION) else {
+            continue;
+        };
+        let below = &window[q + 1..window.len().min(q + 1 + CLAUDE_TRUST_MAX_SPAN)];
+        let options = collect_claude_trust_options(below, q + 1);
+        if options.options.len() < DIALOG_MIN_OPTIONS {
+            continue;
+        }
+        let has_security_anchor = window[q + 1..options.start]
+            .iter()
+            .any(|line| line.trim().eq_ignore_ascii_case("Security guide"));
+        let footer_rows =
+            &window[options.end..window.len().min(options.end + DIALOG_MAX_QUESTION_GAP)];
+        let has_enter_footer = footer_rows.iter().any(|line| {
+            line.trim()
+                .eq_ignore_ascii_case("Enter to confirm · Esc to cancel")
+        });
+        if !has_security_anchor || !has_enter_footer {
+            continue;
+        }
+        let end = at + CLAUDE_TRUST_QUESTION.len();
+        let question = trimmed.get(at..end).unwrap_or(trimmed);
+        return Some(PaneDialog {
+            question: question.to_string(),
+            options: options.options,
+            selected_index: options.selected_index,
+            mode: PaneDialogMode::Single,
+            checked_indices: Vec::new(),
+            class: PaneDialogClass::HumanOnly,
+            context_hash: dialog_context_hash(window, q, options.start),
+        });
+    }
+    None
+}
+
+/// How many rows below its question the Claude trust dialog may draw its options. The live dialog
+/// draws them 8 rows below; the margin covers a wrapped paragraph on a narrower pane.
+const CLAUDE_TRUST_MAX_SPAN: usize = 14;
+
+/// The trust dialog's two options in `lines`, which start at row `offset` of the window; `start`
+/// and `end` are WINDOW indices, as every other option producer returns them. The options must be
+/// adjacent rows: anything between them is not this dialog.
+fn collect_claude_trust_options(lines: &[&str], offset: usize) -> CollectedOptions {
+    let mut options = Vec::new();
+    let mut selected_index = None;
+    let mut start = offset;
+    let mut end = offset;
+    for (row, line) in lines.iter().enumerate() {
+        let mut rest = line.trim_start();
+        let selected = rest.starts_with('❯');
+        if let Some(after_marker) = rest.strip_prefix('❯') {
+            rest = after_marker.trim_start();
+        }
+        let label = rest.trim();
+        if !matches!(label, "No, exit" | "Yes, I trust this folder") {
+            if options.is_empty() {
+                continue;
+            }
+            break;
+        }
+        if options.is_empty() {
+            start = offset + row;
+        }
+        if selected {
+            selected_index = Some(options.len());
+        }
+        options.push(label.to_string());
+        end = offset + row + 1;
+    }
+    CollectedOptions {
+        options,
+        selected_index,
+        start,
+        end,
+        checked_indices: Vec::new(),
+        checkbox_count: 0,
+        submit_control: false,
+    }
 }
 
 fn dialog_context_hash(window: &[&str], question: usize, options_start: usize) -> u64 {

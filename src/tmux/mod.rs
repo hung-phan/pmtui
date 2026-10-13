@@ -6,7 +6,8 @@
 //! One seam per file: `driver` is the trait and the types that cross it, `real`
 //! shells out to the `tmux` binary, `fake` is the in-memory double the unit tests
 //! drive, `launch` is the typed vocabulary of an interactive launch (its managed
-//! env, outcome and error), `activity` and `dialog` are the pure pane-text heuristics, `send_text`
+//! env, outcome and error), `activity` and `dialog` are the pure pane-text heuristics, `send_gate`
+//! is what pmtui's `s` key reads beyond them (a draft in the box, a blocking banner), `send_text`
 //! sanitizes a nudge before it is typed, and `session_names` derives the
 //! per-family session names. Every item is re-exported here, so every
 //! `tmux::<Item>` path outside this module keeps resolving.
@@ -18,6 +19,7 @@ mod dialog_keys;
 mod driver;
 mod launch;
 mod real;
+mod send_gate;
 mod send_text;
 mod session_names;
 
@@ -27,7 +29,9 @@ pub mod fake;
 #[cfg(test)]
 mod tests;
 
-pub use activity::{PaneActivity, classify_pane, has_composer, progress_fingerprint};
+pub use activity::{
+    PaneActivity, classify_pane, has_composer, has_composer_in_tail, progress_fingerprint,
+};
 // The heartbeat confirmation gate's content-stability helper. `pub` (not `pub(crate)`)
 // because pmtui — a SEPARATE crate from this lib — runs the same two-observation gate
 // read-only in its refresh to tell a working Standard agent from one idle at its prompt.
@@ -44,5 +48,8 @@ pub use real::{LAUNCH_COMMAND_MAX_BYTES, TmuxDriver, launch_command};
 // POSIX shell escaping, shared with `worker::launch`'s turn-hook builder so a project
 // root with a shell metacharacter can't malform the hook command.
 pub(crate) use real::shq;
+pub use send_gate::{
+    classify_pane_styled, claude_draft_in_box, feedback_survey, styled_activity, unstyled,
+};
 pub use send_text::sanitize_send_text;
 pub use session_names::{job_session_name, session_name, supervisor_session_name};

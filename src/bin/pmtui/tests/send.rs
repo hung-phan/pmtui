@@ -4,6 +4,42 @@
 
 use super::*;
 
+/// A fresh Claude Code v2.1.296 session as `capture-pane -e` returns it: the empty input box
+/// shows a rotating hint, drawn dim (`ESC[2m`).
+const IDLE_CLAUDE_PLACEHOLDER_PANE: &str = concat!(
+    "\x1b[38;5;244m────────────────────────────────\n",
+    "\x1b[39m❯ \x1b[2mTry \"how do I log an error?\"\n",
+    "\x1b[38;5;244m────────────────────────────────\n",
+    "\x1b[39m  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n",
+);
+
+/// The same box holding a person's unsent draft: plain text, not dim.
+const CLAUDE_DRAFT_PANE: &str = concat!(
+    "\x1b[38;5;244m────────────────────────────────\n",
+    "\x1b[39m❯\u{a0}refactor the parser but keep\n",
+    "\x1b[38;5;244m────────────────────────────────\n",
+    "\x1b[39m  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n",
+);
+
+/// Claude's inline survey, which draws the input box but takes digit keys as answers.
+const CLAUDE_SURVEY_PANE: &str = concat!(
+    "● Done.\n",
+    "\n",
+    "How is Claude doing this session? (optional)\n",
+    "1: Bad    2: Fine   3: Good   0: Dismiss\n",
+    "────────────────────────────────\n",
+    "❯\u{a0}\n",
+    "────────────────────────────────\n",
+);
+
+fn prompt_with_long_footer(prompt: &str, footer_lines: usize) -> String {
+    let mut pane = format!("transcript above\n{prompt}\n");
+    for i in 0..footer_lines {
+        pane.push_str(&format!("  status footer row {i}\n"));
+    }
+    pane
+}
+
 #[test]
 fn s_sends_the_typed_text_to_the_rows_own_pane_and_nothing_else() {
     let dir = tempfile::tempdir().unwrap();
@@ -16,6 +52,70 @@ fn s_sends_the_typed_text_to_the_rows_own_pane_and_nothing_else() {
         "the text did not reach exactly the selected row's pane"
     );
     assert!(matches!(app.mode, UiMode::Normal), "the field stayed open");
+    assert_eq!(app.status, "sent \u{2192} bot");
+}
+
+#[test]
+fn s_sends_to_a_claude_pane_waiting_at_its_placeholder_composer() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut app, pane, session, _) = send_app(dir.path(), IDLE_CLAUDE_PLACEHOLDER_PANE);
+    send_via_keys(&mut app, "hello world!");
+
+    assert_eq!(
+        pane.sends(),
+        vec![(session, "hello world!".to_string())],
+        "Claude's non-bare placeholder prompt must be accepted as a composer"
+    );
+    assert_eq!(app.status, "sent \u{2192} bot");
+}
+
+#[test]
+fn s_refuses_a_claude_box_holding_someone_elses_draft() {
+    // Typing appends to the draft and our Enter submits both as one garbled message.
+    let dir = tempfile::tempdir().unwrap();
+    let (mut app, pane, _, _) = send_app(dir.path(), CLAUDE_DRAFT_PANE);
+    send_via_keys(&mut app, "run the tests");
+
+    assert!(
+        pane.sends().is_empty(),
+        "bytes reached a draft: {:?}",
+        pane.sends()
+    );
+    assert!(
+        app.status.contains("input box has unsent text"),
+        "status: {:?}",
+        app.status
+    );
+}
+
+#[test]
+fn s_refuses_a_pane_showing_claudes_survey() {
+    // The survey takes digit keys, so a Message with a digit would answer it.
+    let dir = tempfile::tempdir().unwrap();
+    let (mut app, pane, _, _) = send_app(dir.path(), CLAUDE_SURVEY_PANE);
+    send_via_keys(&mut app, "try option 2");
+
+    assert!(pane.sends().is_empty(), "bytes reached the survey");
+    assert!(
+        app.status.contains("asking for feedback"),
+        "status: {:?}",
+        app.status
+    );
+}
+
+#[test]
+fn s_accepts_a_prompt_visible_above_a_long_footer() {
+    let dir = tempfile::tempdir().unwrap();
+    let pane_text = prompt_with_long_footer("\u{276f}\u{a0}", 24);
+    let (mut app, pane, session, _) = send_app(dir.path(), &pane_text);
+
+    send_via_keys(&mut app, "the prompt is still visible");
+
+    assert_eq!(
+        pane.sends(),
+        vec![(session, "the prompt is still visible".to_string())],
+        "the send gate must use the full capture it asked tmux for, not only the activity window"
+    );
     assert_eq!(app.status, "sent \u{2192} bot");
 }
 

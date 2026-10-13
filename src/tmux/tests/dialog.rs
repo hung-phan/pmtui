@@ -447,6 +447,71 @@ fn codex_trust_dialog_yields_the_question_and_both_options() {
 }
 
 #[test]
+fn claude_workspace_trust_dialog_is_human_only() {
+    let d = classify_dialog(FIXTURE_CLAUDE_DIALOG_TRUST).expect("Claude trust dialog recognised");
+    assert_eq!(
+        d.question,
+        "Quick safety check: Is this a project you created or one you trust?"
+    );
+    assert_eq!(
+        d.options,
+        vec![
+            "No, exit".to_string(),
+            "Yes, I trust this folder".to_string()
+        ]
+    );
+    assert_eq!(d.selected_index, Some(0));
+    assert_eq!(d.mode, PaneDialogMode::Single);
+    assert_eq!(d.class, PaneDialogClass::HumanOnly);
+    assert_eq!(
+        classify_pane(FIXTURE_CLAUDE_DIALOG_TRUST),
+        PaneActivity::Busy,
+        "trust is a blocking dialog, not an idle composer"
+    );
+}
+
+#[test]
+fn claude_trust_anchors_scattered_over_a_transcript_are_not_the_dialog() {
+    let scattered = concat!(
+        "⏺ The dialog asks: Is this a project you created or one you trust?\n",
+        "  It links a Security guide:\n",
+        "  Security guide\n",
+        "  and offers two answers, one per line. First:\n",
+        "  No, exit\n",
+        "  explained in detail below, and then the second answer\n",
+        "  Yes, I trust this folder\n",
+        "  Enter to confirm · Esc to cancel\n",
+    );
+    assert_eq!(
+        classify_dialog(scattered),
+        None,
+        "the options must be adjacent rows"
+    );
+
+    let far = FIXTURE_CLAUDE_DIALOG_TRUST
+        .replace(" Security guide\n", &" Security guide\n filler\n".repeat(8));
+    assert_eq!(
+        classify_dialog(&far),
+        None,
+        "options far below the question are not this dialog"
+    );
+}
+
+#[test]
+fn claude_trust_context_hash_covers_the_text_between_question_and_options() {
+    let a = classify_dialog(FIXTURE_CLAUDE_DIALOG_TRUST).expect("dialog");
+    let other_dir = FIXTURE_CLAUDE_DIALOG_TRUST.replace(
+        "Claude Code'll be able to read, edit, and execute files here.",
+        "Claude Code'll be able to read files here.",
+    );
+    let b = classify_dialog(&other_dir).expect("dialog");
+    assert_ne!(
+        a.context_hash, b.context_hash,
+        "the paragraph between the question and the options is part of the context"
+    );
+}
+
+#[test]
 fn current_codex_folder_access_dialog_is_human_only() {
     let pane = r#"
   Folder access

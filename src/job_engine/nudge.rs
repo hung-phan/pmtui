@@ -173,9 +173,11 @@ impl JobScheduler {
             };
             return Ok(JobTick::Monitoring { until });
         }
+        // The last look before typing reads styles too, so a person's draft in the box is Busy.
         match driver.capture_tail(&session, 40) {
-            Ok(capture)
-                if crate::tmux::classify_pane(&capture) == crate::tmux::PaneActivity::Idle => {}
+            Ok(_)
+                if crate::tmux::styled_activity(driver, &session, 40)
+                    == crate::tmux::PaneActivity::Idle => {}
             Ok(capture) => return self.busy_pane_recheck(now, base, &capture),
             Err(_) => return self.busy_recheck(now, base, HoldReason::Transient),
         }

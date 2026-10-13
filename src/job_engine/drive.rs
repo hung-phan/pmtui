@@ -376,7 +376,9 @@ impl JobScheduler {
                     );
                     return self.park_dialog(now, &audited, dialog);
                 }
-                match tmux::classify_pane(&capture) {
+                // The idle verdict reads a styled capture of its own, so it can tell Claude's
+                // dim hint from a person's draft; the readers above keep the plain text.
+                match tmux::styled_activity(driver, &session, 40) {
                     PaneActivity::Idle => self.idle_observed(driver, now, base, &capture),
                     // Busy: re-check soon, consume nothing (no nudge, no budget, no answer)
                     // — but run the stall backstop so a Busy-forever pane can't hang

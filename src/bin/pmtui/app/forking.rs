@@ -498,9 +498,9 @@ impl App {
 
     /// The transcript fingerprint of one Idle capture of the source; `None` records a refusal.
     fn idle_source_fingerprint(&mut self, source: &ProjectEntry, session: &str) -> Option<u64> {
-        match self.agent_tmux.capture_tail(session, 40) {
-            Ok(capture) if tmux::classify_pane(&capture) == tmux::PaneActivity::Idle => {
-                Some(tmux::idle_fingerprint(&capture))
+        match self.agent_tmux.capture_tail_styled(session, 40) {
+            Ok(styled) if tmux::classify_pane_styled(&styled) == tmux::PaneActivity::Idle => {
+                Some(tmux::idle_fingerprint(&tmux::unstyled(&styled)))
             }
             Ok(_) => {
                 self.status = format!("{}: still working; fork once it is idle", source.id);

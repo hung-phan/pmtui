@@ -16,6 +16,7 @@ mod fake;
 mod fork_identity;
 mod launch;
 mod real;
+mod send_gate;
 mod send_text;
 mod session_names;
 
@@ -351,4 +352,71 @@ const FIXTURE_CODEX_DIALOG_TRUST: &str = concat!(
     "  2. No, quit\n",
     "\n",
     "  Press enter to continue\n",
+);
+
+/// Live Claude capture of the startup workspace trust dialog. It is a blocking human-only
+/// choice, but it is not a numbered dialog: the options are plain labels below a security
+/// guide line, so the general dialog parser deliberately rejects it.
+const FIXTURE_CLAUDE_DIALOG_TRUST: &str = concat!(
+    "────────────────────────────────────────────────────────────────────────────────\n",
+    " Accessing workspace:\n",
+    "\n",
+    " /private/tmp/pmtui-fixed-test.j1Boib\n",
+    "\n",
+    " Quick safety check: Is this a project you created or one you trust? (Like your own code,\n",
+    " a well-known open source project, or work from your team). If not, take a moment to\n",
+    " review what's in this folder first.\n",
+    "\n",
+    " Claude Code'll be able to read, edit, and execute files here.\n",
+    "\n",
+    " Security guide\n",
+    "\n",
+    " ❯ No, exit\n",
+    "   Yes, I trust this folder\n",
+    "\n",
+    " Enter to confirm · Esc to cancel\n",
+);
+
+/// Live Claude Code v2.1.296 captures taken WITH styles (`capture-pane -e`), trimmed to the
+/// input box and the row around it. Rules shortened. The box is the same in every state; only
+/// its contents and their style differ, which is what the send gate reads.
+///
+/// A fresh session: the empty box shows a rotating hint, drawn dim (`ESC[2m`).
+const FIXTURE_CLAUDE_STYLED_HINT: &str = concat!(
+    "\x1b[38;5;244m────────────────────────────────\n",
+    "\x1b[39m❯ \x1b[2mTry \"how do I log an error?\"\n",
+    "\x1b[38;5;244m────────────────────────────────\n",
+    "\x1b[39m  \x1b[38;5;220m⏵⏵ auto mode on\x1b[38;5;246m (shift+tab to cycle)\x1b[39m\n",
+);
+
+/// After one completed turn: the submitted message is echoed on a grey background with the
+/// same `❯` lead, outside the box, and the empty box is a bare `❯` (no hint).
+const FIXTURE_CLAUDE_STYLED_AFTER_TURN: &str = concat!(
+    "\x1b[38;5;246m\x1b[48;5;237m❯ \x1b[38;5;231mReply with just: ok\x1b[39m\n",
+    "\x1b[38;5;231m\x1b[49m⏺\x1b[39m ok\n",
+    "\x1b[38;5;246m✻\x1b[39m \x1b[38;5;246mSautéed for 2s · done 11:09 PM\x1b[39m\n",
+    "\x1b[38;5;244m────────────────────────────────\n",
+    "\x1b[39m❯\u{a0}\n",
+    "\x1b[38;5;244m────────────────────────────────\n",
+    "\x1b[39m  \x1b[38;5;220m⏵⏵ auto mode on\x1b[38;5;246m (shift+tab to cycle)\x1b[39m\n",
+);
+
+/// The same pane with a person's unsent draft in the box: plain, not dim.
+const FIXTURE_CLAUDE_STYLED_DRAFT: &str = concat!(
+    "\x1b[38;5;246m\x1b[48;5;237m❯ \x1b[38;5;231mReply with just: ok\x1b[39m\n",
+    "\x1b[38;5;231m\x1b[49m⏺\x1b[39m ok\n",
+    "\x1b[38;5;246m✻\x1b[39m \x1b[38;5;246mSautéed for 2s · done 11:09 PM\x1b[39m\n",
+    "\x1b[38;5;244m────────────────────────────────\n",
+    "\x1b[39m❯\u{a0}half typed\n",
+    "\x1b[38;5;244m────────────────────────────────\n",
+    "\x1b[39m  \x1b[38;5;220m⏵⏵ auto mode on\x1b[38;5;246m (shift+tab to cycle)\x1b[39m\n",
+);
+
+/// A multi-line draft: its second line continues on an indented row inside the box.
+const FIXTURE_CLAUDE_STYLED_MULTILINE_DRAFT: &str = concat!(
+    "\x1b[38;5;244m────────────────────────────────\n",
+    "\x1b[39m❯ first line\n",
+    "  second line\n",
+    "\x1b[38;5;244m────────────────────────────────\n",
+    "\x1b[39m  \x1b[38;5;220m⏵⏵ auto mode on\x1b[38;5;246m (shift+tab to cycle)\x1b[39m\n",
 );

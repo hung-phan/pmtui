@@ -58,14 +58,16 @@ pub trait Driver: Send + Sync {
     fn capture_tail(&self, session: &str, lines: usize) -> Result<String>;
 
     /// Capture the pane the same way as [`Driver::capture_tail`] but WITH its escape
-    /// sequences intact (`capture-pane -e`), for the RENDER path only.
+    /// sequences intact (`capture-pane -e`), for the preview and for the readers that need a
+    /// cell's style: [`classify_pane_styled`](super::classify_pane_styled) and pmtui's send
+    /// gate, which tell Claude's dim hint from a person's draft.
     ///
     /// A SEPARATE method on purpose, and [`Driver::capture_tail`] deliberately keeps its
     /// escape-free output: [`classify_pane`](super::classify_pane), [`classify_dialog`](super::classify_dialog) and the stall/idle
     /// detection all match on literal pane text, so handing them SGR escapes would break
     /// pane classification outright (a colour change dropped into the middle of an
     /// `esc to interrupt` hint stops matching, and the session reads Idle mid-response).
-    /// Only pmtui's preview wants the escapes, so only pmtui's preview asks for them.
+    /// A caller that captures styled hands those readers [`unstyled`](super::unstyled) text.
     ///
     /// Defaults to [`Driver::capture_tail`] so a driver that has not opted in still
     /// renders — unstyled, as before — rather than showing nothing.
