@@ -286,8 +286,11 @@ impl JobScheduler {
 
         // 3. Already up: read the pane ONCE, then dispose it.
         let session = self.loop_session();
-        match driver.capture_tail(&session, 40) {
-            Ok(capture) => {
+        // Styled, so the idle verdict can tell Claude's dim hint from a person's draft
+        // (`classify_pane_styled`); every other reader takes the plain text.
+        match driver.capture_tail_styled(&session, 40) {
+            Ok(styled) => {
+                let capture = tmux::unstyled(&styled);
                 // 3a. A blocking DIALOG is checked BEFORE the Idle/Busy disposition,
                 // because a dialog pane classifies `Busy` (it draws no bare prompt and no
                 // busy marker, so `classify_pane` falls to its conservative default). Left
@@ -376,7 +379,7 @@ impl JobScheduler {
                     );
                     return self.park_dialog(now, &audited, dialog);
                 }
-                match tmux::classify_pane(&capture) {
+                match tmux::classify_pane_styled(&styled) {
                     PaneActivity::Idle => self.idle_observed(driver, now, base, &capture),
                     // Busy: re-check soon, consume nothing (no nudge, no budget, no answer)
                     // — but run the stall backstop so a Busy-forever pane can't hang

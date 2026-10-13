@@ -5,6 +5,7 @@
 //! working agent — so no predicate here can be changed without the others in view.
 
 use super::dialog::{classify_dialog, dialog_option_text};
+use super::send_gate::feedback_survey;
 
 /// Whether an interactive claude pane is mid-response or idle at its prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,18 +52,27 @@ pub(super) const PANE_TAIL_LINES: usize = 16;
 ///   1. Busy if a line contains `esc to interrupt`/`ctrl+c to interrupt` (case-insensitive), OR a Braille
 ///      spinner glyph (`U+2800..=U+28FF`) — both seen in other/older builds — OR is an in-progress
 ///      spinner-led line (see [`is_busy_spinner_line`]).
-///   2. Else Idle if ANY line in the window is an input prompt ([`is_prompt_row`]): a bare claude
-///      prompt (`>`/`❯` then whitespace only), claude's prompt inside its input box whatever the box
-///      holds, or codex's composer ([`is_codex_composer`], which is NEVER bare — it carries a
-///      rotating placeholder).
+///   2. Else Idle if ANY line in the window is an EMPTY input prompt ([`is_empty_prompt_row`]): a
+///      bare claude prompt (`>`/`❯` then whitespace only, inside its box or not), or codex's
+///      composer ([`is_codex_composer`], which is NEVER bare — it carries a rotating placeholder).
+///      A claude box that holds text is NOT Idle here: plain text cannot tell Claude's dim hint
+///      from a person's draft, and a nudge typed onto a draft submits both. A caller with a styled
+///      capture asks [`classify_pane_styled`](super::classify_pane_styled), which can tell.
 ///   3. Else Busy (conservative default — unknown ⇒ don't nudge).
+///
+/// In every case a feedback survey drawn by the box ([`feedback_survey`]) is Busy: its options
+/// are digit keys, so typed text would answer it.
 pub fn classify_pane(capture: &str) -> PaneActivity {
+    classify_with(capture, is_empty_prompt_row)
+}
+
+/// The body of [`classify_pane`], with clause (2)'s prompt predicate supplied by the caller: the
+/// plain classifier accepts only an empty prompt, the styled one any prompt it has then checked
+/// for a draft.
+pub(super) fn classify_with(capture: &str, prompt_row: fn(&[&str], usize) -> bool) -> PaneActivity {
     let non_empty: Vec<&str> = capture.lines().filter(|l| !l.trim().is_empty()).collect();
     // No content at all ⇒ we cannot confirm an idle prompt ⇒ stay conservative.
     if non_empty.is_empty() {
-        return PaneActivity::Busy;
-    }
-    if classify_dialog(capture).is_some() {
         return PaneActivity::Busy;
     }
     let start = non_empty.len().saturating_sub(PANE_TAIL_LINES);
@@ -81,11 +91,10 @@ pub fn classify_pane(capture: &str) -> PaneActivity {
             return PaneActivity::Busy;
         }
     }
-    // (2) Confident-Idle: an input prompt anywhere in the window awaits input.
-    // Shares [`is_prompt_row`] with [`has_composer`] (which pmtui's `s` key gates on) so the
-    // two can never disagree about what counts as an input field. The row's neighbours are
-    // read from the whole capture, so a box rule just above the window still counts.
-    if (start..non_empty.len()).any(|at| is_prompt_row(&non_empty, at)) {
+    // (2) Confident-Idle: an input prompt anywhere in the window awaits input. The row's
+    // neighbours are read from the whole capture, so a box rule just above the window still
+    // counts.
+    if (start..non_empty.len()).any(|at| prompt_row(&non_empty, at)) && !feedback_survey(capture) {
         PaneActivity::Idle
     } else {
         PaneActivity::Busy
@@ -263,8 +272,15 @@ pub(super) fn is_bare_prompt(line: &str) -> bool {
     matches!(chars.next(), Some('>') | Some('❯')) && chars.all(char::is_whitespace)
 }
 
-/// Is the row at `at` an input prompt awaiting text? The ONE prompt predicate shared by
-/// [`classify_pane`], [`has_composer`] and the fingerprints. It takes the row's neighbours
+/// Is the row at `at` an input prompt that is EMPTY — nothing in it a nudge could be glued onto?
+/// Clause (2) of [`classify_pane`]. Claude's empty box draws a bare `❯`, so this is a bare prompt
+/// or codex's composer.
+fn is_empty_prompt_row(lines: &[&str], at: usize) -> bool {
+    is_bare_prompt(lines[at]) || is_codex_composer(lines[at])
+}
+
+/// Is the row at `at` an input prompt, whatever it holds? The prompt predicate shared by
+/// [`has_composer`], the fingerprints and [`classify_pane_styled`](super::classify_pane_styled). It takes the row's neighbours
 /// because claude's prompt is recognised by where it sits, not by what it says.
 pub(super) fn is_prompt_row(lines: &[&str], at: usize) -> bool {
     let line = lines[at];
@@ -323,15 +339,37 @@ pub(super) fn is_box_rule(line: &str) -> bool {
 }
 
 /// The TOP rule of an input box: a plain [`is_box_rule`], or one with a title set into it —
-/// a run of at least eight `─`, the title, and a closing `─`, as in
-/// `──────── Fix the parser ─`. A terminal agent can label its box with the session or turn
-/// it belongs to, and does so on an idle box as well as a working one; requiring a plain rule
-/// read such a pane as having no prompt at all.
+/// a run of at least eight `─`, a space, a title of at most [`BOX_TITLE_MAX`] characters with no
+/// `─` in it, a space, and the rule's closing `─` run, as in `──────── Fix the parser ─`. TraeX
+/// labels its box this way with the thread or the turn, on an idle box as well as a working one
+/// (`FIXTURE_TRAE_*`, measured on traex 0.209.1, end with exactly one `─`); requiring a plain rule
+/// read such a pane as having no prompt at all. The narrow shape keeps a markdown separator with
+/// text in it from opening a box.
 pub(super) fn is_box_top_rule(line: &str) -> bool {
     let rule = line.trim();
-    is_box_rule(rule)
-        || (rule.chars().take_while(|&c| c == '─').count() >= 8 && rule.ends_with('─'))
+    if is_box_rule(rule) {
+        return true;
+    }
+    let lead = rule.chars().take_while(|&c| c == '─').count();
+    let rest = rule.trim_start_matches('─');
+    let tail = rest.trim_end_matches('─');
+    let close = rest.chars().count() - tail.chars().count();
+    let Some(title) = tail
+        .strip_prefix(' ')
+        .and_then(|title| title.strip_suffix(' '))
+    else {
+        return false;
+    };
+    lead >= 8
+        && close >= 1
+        && !title.trim().is_empty()
+        && title.trim() == title
+        && title.chars().count() <= BOX_TITLE_MAX
+        && !title.contains('─')
 }
+
+/// The longest title [`is_box_top_rule`] accepts in a box's top rule.
+const BOX_TITLE_MAX: usize = 80;
 
 /// codex's COMPOSER line — the analogue of claude's bare prompt, and the reason
 /// [`is_bare_prompt`] can never detect an idle codex on its own.

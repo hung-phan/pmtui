@@ -456,9 +456,13 @@ footer lines, but it MUST still fail closed when the pane shows a dialog.
 The gate MUST recognise Claude's prompt by its place, inside the input box between two rules, and not by
 the words it shows, because those words change between releases. The top rule may carry a title. It MUST refuse when the box holds text
 a person typed and did not submit, because the send would join the two and submit both. It tells that
-text from Claude's hint by the hint's dim style, so it MUST read the pane with its styles. It MUST also
-refuse when a state that takes keys or holds the turn is drawn around the box, such as a feedback survey
-or a usage-limit notice. When the gate cannot tell, it refuses.
+text from Claude's hint by the hint's dim style, or grey colour, so it MUST read the pane with its styles.
+It MUST also refuse while Claude's feedback survey is drawn by the box, because the survey's options are
+digit keys. When the gate cannot tell, it refuses.
+
+The driver's nudge follows the same rules. Read without styles, a box that holds any text is busy, because
+the hint and a draft are the same characters. The driver reads the pane with its styles before a nudge, so
+a box that holds only the hint is idle, and a box that holds a draft or sits under the survey is busy.
 
 An open composer stays with its session. While the composer is open, a key MUST NOT move the selection, and
 a pointer action MUST NOT move it.

@@ -219,16 +219,20 @@ impl App {
                         None => {
                             merge_activity(v.engine, hook_working, ActivityObservation::Missing)
                         }
-                        Some(pane) => match driver.capture_tail(pane, ACTIVITY_CAPTURE_LINES) {
+                        Some(pane) => match driver
+                            .capture_tail_styled(pane, ACTIVITY_CAPTURE_LINES)
+                            .map(|styled| {
+                                (tmux::classify_pane_styled(&styled), tmux::unstyled(&styled))
+                            }) {
                             Err(_) => merge_activity(
                                 v.engine,
                                 hook_working,
                                 ActivityObservation::Unreadable,
                             ),
-                            Ok(cap) if tmux::classify_pane(&cap) == tmux::PaneActivity::Busy => {
+                            Ok((tmux::PaneActivity::Busy, _)) => {
                                 merge_activity(v.engine, hook_working, ActivityObservation::Busy)
                             }
-                            Ok(cap) => {
+                            Ok((tmux::PaneActivity::Idle, cap)) => {
                                 let (fp, count) = idle_gate_step(
                                     prev_gate.get(&p.id).copied(),
                                     tmux::idle_fingerprint(&cap),

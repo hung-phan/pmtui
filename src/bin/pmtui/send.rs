@@ -68,9 +68,10 @@ pub(crate) enum SendPlan {
     Refuse(String),
 }
 
-/// How many trailing lines `s` captures to gate the send. Wider than
+/// How many trailing lines `s` captures, styled, to gate the send. Wider than
 /// `PANE_TAIL_LINES` because `classify_dialog` scans a 24-line window for a
-/// question-plus-options block.
+/// question-plus-options block, and because the input box can sit above a tall footer: the gate
+/// asks only whether a box is there, never whether the agent is idle.
 pub(crate) const SEND_GATE_LINES: usize = 40;
 
 /// Largest message `s` will deliver in one press. Past this, `Enter` and a paste into
@@ -163,8 +164,9 @@ pub(crate) fn send_decision(t: &SendTarget, p: &SendProbe) -> SendPlan {
     // Mid-response is FINE and is sent, not refused: the composer accepts it and it
     // becomes the agent's next turn. Refusing here would reproduce "it did nothing", and
     // the send only DELAYS pmd's next nudge (idle confirmations reset naturally).
-    let cap = tmux::unstyled(styled);
-    if tmux::classify_pane(&cap) == tmux::PaneActivity::Busy && tmux::has_composer(&cap) {
+    if tmux::classify_pane_styled(styled) == tmux::PaneActivity::Busy
+        && tmux::has_composer(&tmux::unstyled(styled))
+    {
         return SendPlan::Send(format!("sent → {} (it was working)", t.id));
     }
     SendPlan::Send(format!("sent → {}", t.id))
@@ -174,8 +176,8 @@ pub(crate) fn send_decision(t: &SendTarget, p: &SendProbe) -> SendPlan {
 /// (`capture_tail_styled`), or `None` when it can.
 ///
 /// Shared by [`send_decision`] and `App::deliver`'s final recheck, so the press and the write
-/// can never disagree about what is safe. In order: a dialog (the `Enter` would answer it), a
-/// blocking state drawn around the input box, no prompt at all, and a person's unsent draft in
+/// can never disagree about what is safe. In order: a dialog (the `Enter` would answer it), the
+/// feedback survey drawn by the input box (its digit keys would answer it), no prompt at all, and a person's unsent draft in
 /// the box (our text would be glued onto theirs and submitted). The dialog check precedes the
 /// prompt check so its clearer reason wins; `has_composer_in_tail` refuses a dialog anyway.
 pub(crate) fn pane_refusal(styled: &str) -> Option<&'static str> {
@@ -183,14 +185,8 @@ pub(crate) fn pane_refusal(styled: &str) -> Option<&'static str> {
     if tmux::classify_dialog(&cap).is_some() {
         return Some("dialog up — press Enter and answer it there");
     }
-    match tmux::send_blocker(&cap) {
-        Some(tmux::SendBlocker::Survey) => {
-            return Some("the agent is asking for feedback — press Enter and answer it there");
-        }
-        Some(tmux::SendBlocker::UsageLimit) => {
-            return Some("usage limit reached — send it after the limit resets");
-        }
-        None => {}
+    if tmux::feedback_survey(&cap) {
+        return Some("the agent is asking for feedback — press Enter and answer it there");
     }
     if !tmux::has_composer_in_tail(&cap, SEND_GATE_LINES) {
         return Some("no prompt on screen — press Enter to look");

@@ -1,10 +1,13 @@
-//! Tests for what pmtui's `s` key reads beyond the shared prompt predicate: a person's draft in
-//! Claude's input box (styled captures) and the states that draw the box but must not be typed
-//! into. Every Claude fixture is a live v2.1.296 capture.
+//! Tests for what a pane must show beyond the shared prompt predicate before anything is typed
+//! into it: a person's draft in Claude's input box (styled captures), the feedback survey, and the
+//! styled idle verdict pmd nudges on. Every `FIXTURE_CLAUDE_STYLED_*` is a live v2.1.296 capture.
 
 use super::*;
 use crate::tmux::activity::has_composer;
-use crate::tmux::send_gate::{SendBlocker, claude_draft_in_box, send_blocker, unstyled};
+use crate::tmux::activity::{PaneActivity, classify_pane};
+use crate::tmux::send_gate::{
+    classify_pane_styled, claude_draft_in_box, feedback_survey, unstyled,
+};
 
 #[test]
 fn unstyled_strips_every_escape_and_keeps_the_text() {
@@ -81,8 +84,8 @@ fn an_echoed_message_outside_the_box_is_not_a_prompt() {
 }
 
 #[test]
-fn a_survey_or_usage_limit_by_the_box_blocks_the_send() {
-    let survey = concat!(
+fn a_survey_by_the_box_blocks_the_send() {
+    let above = concat!(
         "● Done.\n",
         "\n",
         "How is Claude doing this session? (optional)\n",
@@ -91,17 +94,12 @@ fn a_survey_or_usage_limit_by_the_box_blocks_the_send() {
         "❯\u{a0}\n",
         "────────────────────────────────\n",
     );
-    assert_eq!(send_blocker(survey), Some(SendBlocker::Survey));
-
-    let limit = concat!(
-        "● Done.\n",
-        "\n",
-        "⚠ Usage limit reached · continuing automatically at 5pm · esc to cancel\n",
-        "────────────────────────────────\n",
-        "❯\u{a0}\n",
-        "────────────────────────────────\n",
+    assert!(feedback_survey(above));
+    assert_eq!(
+        classify_pane(above),
+        PaneActivity::Busy,
+        "pmd must not type a nudge whose digits would answer it"
     );
-    assert_eq!(send_blocker(limit), Some(SendBlocker::UsageLimit));
 
     let below = concat!(
         "────────────────────────────────\n",
@@ -109,26 +107,123 @@ fn a_survey_or_usage_limit_by_the_box_blocks_the_send() {
         "────────────────────────────────\n",
         "  How is Claude doing this session? (optional)\n",
     );
-    assert_eq!(send_blocker(below), Some(SendBlocker::Survey));
+    assert!(feedback_survey(below));
 }
 
 #[test]
-fn a_blocker_phrase_in_the_transcript_does_not_block() {
-    let mentioned = concat!(
-        "● Your API returned \"usage limit reached\" twice today.\n",
-        "\n",
+fn the_survey_question_in_the_transcript_does_not_block() {
+    // The live layout: the transcript abuts the box's top rule with no blank row between.
+    let quoted_by_the_agent = unstyled(FIXTURE_CLAUDE_STYLED_AFTER_TURN).replace(
+        "⏺ ok",
+        "⏺ Claude asked \"How is Claude doing this session?\" twice.",
+    );
+    assert!(
+        quoted_by_the_agent.contains("twice."),
+        "the fixture changed"
+    );
+    assert!(!feedback_survey(&quoted_by_the_agent));
+
+    let wrapped_answer = concat!(
+        "⏺ The survey reads:\n",
+        "  how is claude doing this session? It is optional.\n",
         "────────────────────────────────\n",
         "❯\u{a0}\n",
         "────────────────────────────────\n",
     );
+    assert!(
+        feedback_survey(wrapped_answer),
+        "a row that BEGINS with the question is the survey's shape, even when it is a wrapped \
+         answer: the refusal keeps the Message, so this direction costs a press, never a send"
+    );
+    assert!(!feedback_survey(&unstyled(
+        FIXTURE_CLAUDE_STYLED_AFTER_TURN
+    )));
+}
+
+#[test]
+fn rows_far_above_the_box_are_transcript() {
+    let pane = concat!(
+        "How is Claude doing this session? (optional)\n",
+        "line one\n",
+        "line two\n",
+        "line three\n",
+        "line four\n",
+        "────────────────────────────────\n",
+        "❯\u{a0}\n",
+        "────────────────────────────────\n",
+    );
+    assert!(
+        !feedback_survey(pane),
+        "only the rows directly above the rule are notices"
+    );
+}
+
+#[test]
+fn plain_text_counts_only_an_empty_box_as_idle() {
+    for (name, styled) in [
+        ("hint", FIXTURE_CLAUDE_STYLED_HINT),
+        ("draft", FIXTURE_CLAUDE_STYLED_DRAFT),
+        ("multi-line draft", FIXTURE_CLAUDE_STYLED_MULTILINE_DRAFT),
+    ] {
+        assert_eq!(
+            classify_pane(&unstyled(styled)),
+            PaneActivity::Busy,
+            "{name}: without styles the hint and a draft are the same text"
+        );
+    }
     assert_eq!(
-        send_blocker(mentioned),
-        None,
-        "the agent's answer is transcript, separated from the box by a blank row"
+        classify_pane(&unstyled(FIXTURE_CLAUDE_STYLED_AFTER_TURN)),
+        PaneActivity::Idle
+    );
+}
+
+#[test]
+fn the_styled_verdict_is_idle_on_a_hint_and_busy_on_a_draft() {
+    assert_eq!(
+        classify_pane_styled(FIXTURE_CLAUDE_STYLED_HINT),
+        PaneActivity::Idle
     );
     assert_eq!(
-        send_blocker(&unstyled(FIXTURE_CLAUDE_STYLED_AFTER_TURN)),
-        None
+        classify_pane_styled(FIXTURE_CLAUDE_STYLED_AFTER_TURN),
+        PaneActivity::Idle
+    );
+    for (name, styled) in [
+        ("draft", FIXTURE_CLAUDE_STYLED_DRAFT),
+        ("multi-line draft", FIXTURE_CLAUDE_STYLED_MULTILINE_DRAFT),
+    ] {
+        assert_eq!(
+            classify_pane_styled(styled),
+            PaneActivity::Busy,
+            "{name}: pmd must not glue a nudge onto a person's unsent text"
+        );
+    }
+    let drafted = concat!(
+        "────────────────────────────────\n",
+        "❯ wait, do not deploy yet\n",
+        "────────────────────────────────\n",
+    );
+    assert_eq!(classify_pane(drafted), PaneActivity::Busy);
+    assert_eq!(classify_pane_styled(drafted), PaneActivity::Busy);
+}
+
+#[test]
+fn a_grey_hint_colour_is_dim_but_a_highlighted_command_is_not() {
+    for grey in ["\x1b[38;5;244m", "\x1b[90m", "\x1b[38;2;128;128;128m"] {
+        let pane = FIXTURE_CLAUDE_STYLED_HINT.replace("\x1b[2m", grey);
+        assert_ne!(pane, FIXTURE_CLAUDE_STYLED_HINT, "the fixture changed");
+        assert!(
+            !claude_draft_in_box(&pane),
+            "{grey:?}: a hint greyed by colour is still a hint"
+        );
+    }
+    let command = concat!(
+        "────────────────────────────────\n",
+        "❯ \x1b[38;5;75m/compact\x1b[0m\n",
+        "────────────────────────────────\n",
+    );
+    assert!(
+        claude_draft_in_box(command),
+        "a coloured typed command is a draft"
     );
 }
 
@@ -147,10 +242,7 @@ const TITLED_BOX: &str = concat!(
 fn a_titled_top_rule_still_opens_the_box() {
     let plain = unstyled(TITLED_BOX);
     assert!(has_composer(&plain), "the titled box is a prompt");
-    assert_eq!(
-        crate::tmux::classify_pane(&plain),
-        crate::tmux::PaneActivity::Idle
-    );
+    assert_eq!(classify_pane_styled(TITLED_BOX), PaneActivity::Idle);
     assert!(
         !claude_draft_in_box(TITLED_BOX),
         "the dim hint is not a draft"
@@ -163,14 +255,14 @@ fn a_titled_top_rule_still_opens_the_box() {
 }
 
 #[test]
-fn a_blocker_above_a_titled_box_still_blocks() {
+fn a_survey_above_a_titled_box_still_blocks() {
     let pane = concat!(
-        "⚠ Usage limit reached · resets 5pm\n",
+        "How is Claude doing this session? (optional)\n",
         "──────────────────────────────── Fix the parser ─\n",
         "❯\u{a0}\n",
         "────────────────────────────────────────────────\n",
     );
-    assert_eq!(send_blocker(pane), Some(SendBlocker::UsageLimit));
+    assert!(feedback_survey(pane));
 }
 
 #[test]
@@ -179,8 +271,38 @@ fn a_titled_rule_needs_a_long_lead_and_a_closing_rule() {
         "──── Fix the parser ─",                             // lead too short
         "──────────────────────────────── Fix the parser",   // no closing `─`
         "Fix the parser ──────────────────────────────────", // title first
+        "────────────────Fix the parser ─",                  // no space before the title
+        "──────────────── Fix the parser─",                  // no space after it
+        "──────────────── a ── b ─",                         // a rule inside the title
     ] {
         let pane = format!("{top}\n❯\u{a0}Try \"x\"\n────────────────────────────────\n");
         assert!(!has_composer(&pane), "not a box top: {top:?}");
     }
+}
+
+#[test]
+fn a_markdown_separator_over_a_quoted_line_is_not_a_box() {
+    let long_title = format!("──────────────── {} ─", "x".repeat(81));
+    let pane = format!("{long_title}\n❯ quoted\n────────────────────────────────\n");
+    assert!(
+        !has_composer(&pane),
+        "a title past the bound is not a box top"
+    );
+
+    let streaming = concat!(
+        "⏺ Here is the layout:\n",
+        "──────────────── src/foo.rs ───\n",
+        "❯ cargo run\n",
+        "────────────────────────────────\n",
+    );
+    assert_eq!(
+        classify_pane(streaming),
+        PaneActivity::Busy,
+        "plain text never reads a box holding text as idle"
+    );
+    assert_eq!(
+        classify_pane_styled(streaming),
+        PaneActivity::Busy,
+        "an agent's own text is not dim, so it reads as a draft"
+    );
 }

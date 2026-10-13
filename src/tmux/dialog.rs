@@ -462,6 +462,12 @@ fn classify_codex_trust_dialog(window: &[&str]) -> Option<PaneDialog> {
 /// Recognise Claude's startup workspace trust dialog on a window whose general rules already found
 /// nothing. Like the codex trust dialog, this is human-only: a person decides whether project-local
 /// files may influence the agent before any ordinary Message can be sent.
+///
+/// Every anchor must sit where the live dialog draws it (`FIXTURE_CLAUDE_DIALOG_TRUST`): the two
+/// options within [`CLAUDE_TRUST_MAX_SPAN`] rows below the question, `Security guide` between the
+/// question and the options, and the `Enter to confirm` footer within
+/// [`DIALOG_MAX_QUESTION_GAP`] rows after them. Four literal anchors scattered over a transcript
+/// that merely shows the dialog's text are not the dialog.
 fn classify_claude_trust_dialog(window: &[&str]) -> Option<PaneDialog> {
     for q in (0..window.len()).rev() {
         let trimmed = window[q].trim();
@@ -469,14 +475,17 @@ fn classify_claude_trust_dialog(window: &[&str]) -> Option<PaneDialog> {
         let Some(at) = lower.find(CLAUDE_TRUST_QUESTION) else {
             continue;
         };
-        let options = collect_claude_trust_options(&window[q + 1..]);
+        let below = &window[q + 1..window.len().min(q + 1 + CLAUDE_TRUST_MAX_SPAN)];
+        let options = collect_claude_trust_options(below, q + 1);
         if options.options.len() < DIALOG_MIN_OPTIONS {
             continue;
         }
-        let has_security_anchor = window[q + 1..]
+        let has_security_anchor = window[q + 1..options.start]
             .iter()
             .any(|line| line.trim().eq_ignore_ascii_case("Security guide"));
-        let has_enter_footer = window[q + 1..].iter().any(|line| {
+        let footer_rows =
+            &window[options.end..window.len().min(options.end + DIALOG_MAX_QUESTION_GAP)];
+        let has_enter_footer = footer_rows.iter().any(|line| {
             line.trim()
                 .eq_ignore_ascii_case("Enter to confirm · Esc to cancel")
         });
@@ -492,18 +501,25 @@ fn classify_claude_trust_dialog(window: &[&str]) -> Option<PaneDialog> {
             mode: PaneDialogMode::Single,
             checked_indices: Vec::new(),
             class: PaneDialogClass::HumanOnly,
-            context_hash: dialog_context_hash(window, q, q + 1),
+            context_hash: dialog_context_hash(window, q, options.start),
         });
     }
     None
 }
 
-fn collect_claude_trust_options(lines: &[&str]) -> CollectedOptions {
+/// How many rows below its question the Claude trust dialog may draw its options. The live dialog
+/// draws them 8 rows below; the margin covers a wrapped paragraph on a narrower pane.
+const CLAUDE_TRUST_MAX_SPAN: usize = 14;
+
+/// The trust dialog's two options in `lines`, which start at row `offset` of the window; `start`
+/// and `end` are WINDOW indices, as every other option producer returns them. The options must be
+/// adjacent rows: anything between them is not this dialog.
+fn collect_claude_trust_options(lines: &[&str], offset: usize) -> CollectedOptions {
     let mut options = Vec::new();
     let mut selected_index = None;
-    let mut start = 0;
-    let mut end = 0;
-    for (offset, line) in lines.iter().enumerate() {
+    let mut start = offset;
+    let mut end = offset;
+    for (row, line) in lines.iter().enumerate() {
         let mut rest = line.trim_start();
         let selected = rest.starts_with('❯');
         if let Some(after_marker) = rest.strip_prefix('❯') {
@@ -511,16 +527,19 @@ fn collect_claude_trust_options(lines: &[&str]) -> CollectedOptions {
         }
         let label = rest.trim();
         if !matches!(label, "No, exit" | "Yes, I trust this folder") {
-            continue;
+            if options.is_empty() {
+                continue;
+            }
+            break;
         }
         if options.is_empty() {
-            start = offset;
+            start = offset + row;
         }
         if selected {
             selected_index = Some(options.len());
         }
         options.push(label.to_string());
-        end = offset + 1;
+        end = offset + row + 1;
     }
     CollectedOptions {
         options,
