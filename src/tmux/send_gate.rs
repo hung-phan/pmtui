@@ -88,12 +88,30 @@ fn is_transcript_entry(line: &str) -> bool {
 /// as Idle. This one can, so a fresh session showing its hint — or an engine whose box always holds
 /// one — becomes nudgeable without making a drafted box nudgeable too. A capture with no styles
 /// (a test driver's) reads every hint as a draft, which is the safe direction.
+///
+/// It also fails closed on a dialog. This is the verdict every typing path reads last, and it
+/// accepts a box whatever it holds, so a dialog drawn inside a box must never reach the draft
+/// check as a prompt.
 pub fn classify_pane_styled(styled: &str) -> PaneActivity {
     let plain = unstyled(styled);
+    if super::dialog::classify_dialog(&plain).is_some() {
+        return PaneActivity::Busy;
+    }
     match classify_with(&plain, is_prompt_row) {
         PaneActivity::Idle if claude_draft_in_box(styled) => PaneActivity::Busy,
         activity => activity,
     }
+}
+
+/// [`classify_pane_styled`] on a fresh styled capture of `session`, for a caller that reads the
+/// pane's PLAIN capture for everything else. The two are separate captures on purpose: the plain
+/// readers (dialog recognition, fingerprints) compare their text with later plain captures, and
+/// text rebuilt from a styled capture need not match it byte for byte. A capture that fails is
+/// Busy.
+pub fn styled_activity(driver: &dyn super::Driver, session: &str, lines: usize) -> PaneActivity {
+    driver
+        .capture_tail_styled(session, lines)
+        .map_or(PaneActivity::Busy, |styled| classify_pane_styled(&styled))
 }
 
 /// Whether Claude's input box holds unsent text, read from a STYLED capture.

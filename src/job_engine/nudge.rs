@@ -173,14 +173,12 @@ impl JobScheduler {
             };
             return Ok(JobTick::Monitoring { until });
         }
-        // The last look before typing: styled, so a person's draft in the box is Busy.
-        match driver.capture_tail_styled(&session, 40) {
-            Ok(styled)
-                if crate::tmux::classify_pane_styled(&styled)
+        // The last look before typing reads styles too, so a person's draft in the box is Busy.
+        match driver.capture_tail(&session, 40) {
+            Ok(_)
+                if crate::tmux::styled_activity(driver, &session, 40)
                     == crate::tmux::PaneActivity::Idle => {}
-            Ok(styled) => {
-                return self.busy_pane_recheck(now, base, &crate::tmux::unstyled(&styled));
-            }
+            Ok(capture) => return self.busy_pane_recheck(now, base, &capture),
             Err(_) => return self.busy_recheck(now, base, HoldReason::Transient),
         }
         // The single seam that turns ledger + scheduler state into the nudge bytes: the goal on

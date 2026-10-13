@@ -398,8 +398,8 @@ impl JobScheduler {
                     return Ok(tick);
                 }
                 let session = self.loop_session();
-                match driver.capture_tail_styled(&session, 40) {
-                    Ok(styled) if tmux::classify_pane_styled(&styled) == PaneActivity::Idle => {
+                match tmux::styled_activity(driver, &session, 40) {
+                    PaneActivity::Idle => {
                         // The resume path: a human answer just landed (it rides in
                         // `pending_context`), so flag it for the "Since last wake" block. Not a
                         // marker-less-finish correction — the answer is the thing to deliver here.

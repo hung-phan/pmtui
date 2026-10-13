@@ -48,6 +48,8 @@ pub use real::{LAUNCH_COMMAND_MAX_BYTES, TmuxDriver, launch_command};
 // POSIX shell escaping, shared with `worker::launch`'s turn-hook builder so a project
 // root with a shell metacharacter can't malform the hook command.
 pub(crate) use real::shq;
-pub use send_gate::{classify_pane_styled, claude_draft_in_box, feedback_survey, unstyled};
+pub use send_gate::{
+    classify_pane_styled, claude_draft_in_box, feedback_survey, styled_activity, unstyled,
+};
 pub use send_text::sanitize_send_text;
 pub use session_names::{job_session_name, session_name, supervisor_session_name};
