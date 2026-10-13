@@ -35,6 +35,18 @@ fn build_chat_codex_resumes_interactively_without_exec() {
 }
 
 #[test]
+fn build_chat_trae_resumes_interactively_without_headless_flags() {
+    let argv = build_chat(Engine::Trae, "trae-session", None, test_turn_signal());
+    assert_eq!(argv[0], "traex");
+    assert!(argv.iter().any(|arg| arg == "-c"), "{argv:?}");
+    assert_eq!(&argv[argv.len() - 2..], ["resume", "trae-session"]);
+    assert!(
+        !argv.iter().any(|arg| arg == "-p"),
+        "interactive TRAE chat is not print mode: {argv:?}"
+    );
+}
+
+#[test]
 fn build_chat_inserts_model_when_some_omits_when_none() {
     // Present-iff-Some AND position. claude: `--model <m>` AFTER `claude`, BEFORE `--resume`.
     let argv = build_chat(
@@ -73,6 +85,16 @@ fn build_chat_inserts_model_when_some_omits_when_none() {
         codex_at < m_at && m_at < cx_resume_at,
         "-m after codex, before resume: {cx:?}"
     );
+    // traex: `-m <m>` after `traex`, before `resume`.
+    let trae = build_chat(Engine::Trae, "trae-1", Some("seed-1"), test_turn_signal());
+    assert!(trae.windows(2).any(|w| w == ["-m", "seed-1"]), "{trae:?}");
+    let m_at = trae.iter().position(|a| a == "-m").unwrap();
+    let trae_at = trae.iter().position(|a| a == "traex").unwrap();
+    let trae_resume_at = trae.iter().position(|a| a == "resume").unwrap();
+    assert!(
+        trae_at < m_at && m_at < trae_resume_at,
+        "-m after traex, before resume: {trae:?}"
+    );
     // None ⇒ no flag on either engine.
     assert!(
         !build_chat(Engine::Claude, "conv-1", None, test_turn_signal())
@@ -81,6 +103,11 @@ fn build_chat_inserts_model_when_some_omits_when_none() {
     );
     assert!(
         !build_chat(Engine::Codex, "sess-1", None, test_turn_signal())
+            .iter()
+            .any(|a| a == "-m")
+    );
+    assert!(
+        !build_chat(Engine::Trae, "trae-1", None, test_turn_signal())
             .iter()
             .any(|a| a == "-m")
     );
@@ -112,6 +139,26 @@ fn build_chat_create_inserts_model_when_some_omits_when_none() {
             .iter()
             .any(|a| a == "--model")
     );
+
+    let trae = build_chat_create(
+        Engine::Trae,
+        "new-uuid-1",
+        Some("seed-1"),
+        test_turn_signal(),
+    );
+    assert!(trae.windows(2).any(|w| w == ["-m", "seed-1"]), "{trae:?}");
+    let m_at = trae.iter().position(|a| a == "-m").unwrap();
+    let trae_at = trae.iter().position(|a| a == "traex").unwrap();
+    let sid_at = trae.iter().position(|a| a == "--session-id").unwrap();
+    assert!(
+        trae_at < m_at && m_at < sid_at,
+        "-m after traex, before --session-id: {trae:?}"
+    );
+    assert!(
+        !build_chat_create(Engine::Trae, "new-uuid-1", None, test_turn_signal())
+            .iter()
+            .any(|a| a == "-m")
+    );
 }
 
 #[test]
@@ -132,10 +179,22 @@ fn build_chat_and_create_omit_model_when_empty_or_whitespace() {
             "build_chat codex m={m:?}"
         );
         assert!(
+            !build_chat(Engine::Trae, "trae-1", Some(m), test_turn_signal())
+                .iter()
+                .any(|a| a == "-m"),
+            "build_chat trae m={m:?}"
+        );
+        assert!(
             !build_chat_create(Engine::Claude, "new-uuid-1", Some(m), test_turn_signal(),)
                 .iter()
                 .any(|a| a == "--model"),
             "build_chat_create claude m={m:?}"
+        );
+        assert!(
+            !build_chat_create(Engine::Trae, "new-uuid-1", Some(m), test_turn_signal(),)
+                .iter()
+                .any(|a| a == "-m"),
+            "build_chat_create trae m={m:?}"
         );
     }
 }
@@ -229,6 +288,22 @@ fn build_chat_create_claude_uses_session_id_not_resume_or_headless() {
 }
 
 #[test]
+fn build_chat_create_trae_uses_session_id_not_resume_or_headless() {
+    let argv = build_chat_create(Engine::Trae, "new-trae-id", None, test_turn_signal());
+    assert_eq!(argv[0], "traex");
+    assert!(argv.iter().any(|arg| arg == "-c"), "{argv:?}");
+    assert_eq!(&argv[argv.len() - 2..], ["--session-id", "new-trae-id"]);
+    assert!(
+        !argv.iter().any(|a| a == "-p"),
+        "create is interactive: no -p"
+    );
+    assert!(
+        !argv.iter().any(|a| a == "--resume"),
+        "create is not a resume"
+    );
+}
+
+#[test]
 fn build_codex_fresh_chat_is_a_plain_interactive_codex_with_optional_flags() {
     // Bare: no id (`resume`/`--session-id`), no unattended approval flags — codex mints
     // the conversation and a human answers approvals (mirrors build_chat's codex posture).
@@ -258,25 +333,25 @@ fn effective_id_prefers_ledger_then_registry_seed_then_what_the_engine_reported(
     // observation. All absent ⇒ None.
     let captured = Some("captured");
     assert_eq!(
-        effective_id(Some("ledger"), Some("seed"), captured),
+        effective_id(Engine::Claude, Some("ledger"), Some("seed"), captured),
         Some("ledger".to_string())
     );
     assert_eq!(
-        effective_id(None, Some("seed"), captured),
+        effective_id(Engine::Claude, None, Some("seed"), captured),
         Some("seed".to_string())
     );
     assert_eq!(
-        effective_id(Some("ledger"), None, captured),
+        effective_id(Engine::Claude, Some("ledger"), None, captured),
         Some("ledger".to_string())
     );
     // Ranking it last is what makes the new source purely ADDITIVE: it can only ever decide a row
     // where both decisions are empty — which is every codex row, since codex has no caller-chosen
     // id for either of them to record.
     assert_eq!(
-        effective_id(None, None, captured),
+        effective_id(Engine::Claude, None, None, captured),
         Some("captured".to_string())
     );
-    assert_eq!(effective_id(None, None, None), None);
+    assert_eq!(effective_id(Engine::Claude, None, None, None), None);
 }
 
 #[test]
@@ -286,7 +361,7 @@ fn a_codex_row_whose_hook_reported_an_id_resumes_instead_of_opening_a_second_con
     // opened a SECOND conversation, orphaning the first. The hook's own `thread_id` is the only
     // thing that could have said otherwise.
     let captured = "0199dddd-1111-7aaa-8bbb-ccccdddddddd";
-    let eff = effective_id(None, None, Some(captured));
+    let eff = effective_id(Engine::Codex, None, None, Some(captured));
     assert_eq!(
         agent_loop_enter(None, eff.as_deref(), false),
         EnterAction::Chat(captured.to_string()),
@@ -300,7 +375,7 @@ fn second_enter_on_seed_only_session_resumes_not_re_mints() {
     // None), a second Enter must Chat the SEEDED id via the resume path — never
     // mint a second conversation. effective_id feeds agent_loop_enter, so a
     // seed-only state is Chat(seed), not WaitingFirstWake.
-    let eff = effective_id(None, Some("seed-42"), None);
+    let eff = effective_id(Engine::Claude, None, Some("seed-42"), None);
     assert_eq!(
         agent_loop_enter(None, eff.as_deref(), false),
         EnterAction::Chat("seed-42".to_string())
@@ -670,9 +745,10 @@ fn production_editor_wrappers_spawn_the_selected_editor() {
     assert_eq!(editor_command_from(None, Some("editor".into())), "editor");
     assert_eq!(editor_command_from(None, None), "vi");
 
+    let editor = "true";
     let mut send_handoff = RecordingHandoff::default();
     assert_eq!(
-        edit_send_message(&mut send_handoff, "draft", "/bin/true")
+        edit_send_message(&mut send_handoff, "draft", editor)
             .unwrap()
             .as_deref(),
         Some("draft")
@@ -681,7 +757,7 @@ fn production_editor_wrappers_spawn_the_selected_editor() {
 
     let mut directive_handoff = RecordingHandoff::default();
     assert_eq!(
-        edit_directive(&mut directive_handoff, "keep this", "/bin/true")
+        edit_directive(&mut directive_handoff, "keep this", editor)
             .unwrap()
             .as_deref(),
         Some("keep this")
@@ -690,7 +766,7 @@ fn production_editor_wrappers_spawn_the_selected_editor() {
 
     let mut brief_handoff = RecordingHandoff::default();
     assert_eq!(
-        edit_brief(&mut brief_handoff, "ship it", "/bin/true")
+        edit_brief(&mut brief_handoff, "ship it", editor)
             .unwrap()
             .as_deref(),
         Some("ship it")
@@ -1053,4 +1129,25 @@ fn editor_temp_write_failure_stops_before_terminal_handoff() {
     assert!(error.to_string().contains("write send temp"), "{error:#}");
     assert!(handoff.events.is_empty());
     assert!(!editor_ran.get());
+}
+
+#[test]
+fn a_trae_row_resumes_only_the_thread_its_hook_reported() {
+    // TraeX keeps pmtui's `--session-id` as a thread NAME, and `traex resume <uuid>` cannot open a
+    // name, so a ledger or registry id must never reach Enter for a TraeX row.
+    let reported = "01a133c3-b12f-7033-ae77-38f3294fb68e";
+    assert_eq!(
+        effective_id(
+            Engine::Trae,
+            Some("ledger-name"),
+            Some("seed-name"),
+            Some(reported)
+        ),
+        Some(reported.to_string())
+    );
+    assert_eq!(
+        effective_id(Engine::Trae, Some("ledger-name"), Some("seed-name"), None),
+        None,
+        "no reported thread yet: nothing to resume"
+    );
 }

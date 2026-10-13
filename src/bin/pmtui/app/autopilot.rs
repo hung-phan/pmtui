@@ -246,7 +246,10 @@ impl App {
                         }
                         let engine = c.decider_engine;
                         let stored_model = c.decider_model.clone();
-                        let cursor = Engine::ALL.iter().position(|&e| e == engine).unwrap_or(0);
+                        let cursor = Engine::DECIDERS
+                            .iter()
+                            .position(|&e| e == engine)
+                            .unwrap_or(0);
                         // Fill the catalog for the current engine now, so the first frame renders it
                         // without I/O (advancing to another engine fills that one on Enter).
                         let _ = self.models_len(engine);
@@ -298,7 +301,11 @@ impl App {
         match stage {
             PickStage::Model => self.commit_model_pick(),
             PickStage::Engine => {
-                let engine = Engine::ALL[cursor.min(Engine::ALL.len() - 1)];
+                let engines = match target {
+                    PickTarget::Decider => &Engine::DECIDERS[..],
+                    PickTarget::Worker => &Engine::ALL[..],
+                };
+                let engine = engines[cursor.min(engines.len() - 1)];
                 // The stored model for this target does NOT change just because a different engine is
                 // being eyed — so it seeds both the cursor and the `●` current marker for the new
                 // engine's catalog. (An engine whose catalog lacks the stored value shows no `●`.)
@@ -406,7 +413,10 @@ impl App {
         } = &self.mode
         {
             let (id, engine, stored_model) = (id.clone(), *engine, stored_model.clone());
-            let cursor = Engine::ALL.iter().position(|&e| e == engine).unwrap_or(0);
+            let cursor = Engine::DECIDERS
+                .iter()
+                .position(|&e| e == engine)
+                .unwrap_or(0);
             self.mode = UiMode::ModelPicker {
                 target: PickTarget::Decider,
                 id,

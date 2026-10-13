@@ -1,6 +1,6 @@
 //! Launching the agent that does the work: the two knobs every launch shares
 //! ([`PermissionMode`], [`Resume`]) and the exact argv for the two shapes a worker takes —
-//! the ephemeral headless `-p` worker and the persistent interactive REPL the daemon
+//! the ephemeral headless worker and the persistent interactive REPL the daemon
 //! nudges. One module because the two shapes must not drift: they share the `env` prefix,
 //! the unattended permission posture, and the session-anchoring rules.
 
@@ -44,7 +44,7 @@ impl PermissionMode {
 ///   persists it (no `--no-session-persistence`). Codex has no caller-chosen id,
 ///   so it ignores `session_id` and mints its own (captured from `--json` later).
 /// - `Continue(id)` resumes that specific conversation: claude `--resume <id>`,
-///   codex `exec resume <id>`.
+///   codex `exec resume <id>`, and TRAE `exec resume <id>`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Resume {
     Fresh { session_id: Option<String> },
@@ -71,7 +71,7 @@ pub(super) fn turn_hook_value_enabled(value: Option<&str>) -> bool {
 ///
 /// The prompt is always the trailing positional after an unconditional `--`
 /// separator, with every flag (including claude's **variadic** `--add-dir`)
-/// before it. This is verified against both real CLIs and closes three traps at
+/// before it. This is verified against the real CLIs and closes three traps at
 /// once: a dash-leading prompt parsed as a flag, a prompt equal to a codex
 /// subcommand (`review`/`resume`/`help`), and claude's variadic `--add-dir`
 /// swallowing a trailing prompt (`--` terminates the variadic collection).
@@ -154,8 +154,44 @@ pub fn build_command(
                 }
             }
         }
+        Engine::Trae => {
+            argv.push(Engine::Trae.bin().into());
+            argv.push("exec".into());
+            match &resume {
+                Resume::Fresh {
+                    session_id: Some(id),
+                } => {
+                    argv.push("--sandbox".into());
+                    argv.push("workspace-write".into());
+                    argv.push("--skip-git-repo-check".into());
+                    argv.push("--json".into());
+                    argv.push("--session-id".into());
+                    argv.push(id.clone());
+                    for d in add_dirs {
+                        argv.push("--add-dir".into());
+                        argv.push(d.to_string_lossy().into_owned());
+                    }
+                }
+                Resume::Continue(id) => {
+                    argv.push("resume".into());
+                    argv.push(id.clone());
+                    argv.push("--skip-git-repo-check".into());
+                    argv.push("--json".into());
+                }
+                Resume::Fresh { session_id: None } => {
+                    argv.push("--sandbox".into());
+                    argv.push("workspace-write".into());
+                    argv.push("--skip-git-repo-check".into());
+                    argv.push("--json".into());
+                    for d in add_dirs {
+                        argv.push("--add-dir".into());
+                        argv.push(d.to_string_lossy().into_owned());
+                    }
+                }
+            }
+        }
     }
-    // The prompt is the trailing positional after `--` for BOTH engines: `--`
+    // The prompt is the trailing positional after `--` for all engines: `--`
     // ends option parsing (so a dash-leading prompt is positional), ends codex
     // subcommand matching, and terminates claude's variadic `--add-dir`.
     argv.push("--".into());
@@ -167,7 +203,7 @@ pub fn build_command(
 /// EXITS.
 ///
 /// This is [`build_command`]'s one-shot shape plus the flags an UNATTENDED run needs, so the argv
-/// knowledge verified against both real CLIs stays in one place. The extra flags are spliced in ahead
+/// knowledge verified against the real CLIs stays in one place. The extra flags are spliced in ahead
 /// of the trailing `--` + prompt, which must remain the last two elements for the reasons
 /// [`build_command`] documents.
 ///
@@ -183,8 +219,8 @@ pub fn build_command(
 /// - `--json-schema` / `--output-schema` ask for a final payload shaped like
 ///   [`crate::spawn::result_schema_json`], so the outcome a receipt reports is the HARNESS's output
 ///   rather than a file the agent has to remember to write.
-/// - codex also gets `-o`, which writes that final message to a file; claude's equivalent arrives in
-///   the `result` event of the tee'd stream.
+/// - codex and traex also get `-o`, which writes that final message to a file; claude's equivalent
+///   arrives in the `result` event of the tee'd stream.
 /// - A pinned `--session-id` (claude) leaves a conversation a human or the parent can resume, so a job
 ///   that ends `needs_human` or `failed` need not be restarted from nothing. Codex has no
 ///   caller-chosen id.
@@ -211,7 +247,7 @@ pub fn build_job_command(
     last_message: &Path,
 ) -> Vec<String> {
     let resume = match engine {
-        Engine::Claude => Resume::Fresh {
+        Engine::Claude | Engine::Trae => Resume::Fresh {
             session_id: Some(session_id.to_string()),
         },
         // Codex assigns its own id; it is captured from the `--json` stream, never chosen here.
@@ -245,6 +281,16 @@ pub fn build_job_command(
                 extra.push(model.to_string());
             }
         }
+        Engine::Trae => {
+            extra.push("--output-schema".into());
+            extra.push(schema.to_string_lossy().into_owned());
+            extra.push("-o".into());
+            extra.push(last_message.to_string_lossy().into_owned());
+            if let Some(model) = model.filter(|model| !model.trim().is_empty()) {
+                extra.push("-m".into());
+                extra.push(model.to_string());
+            }
+        }
     }
     // Ahead of `--`, never after it: everything past the separator is the prompt.
     let at = argv
@@ -271,7 +317,7 @@ fn strip_managed_env(argv: &mut Vec<String>) {
 
 /// Build the argv for a `Mode::AgentLoop` session's ONE **persistent interactive**
 /// agent — the long-lived engine REPL the daemon nudges via `tmux send-keys` and a
-/// human attaches to (NOT the ephemeral headless `-p`/`stream-json` worker
+/// human attaches to (NOT the ephemeral headless event-stream worker
 /// [`build_command`] builds). Unlike a phase/wake worker it takes NO prompt: the
 /// nudge is typed in later; this only launches the resumable REPL.
 ///
@@ -434,6 +480,32 @@ pub fn build_loop_command(
             // cwd `tmux::Driver::launch_interactive` starts the session in, so it is
             // already codex's primary writable workspace under `workspace-write`.
         }
+        Engine::Trae => {
+            argv.push(Engine::Trae.bin().into());
+            if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
+                argv.push("-m".into());
+                argv.push(m.to_string());
+            }
+            if turn_signal.is_some() {
+                argv.push("-c".into());
+                argv.push(trae_turn_hook_config());
+            }
+            match resume {
+                Resume::Fresh {
+                    session_id: Some(id),
+                } => {
+                    argv.push("--session-id".into());
+                    argv.push(id.clone());
+                }
+                Resume::Continue(id) => {
+                    argv.push("resume".into());
+                    argv.push(id.clone());
+                }
+                Resume::Fresh { session_id: None } => {}
+            }
+            argv.push("--permission-mode".into());
+            argv.push("auto".into());
+        }
     }
     argv
 }
@@ -490,6 +562,30 @@ pub fn build_standard_command(
                 argv.push(id.clone());
             }
         }
+        Engine::Trae => {
+            argv.push(Engine::Trae.bin().into());
+            if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
+                argv.push("-m".into());
+                argv.push(m.to_string());
+            }
+            if turn_signal.is_some() {
+                argv.push("-c".into());
+                argv.push(trae_turn_hook_config());
+            }
+            match resume {
+                Resume::Fresh {
+                    session_id: Some(id),
+                } => {
+                    argv.push("--session-id".into());
+                    argv.push(id.clone());
+                }
+                Resume::Continue(id) => {
+                    argv.push("resume".into());
+                    argv.push(id.clone());
+                }
+                Resume::Fresh { session_id: None } => {}
+            }
+        }
     }
     argv
 }
@@ -538,6 +634,9 @@ pub fn build_fork_command(
             argv.push("fork".into());
             argv.push(source_id.to_string());
             argv
+        }
+        Engine::Trae => {
+            panic!("TRAE fork support is not implemented yet");
         }
     }
 }
@@ -676,14 +775,25 @@ fn codex_turn_notify_config(turn_signal: &Path) -> String {
     // Escape the command for a TOML basic string (the claude side gets this for free via
     // serde_json). A project-root path can legally contain `"` or `\`; left unescaped either
     // would malform the `-c` TOML and codex would REJECT it at startup, failing the launch
-    // itself — worse than the busy-detection bug the hook fixes. Backslash first, so the
-    // backslashes introduced by escaping `"` are not doubled. Single quotes and spaces need
-    // no escaping (safe in a TOML basic string and, single-quoted, in the inner shell).
-    let cmd = codex_turn_hook_shell(turn_signal)
+    // itself — worse than the busy-detection bug the hook fixes.
+    let cmd = toml_basic_escape(&codex_turn_hook_shell(turn_signal));
+    format!("notify=[\"sh\", \"-c\", \"{cmd}\"]")
+}
+
+/// The stable command TraeX's Stop hook runs. It is deliberately path-free because TraeX
+/// persists hook trust by command hash; per-session paths would turn one approval into many.
+const TRAE_TURN_HOOK_COMMAND: &str = r#"sh -c 'exec "${PMTUI_BIN:-pmtui}" hook turn-complete'"#;
+
+fn trae_turn_hook_config() -> String {
+    let cmd = toml_basic_escape(TRAE_TURN_HOOK_COMMAND);
+    format!("hooks.Stop=[{{hooks=[{{type=\"command\",async=false,command=\"{cmd}\",timeout=5}}]}}]")
+}
+
+fn toml_basic_escape(value: &str) -> String {
+    value
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
         .replace('\n', "\\n")
         .replace('\r', "\\r")
-        .replace('\t', "\\t");
-    format!("notify=[\"sh\", \"-c\", \"{cmd}\"]")
+        .replace('\t', "\\t")
 }

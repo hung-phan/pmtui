@@ -69,6 +69,63 @@ fn a_claude_run_without_structured_output_still_reports() {
     );
 }
 
+#[test]
+fn trae_result_event_reports_success_or_failure_and_last_result_wins() {
+    let success = read_job_result(
+        Engine::Trae,
+        r#"{"type":"result","subtype":"success","session_id":"s","result":"done","is_error":false}"#,
+        None,
+    )
+    .expect("a result");
+    assert_eq!(success.outcome, JobOutcome::Done);
+    assert_eq!(success.summary, "done");
+
+    let failed = read_job_result(
+        Engine::Trae,
+        r#"{"type":"result","subtype":"error_during_execution","result":"bad","is_error":true}"#,
+        None,
+    )
+    .expect("a result");
+    assert_eq!(failed.outcome, JobOutcome::Failed);
+    assert_eq!(failed.summary, "bad");
+
+    let log = concat!(
+        r#"{"type":"result","subtype":"error_during_execution","result":"first","is_error":true}"#,
+        "\n",
+        r#"{"type":"assistant","message":"still working"}"#,
+        "\n",
+        r#"{"type":"result","subtype":"success","result":"second","is_error":false}"#
+    );
+    let last = read_job_result(Engine::Trae, log, None).expect("a result");
+    assert_eq!(last.outcome, JobOutcome::Done);
+    assert_eq!(last.summary, "second");
+}
+
+#[test]
+fn trae_exec_result_uses_turn_terminator_and_output_file() {
+    let result = read_job_result(
+        Engine::Trae,
+        r#"{"type":"turn.completed"}"#,
+        Some(r#"{"outcome":"needs_human","summary":"credentials are required"}"#),
+    )
+    .expect("a result");
+    assert_eq!(result.outcome, JobOutcome::NeedsHuman);
+    assert_eq!(result.summary, "credentials are required");
+
+    let failed = read_job_result(
+        Engine::Trae,
+        r#"{"type":"turn.failed"}"#,
+        Some(r#"{"outcome":"done","summary":"file was written"}"#),
+    )
+    .expect("a result");
+    assert_eq!(
+        failed.outcome,
+        JobOutcome::Failed,
+        "the CLI terminator, not the file, states run failure"
+    );
+    assert_eq!(failed.summary, "file was written");
+}
+
 /// A MALFORMED PAYLOAD IS REJECTED, NOT GUESSED AT (the other half of agent-deck's parse rule): a
 /// `structured_output` that does not match the schema falls through to the subtype rather than being
 /// half-read.

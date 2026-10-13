@@ -16,7 +16,7 @@ rather than repeating it.
 
 ## How it works
 
-`pmd` treats each project as **one persistent `claude`/`codex` session** living in a
+`pmd` treats each project as **one persistent `claude`/`codex`/`traex` session** living in a
 private-socket tmux server (`tmux -L <socket>`). On its heartbeat the daemon:
 
 1. **watches** the session — is the agent working now, idle, or waiting on you?
@@ -61,12 +61,13 @@ attaches you to that same terminal. Switching to Autopilot makes `pmd` drive it;
 back makes `pmd` stop typing — without restarting the process or losing the conversation.
 
 Autopilot is a goal-level supervisor **above** the engine's own permission mode. Claude and
-Codex still decide whether a concrete tool call needs permission; `pmd` decides which
+Codex still decide whether a concrete tool call needs permission; TRAE CLI does the same through
+TraeX permissions and hook trust. `pmd` decides which
 goal-aligned work or ordinary choice happens next, and records that decision for review.
 
-Permission, trust, and command-approval prompts are human-only. Codex directory trust is
-never auto-approved: its first-run prompt stays for you to answer once, and an unattended
-Autopilot session that reaches it is parked and surfaced. Only menus whose own chrome
+Permission, trust, and command-approval prompts are human-only. Codex directory trust and TraeX hook
+trust are never auto-approved: first-run prompts stay for you to answer once, and an unattended
+Autopilot session that reaches one is parked and surfaced. Only menus whose own chrome
 identifies them as ordinary choices can be delegated, and quoted text is not enough — `pmd`
 sends one navigation key and requires the live highlight to move before it will press Enter.
 
@@ -84,11 +85,13 @@ the Page keys.
 
 Every terminal that pmtui or pmd launches with `PMTUI_BIN` in its environment first gets the
 `pmtui-spawn` skill in the project root, so the agent inside knows how to ask for a child
-session. The skill is a short procedure: spawn only independent work, write a self-contained
-Message, run `pmtui spawn` with one generated request id, and act on the JSON `state` even on
-a nonzero exit. Nested spawns are refused and a sixth child waits its turn, and neither
-process ever creates or edits your `AGENTS.md`. See the [`pmtui spawn` section in the
-README](../README.md#handing-work-to-a-child-session-pmtui-spawn) for the command itself.
+session. Codex and TraeX read it from `.agents/skills/`; Claude gets an exact compatibility
+symlink under `.claude/skills/`. The skill is a short procedure: spawn only independent work,
+write a self-contained Message, run `pmtui spawn` with one generated request id, and act on
+the JSON `state` even on a nonzero exit. Nested spawns are refused and a sixth child waits its
+turn, and neither process ever creates or edits your `AGENTS.md`. See the [`pmtui spawn`
+section in the README](../README.md#handing-work-to-a-child-session-pmtui-spawn) for the
+command itself.
 
 ### What the dashboard said earlier
 
@@ -172,11 +175,12 @@ plain "next field" it always was, so tabbing through the form never gets stuck o
 that row has the arrows, **`shift+tab`** is how you go back a field. To descend from a path you
 typed in full, type the `/` and its children become candidates.
 
-### Codex sessions and their conversation
+### Engine sessions and their conversations
 
-Claude lets pmtui name a conversation up front; Codex does not — it assigns its own. So a Codex session
-learns its identity from the engine itself, reported when its **first turn finishes**. Until then the
-session has no conversation to go back to, which is why a brand-new Codex row shows none.
+Claude lets pmtui name a conversation up front. Codex does not — it assigns its own. TRAE CLI
+accepts a name but cannot resume by it. So Codex and TRAE CLI sessions learn their identity from the
+engine itself, reported when their **first turn finishes**. Until then the session has no conversation to go back to, which is why a brand-new
+Codex row shows none.
 
 Once it has one, `Enter` resumes that conversation and a restart keeps it. Before this, neither the
 dashboard nor the driver had any way to know the id, so a Codex session that had been working for hours
@@ -543,8 +547,8 @@ when it has an explicit `availableModels` allowlist, resolving entries through
 `sonnet`, `opus` and `haiku` aliases (Claude still enforces what your subscription may use).
 Bedrock, Vertex, Foundry, Mantle, Anthropic AWS and custom-base-URL setups need an explicit
 allowlist, because a bare alias may not select the provider model you meant. **Codex** models
-come from `codex debug models`. The list is cached per engine for the dashboard's lifetime —
-restart `pmtui` to refresh it.
+come from `codex debug models`. **TRAE CLI** models come from `traex models --json`.
+The list is cached per engine for the dashboard's lifetime — restart `pmtui` to refresh it.
 </details>
 
 <details>

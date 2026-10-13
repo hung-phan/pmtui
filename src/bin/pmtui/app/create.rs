@@ -490,6 +490,7 @@ impl App {
         });
         let captured_cid = crate::decide::read_captured_conversation_id(&paths);
         let existing = crate::decide::effective_id(
+            engine,
             ledger_cid.as_deref(),
             registry_cid.as_deref(),
             captured_cid.as_deref(),
@@ -652,7 +653,7 @@ fn new_session_id_base(dir: &Path) -> String {
 /// before its real id is minted.
 const MINTED_ID_SHAPE: &str = "00000000-0000-4000-8000-000000000000";
 
-/// The argv of a FRESH Standard launch carrying its one-time initial Message: Claude creates
+/// The argv of a FRESH Standard launch carrying its one-time initial Message: Claude and TRAE create
 /// conversation `claude_id` (`build_chat_create`), while Codex has no caller-chosen id, starts
 /// its own (`build_codex_fresh_chat`) and ignores `claude_id`.
 ///
@@ -667,7 +668,7 @@ pub(crate) fn fresh_standard_argv(
 ) -> Vec<String> {
     let argv = match engine {
         Engine::Codex => build_codex_fresh_chat(model, turn_signal),
-        Engine::Claude => build_chat_create(Engine::Claude, claude_id, model, turn_signal),
+        Engine::Claude | Engine::Trae => build_chat_create(engine, claude_id, model, turn_signal),
     };
     with_initial_prompt(argv, message)
 }

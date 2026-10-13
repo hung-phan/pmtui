@@ -197,6 +197,7 @@ fn render_board_card(f: &mut Frame, view: &ProjectView, selected: bool, area: Re
     let engine_color = match view.engine {
         Some(Engine::Claude) => agent_manager::theme::brand(),
         Some(Engine::Codex) => agent_manager::theme::live(),
+        Some(Engine::Trae) => agent_manager::theme::accent_alt(),
         None => attention::text(),
     };
     let mode_color = if view.tier == Some(Tier::Autopilot) {

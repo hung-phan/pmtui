@@ -355,6 +355,7 @@ impl App {
         // adopted/minted id landing in the ledger).
         let captured = read_captured_conversation_id(&session_paths);
         let effective = effective_id(
+            e.engine.unwrap_or(Engine::Claude),
             ledger.conversation_id.as_deref(),
             e.conversation_id.as_deref(),
             captured.as_deref(),

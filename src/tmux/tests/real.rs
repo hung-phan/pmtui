@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
+
 use tempfile::tempdir;
 
 use crate::tmux::codex::{
@@ -20,7 +21,7 @@ use crate::tmux::{
     Driver, Observation, PaneDialog, StepHandle, TmuxDriver, classify_dialog, observe,
 };
 use crate::tmux::{
-    LAUNCH_COMMAND_MAX_BYTES, LaunchError, LaunchOutcome, ManagedEnv, launch_command,
+    LAUNCH_COMMAND_MAX_BYTES, LaunchError, LaunchOutcome, ManagedEnv, launch_command, shell_command,
 };
 
 #[test]
@@ -33,6 +34,10 @@ fn shq_escapes_single_quotes() {
 fn launch_command_is_the_quoted_argv_tmux_receives() {
     assert_eq!(
         launch_command(&["claude".into(), "--".into(), "it's".into()]),
+        "exec 'claude' '--' 'it'\\''s'"
+    );
+    assert_eq!(
+        shell_command(&["claude".into(), "--".into(), "it's".into()]),
         "'claude' '--' 'it'\\''s'"
     );
 }
@@ -511,6 +516,14 @@ capture-pane)
       count=$(grep -c 'send-keys -t =long: Enter' {log})
       [ "$count" -lt 2 ] && echo '› [Pasted Content 801 chars]' || echo '› Ask Codex to do anything' ;;
     *=second-enter:*) echo '› [Pasted Content 801 chars]' ;;
+    *=approval:*)
+      if grep -q 'send-keys -t =approval: Enter' {log}; then
+        printf '  Would you like to run the following command?\n  $ rm -rf build\n› 1. Yes, proceed (y)\n  2. No, and tell Codex what to do differently (esc)\n  Press enter to confirm or esc to cancel\n'
+      else
+        echo '› [Pasted Content 801 chars]'
+      fi ;;
+    *=no-prompt:*)
+      grep -q 'send-keys -t =no-prompt: Enter' {log} && echo '• Working (0s)' || echo '› [Pasted Content 801 chars]' ;;
     *) echo captured ;;
   esac ;;
 load-buffer)
@@ -653,11 +666,14 @@ fn missing_tmux_binary_reports_spawn_errors_without_panicking() {
 /// anything it does not own.
 #[test]
 fn request_stop_signals_the_panes_own_group_and_tolerates_a_missing_pane() {
+    use std::os::unix::process::CommandExt;
+
     let fx = ScriptedTmux::new();
 
     // A process group of our own: signalled, and gone afterwards.
-    let mut child = Command::new("setsid")
-        .args(["sh", "-c", "sleep 30"])
+    let mut child = Command::new("sh")
+        .process_group(0)
+        .args(["-c", "sleep 30"])
         .spawn()
         .expect("spawn a scratch process group");
     std::fs::write(&fx.own_pid, child.id().to_string()).unwrap();
@@ -736,6 +752,7 @@ fn interactive_launch_passes_each_managed_var_with_dash_e_before_the_command() {
             "PMTUI_STATE_DIR=/x/.project-state/sessions/s1-0a1b2c3d",
             "-e",
             "PMTUI_BIN=/bin/pmtui",
+            "exec",
             "'true'",
         ],
         "every managed var sits after the size flags and before the command: {args:?}"
@@ -1071,6 +1088,25 @@ fn a_tmux_that_cannot_run_is_an_ambiguous_probe_error() {
             matches!(&error, LaunchError::Probe(text) if text.starts_with(context)),
             "{failure}: {error:?}"
         );
+    }
+}
+
+/// The submit retry must never answer a dialog. After the first `Enter`, the scripted Codex pane
+/// shows a command approval with `1. Yes, proceed` highlighted; a second `Enter` would approve
+/// the command on the person's behalf. A pane with no prompt at all gets no retry either.
+#[test]
+fn a_codex_submit_retry_never_presses_enter_on_a_dialog_or_a_pane_without_a_prompt() {
+    let fx = ScriptedTmux::new();
+    for session in ["approval", "no-prompt"] {
+        fx.driver
+            .send_keys(session, &"x".repeat(801))
+            .unwrap_or_else(|error| panic!("{session}: {error:#}"));
+        let calls = std::fs::read_to_string(&fx.log).unwrap();
+        let enters = calls
+            .lines()
+            .filter(|line| line.ends_with(&format!("send-keys -t ={session}: Enter")))
+            .count();
+        assert_eq!(enters, 1, "{session}: a retry Enter was sent\n{calls}");
     }
 }
 

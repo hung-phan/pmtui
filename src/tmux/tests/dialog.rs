@@ -12,6 +12,64 @@ use crate::tmux::dialog_option_is_concrete;
 // ---- classify_dialog ------------------------------------------------------
 
 #[test]
+fn trae_hook_trust_prompt_is_a_human_only_dialog() {
+    let d = classify_dialog(FIXTURE_TRAE_DIALOG_HOOK_TRUST).expect("hook trust prompt recognised");
+    assert_eq!(d.question, "Hooks need review");
+    assert_eq!(
+        d.options,
+        vec![
+            "Review hooks".to_string(),
+            "Trust all and continue".to_string(),
+            "Continue without trusting (hooks won't run)".to_string(),
+        ]
+    );
+    assert_eq!(d.selected_index, Some(0));
+    assert_eq!(d.mode, PaneDialogMode::Single);
+    assert_eq!(
+        d.class,
+        PaneDialogClass::HumanOnly,
+        "trusting hooks lets them run outside the sandbox"
+    );
+}
+
+#[test]
+fn trae_signin_chooser_is_a_human_only_dialog_even_below_its_input_box() {
+    let d = classify_dialog(FIXTURE_TRAE_DIALOG_SIGNIN).expect("sign-in chooser recognised");
+    assert_eq!(d.question, "Sign in to use TRAE CLI");
+    assert_eq!(
+        d.selected_index,
+        Some(0),
+        "the ASCII `>` marks the selection"
+    );
+    assert_eq!(d.class, PaneDialogClass::HumanOnly);
+    assert_eq!(
+        d.options,
+        vec![
+            "ByteDance Employee Sign in with Codebase Git or ByteDance SSO".to_string(),
+            "Enterprise User Sign in with email, a custom domain, or a PAT".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn an_ascii_marker_is_an_option_only_inside_the_trae_signin_chooser() {
+    // A quoted numbered list in any engine's transcript must not become a dialog.
+    let quoted = concat!(
+        "Which of these should I do?\n",
+        "> 1. Rename the module\n",
+        "> 2. Keep the old name\n",
+        "Esc to cancel\n",
+    );
+    assert!(classify_dialog(quoted).is_none());
+}
+
+#[test]
+fn trae_mid_turn_is_busy() {
+    assert_eq!(classify_pane(FIXTURE_TRAE_BUSY), PaneActivity::Busy);
+    assert!(classify_dialog(FIXTURE_TRAE_BUSY).is_none());
+}
+
+#[test]
 fn real_permission_dialog_yields_the_question_and_all_three_options() {
     // THE captured case. First the motivating bug, asserted so it can't silently
     // stop being the reason this exists: a dialog pane has no bare prompt and no

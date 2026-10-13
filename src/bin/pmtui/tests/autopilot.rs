@@ -68,6 +68,40 @@ fn cycle_tier_updates_per_session_config_for_agent_loop() {
 }
 
 #[test]
+fn m_allows_trae_autopilot_after_confirming_the_goal() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reg_path, root) = reg_with_agent_loop(dir.path(), "bot");
+    Registry::update(&reg_path, |registry| {
+        registry.projects[0].engine = Some(Engine::Trae);
+    })
+    .unwrap();
+    let _held = hold_current_daemon(&reg_path, "pm-test");
+
+    let mut app = loop_app(&reg_path);
+    app.cycle_tier();
+
+    assert!(
+        matches!(
+            app.mode,
+            UiMode::EditingGoal {
+                then_autopilot: true,
+                ..
+            }
+        ),
+        "TraeX takes the same goal confirmation path as other Autopilot engines: {:?}",
+        app.mode
+    );
+    assert_eq!(tier_on_disk(&root, "bot"), Tier::Standard);
+    app.submit_goal_edit();
+    assert_eq!(tier_on_disk(&root, "bot"), Tier::Autopilot);
+    assert!(
+        app.status.contains("Autopilot") && app.status.contains("already running"),
+        "{}",
+        app.status
+    );
+}
+
+#[test]
 fn daemon_refresh_failure_keeps_the_session_on_standard() {
     let dir = tempfile::tempdir().unwrap();
     let (reg_path, root) = reg_with_agent_loop(dir.path(), "bot");

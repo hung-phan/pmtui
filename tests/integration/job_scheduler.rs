@@ -534,6 +534,9 @@ fn sweep_until(
     let start = Instant::now();
     let clock = SystemClock;
     while start.elapsed() < bound {
+        if done() {
+            return true;
+        }
         let out = sched.tick(driver, &clock);
         if std::env::var("PM_TEST_TRACE").is_ok() {
             let shown = match &out {
@@ -908,7 +911,7 @@ draw() {{
 draw
 while :; do
   c=$(dd bs=1 count=1 2>/dev/null)
-  if [ -z "$c" ]; then
+  if [ -z "$c" ] || [ "$c" = "$(printf '\r')" ]; then
     # Claude advances one row after toggling a checkbox.
     case "$cursor" in
       1) c1=$((1-c1)); cursor=2; draw ;;
@@ -921,6 +924,7 @@ while :; do
           "$([ "$c2" = 1 ] && printf 2)" \
           "$([ "$c3" = 1 ] && printf 3)" \
           "$([ "$c4" = 1 ] && printf 4)" > '{}'
+        printf '\033[2J\033[H> \n'
         sleep 5
         ;;
     esac
@@ -1203,11 +1207,35 @@ fn the_next_nudge_echoes_the_agents_reported_next_step() {
 /// opening line. The whole ~4 KB prompt is teed line-by-line into `@TYPED@`, and this
 /// first line appears exactly once per nudge, so it is the deterministic nudge counter
 /// (a substring of the wrapped body could straddle a line boundary — this cannot).
+const NUDGE_DELIVERY_FLOOR: &str = "sends no messages on your behalf";
+
 fn nudges_in(typed: &str) -> usize {
     typed
         .lines()
         .filter(|l| l.starts_with("You are a long-running agent"))
         .count()
+}
+
+fn nudge_delivery_complete(typed: &str, want_nudges: usize) -> bool {
+    nudges_in(typed) >= want_nudges && typed.matches(NUDGE_DELIVERY_FLOOR).count() >= want_nudges
+}
+
+#[test]
+fn nudge_delivery_waits_for_the_invariant_line_from_each_nudge() {
+    let partial = "You are a long-running agent working toward the goal below on a heartbeat.\n";
+
+    assert!(
+        !nudge_delivery_complete(partial, 1),
+        "the first line alone does not prove the full paste reached the pane"
+    );
+    assert!(
+        !nudge_delivery_complete(&format!("{partial}{partial}{NUDGE_DELIVERY_FLOOR}\n"), 2,),
+        "a later nudge can still be partial even after an earlier full nudge landed"
+    );
+    assert!(nudge_delivery_complete(
+        &format!("{partial}{NUDGE_DELIVERY_FLOOR}\n{partial}{NUDGE_DELIVERY_FLOOR}\n"),
+        2,
+    ));
 }
 
 /// L2-1 (BASELINE, real tmux): a disposed `working` decision lands in
@@ -1399,7 +1427,7 @@ fn typed_after_nudges(prefix: &str, id: &str, goal: &str, want_nudges: usize) ->
     );
     let _ = sweep_until(&mut sched, &driver, Duration::from_secs(60), || {
         std::fs::read_to_string(&typed)
-            .map(|s| nudges_in(&s) >= want_nudges)
+            .map(|s| nudge_delivery_complete(&s, want_nudges))
             .unwrap_or(false)
     });
     let typed_contents = std::fs::read_to_string(&typed).unwrap_or_default();
@@ -1509,7 +1537,7 @@ fn the_no_messages_floor_reaches_a_live_nudged_pane() {
         1,
     );
     assert!(
-        typed.contains("sends no messages on your behalf"),
+        typed.contains(NUDGE_DELIVERY_FLOOR),
         "the non-negotiable rule must survive every degrade path; @TYPED@ held:\n{typed}"
     );
     // ONE wake types the nudge EXACTLY once — over real tmux, from the bytes the pane received
@@ -1522,7 +1550,7 @@ fn the_no_messages_floor_reaches_a_live_nudged_pane() {
         "one wake must type exactly ONE nudge:\n{typed}"
     );
     assert_eq!(
-        typed.matches("sends no messages on your behalf").count(),
+        typed.matches(NUDGE_DELIVERY_FLOOR).count(),
         1,
         "the floor must be typed exactly once per nudge (no double-type):\n{typed}"
     );

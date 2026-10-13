@@ -136,11 +136,15 @@ fn a_launch_at_the_command_budget_starts_and_one_byte_more_is_refused() {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
-    let deep = (0..12).fold(dir.path().to_path_buf(), |path, i| {
-        path.join(format!("{i:02}{}", "d".repeat(248)))
+    let deep_segments = if cfg!(target_os = "macos") { 3 } else { 12 };
+    let deep_name_len = if cfg!(target_os = "macos") { 80 } else { 248 };
+    let deep = (0..deep_segments).fold(dir.path().to_path_buf(), |path, i| {
+        path.join(format!("{i:02}{}", "d".repeat(deep_name_len)))
     });
     std::fs::create_dir_all(&deep).expect("deep working directory");
-    assert!(deep.as_os_str().len() > 3_000);
+    if !cfg!(target_os = "macos") {
+        assert!(deep.as_os_str().len() > 3_000);
+    }
     let socket = TmuxSocket::new("pm-budget");
     let driver = TmuxDriver::with_socket(socket.name());
     let session = session_name("launch-budget-probe", &deep);

@@ -249,7 +249,10 @@ fn opening_the_form_fills_the_list_before_any_key() {
 
 #[test]
 fn the_ghost_renders_after_the_caret_in_dim_above_the_candidate_list() {
-    let d = tempfile::tempdir().unwrap();
+    let d = tempfile::Builder::new()
+        .prefix("pmtui-dc")
+        .tempdir_in("/tmp")
+        .unwrap();
     for c in ["project-alpha", "project-beta"] {
         std::fs::create_dir_all(d.path().join(c)).unwrap();
     }

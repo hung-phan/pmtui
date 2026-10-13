@@ -57,12 +57,13 @@ pub(crate) enum PreviewLog {
     Step(u64),
     /// A JOB's own `job.log`, rendered rather than captured.
     ///
-    /// A job runs `claude -p --output-format stream-json` / `codex exec --json`, so its PANE is a wall
-    /// of machine-readable events — user, looking at one: *"it use the text in raw transcript format and
-    /// it is hard to view"*. The wrapper tees that stream to `job.log`, so the file is the same content
-    /// the pane shows and [`agent_manager::stream_json::render_transcript`] turns it into the prose, tool
-    /// lines and ending a human wants. Ranked ABOVE the live pane for a job, because the pane is the
-    /// unreadable copy of this.
+    /// A job runs `claude -p --output-format stream-json`, `codex exec --json`, or `traex exec
+    /// --json`, so its PANE is a wall of machine-readable events — user, looking at one: *"it use the
+    /// text in raw transcript format and it is hard to view"*. The wrapper tees that stream to
+    /// `job.log`, so the file is the same content the pane shows and
+    /// [`agent_manager::stream_json::render_transcript`] turns it into the prose, tool lines and ending
+    /// a human wants. Ranked ABOVE the live pane for a job, because the pane is the unreadable copy of
+    /// this.
     Job,
     /// Nothing to show, plus the HONEST reason. Never says "no wakes yet" when the
     /// real situation is "the agent session isn't up".

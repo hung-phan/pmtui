@@ -111,6 +111,10 @@ fn worker_skill_paths_are_correct() {
         paths.native_worker_skill_file(crate::registry::Engine::Codex),
         paths.canonical_worker_skill_file()
     );
+    assert_eq!(
+        paths.native_worker_skill_file(crate::registry::Engine::Trae),
+        paths.canonical_worker_skill_file()
+    );
 }
 
 #[test]

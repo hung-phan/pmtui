@@ -132,18 +132,27 @@ pub(crate) fn agent_loop_enter(
 /// exactly the codex case, which has no caller-chosen id to record in either. Before this, a codex
 /// session that had run for hours still looked never-woken, so Enter opened a SECOND conversation
 /// and the first became unreachable.
+///
+/// TraeX is the exception: ONLY the captured id counts. pmtui may name a TraeX conversation with
+/// `--session-id`, but TraeX stores that as a thread NAME, and `traex resume <uuid>` looks a UUID up
+/// as a thread id only — so a recorded name never resumes, with or without a turn (measured on
+/// traex 0.209.1). The thread id its `Stop` hook reports is the one value it resumes.
 pub(crate) fn effective_id(
+    engine: Engine,
     ledger_cid: Option<&str>,
     registry_cid: Option<&str>,
     captured_cid: Option<&str>,
 ) -> Option<String> {
+    if engine == Engine::Trae {
+        return captured_cid.map(str::to_string);
+    }
     ledger_cid
         .or(registry_cid)
         .or(captured_cid)
         .map(str::to_string)
 }
 
-/// The id codex's own turn hook recorded for this session, validated.
+/// The id the engine's own turn hook recorded for this session (codex or TraeX), validated.
 ///
 /// A thin alias over [`agent_manager::state::codex_identity`], which pmd reads too — ONE rule,
 /// two readers, so the dashboard and the daemon can never disagree about which conversation a
@@ -159,11 +168,11 @@ pub(crate) fn read_captured_conversation_id(paths: &ProjectPaths) -> Option<Stri
 /// `request_attach`.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum FirstWakeAction {
-    /// claude + free lock ⇒ CREATE-and-chat immediately (mint an id, seed the
+    /// caller-pinned engine + free lock ⇒ CREATE-and-chat immediately (mint an id, seed the
     /// registry, hold the lease through the REPL). Carries no copy — the caller
     /// builds the create status once the mint/seed succeeds.
     CreateAndChat,
-    /// pmd is driving (claude or codex + held lock) ⇒ ARM the auto-open and show
+    /// pmd is driving (any engine + held lock) ⇒ ARM the auto-open and show
     /// this honest status meanwhile.
     Arm(String),
     /// codex + free lock (pmd is down) ⇒ open a FRESH codex chat NOW. Codex has no
@@ -175,8 +184,8 @@ pub(crate) enum FirstWakeAction {
 }
 
 /// Decide the never-woken Enter action + copy from `(engine, lease_free)`.
-/// - claude + free lock → create-and-chat now.
-/// - claude + held lock → arm ("creating on the first wake — you'll drop in
+/// - caller-pinned engine + free lock → create-and-chat now.
+/// - caller-pinned engine + held lock → arm ("creating on the first wake — you'll drop in
 ///   automatically").
 /// - codex + held lock → arm ("codex: the conversation is created after the first
 ///   wake completes").
@@ -184,8 +193,8 @@ pub(crate) enum FirstWakeAction {
 ///   creates the conversation itself; a live REPL opens like claude's create-and-chat).
 pub(crate) fn first_wake_action(engine: Engine, lease_free: bool, id: &str) -> FirstWakeAction {
     match (engine, lease_free) {
-        (Engine::Claude, true) => FirstWakeAction::CreateAndChat,
-        (Engine::Claude, false) => FirstWakeAction::Arm(format!(
+        (Engine::Claude | Engine::Trae, true) => FirstWakeAction::CreateAndChat,
+        (Engine::Claude | Engine::Trae, false) => FirstWakeAction::Arm(format!(
             "{id}: creating on the first wake — you'll drop in automatically"
         )),
         (Engine::Codex, false) => FirstWakeAction::Arm(format!(

@@ -37,7 +37,7 @@ pub(crate) const POLL_MS: u64 = 250;
 pub(crate) const HELP: &str = concat!(
     "pmtui spawn — ask the running dashboard for a Standard child session\n\n",
     "Usage: pmtui spawn --message <text> [--title <text>] [--name <display-name>]\n",
-    "                   [--dir <existing-directory>] [--agent claude|codex] [--model <id>]\n",
+    "                   [--dir <existing-directory>] [--agent claude|codex|traex] [--model <id>]\n",
     "                   [--request-id <uuid>] [--wait <seconds>] [--json]\n",
     "       pmtui spawn --request-id <uuid> --cancel [--json]\n",
     "       pmtui spawn --status [--json]\n\n",
@@ -48,7 +48,7 @@ pub(crate) const HELP: &str = concat!(
     "--name <name>         a display name for the child\n",
     "--dir <path>          an existing folder inside this session's folder, or another session's\n",
     "                      root (default: this session's folder)\n",
-    "--agent claude|codex  the child's agent (default: this session's)\n",
+    "--agent claude|codex|traex  the child's agent (default: this session's)\n",
     "--model <id>          the child's model (default: this session's, when the agent matches)\n",
     "--request-id <uuid>   name the operation; rerun with the same id to check on it (default: new)\n",
     "--wait <seconds>      how long to wait for the child's RESULT, 0 to 120 (default: 20); a job\n",
@@ -308,7 +308,7 @@ fn parse_agent(value: &str) -> Result<Engine, String> {
     Engine::ALL
         .into_iter()
         .find(|engine| engine.label() == value)
-        .ok_or_else(|| format!("--agent must be claude or codex, not {value:?}"))
+        .ok_or_else(|| format!("--agent must be claude, codex or traex, not {value:?}"))
 }
 
 fn parse_request_id(value: String) -> Result<String, String> {
@@ -723,7 +723,7 @@ pub(crate) fn render_plain(out: &CliOutput) -> String {
         .and_then(|found| found.next_action.as_ref())
     {
         line.push_str("; next: ");
-        line.push_str(&tmux::launch_command(&next.argv));
+        line.push_str(&tmux::shell_command(&next.argv));
     }
     line
 }

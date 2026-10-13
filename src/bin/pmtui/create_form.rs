@@ -202,10 +202,11 @@ impl CreateForm {
         }
     }
     pub(crate) fn toggle_engine(&mut self) {
-        self.engine = match self.engine {
-            Engine::Claude => Engine::Codex,
-            Engine::Codex => Engine::Claude,
-        };
+        let current = Engine::ALL
+            .iter()
+            .position(|engine| *engine == self.engine)
+            .unwrap_or(0);
+        self.engine = Engine::ALL[(current + 1) % Engine::ALL.len()];
         // The model list is PER-ENGINE, so a model picked for the old engine may not exist for the
         // new one. Reset to the engine default; the App repopulates `model_choices` after the flip.
         self.worker_model = None;
@@ -213,10 +214,11 @@ impl CreateForm {
     /// Flip the DECIDER engine (Claude ↔ Codex). A no-op off the Decider field since only it
     /// routes here, and inert on Standard where the field is not even shown.
     pub(crate) fn toggle_decider_engine(&mut self) {
-        self.decider_engine = match self.decider_engine {
-            Engine::Claude => Engine::Codex,
-            Engine::Codex => Engine::Claude,
-        };
+        let current = Engine::DECIDERS
+            .iter()
+            .position(|engine| *engine == self.decider_engine)
+            .unwrap_or(0);
+        self.decider_engine = Engine::DECIDERS[(current + 1) % Engine::DECIDERS.len()];
         // The decider model list is PER-DECIDER-ENGINE, so a model picked for the old engine may not
         // exist for the new one. Reset to the engine default; the App repopulates
         // `decider_model_choices` after the flip (mirrors `toggle_engine` for the worker model).

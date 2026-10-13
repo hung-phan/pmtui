@@ -616,6 +616,7 @@ fn run_headless(
             let _ = std::fs::remove_file(&last);
             Ok((verdict, code))
         }
+        Engine::Trae => Err("TRAE decider benchmark is not implemented".into()),
     }
 }
 
@@ -1759,6 +1760,7 @@ fn the_decider_bench_scores_the_catalog() {
         .filter(|e| match e {
             Engine::Claude => claude_on_path(),
             Engine::Codex => codex_on_path(),
+            Engine::Trae => false,
         })
         .collect();
     for e in &requested {

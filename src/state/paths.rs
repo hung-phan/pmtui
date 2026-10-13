@@ -200,6 +200,9 @@ impl ProjectPaths {
     /// the session's FIRST completed turn, which is the price of asking the engine rather than
     /// guessing from its open files. SIBLING of `turn_signal` in this same directory, which is
     /// what lets the hook builder derive one path from the other.
+    ///
+    /// TraeX's thread id lands here too: `pmtui hook turn-complete` writes the `session_id` of its
+    /// `Stop` payload, with the same contract.
     pub fn codex_conversation_id(&self) -> PathBuf {
         self.daemon_dir().join("conversation-id")
     }
@@ -260,7 +263,7 @@ impl ProjectPaths {
     pub fn codex_project_skill_file(&self) -> PathBuf {
         self.canonical_worker_skill_file()
     }
-    /// The canonical project skill path for either worker engine.
+    /// The canonical project skill path for any worker engine that reads repository skills.
     pub fn native_worker_skill_file(&self, _engine: crate::registry::Engine) -> PathBuf {
         self.canonical_worker_skill_file()
     }

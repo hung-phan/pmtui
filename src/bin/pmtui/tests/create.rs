@@ -32,7 +32,9 @@ fn submit_create_seeds_agent_loop_at_selected_tier() {
     // both levels to prove the selected dial is what lands.
     for (engine, tier) in [
         (Engine::Claude, Tier::Standard),
+        (Engine::Trae, Tier::Standard),
         (Engine::Codex, Tier::Autopilot),
+        (Engine::Trae, Tier::Autopilot),
     ] {
         let dir = tempfile::tempdir().unwrap();
         let reg_path = dir.path().join("registry.json");
@@ -78,7 +80,7 @@ fn submit_create_seeds_agent_loop_at_selected_tier() {
         // minting a second one (see `a_standard_create_starts_the_agent_so_enter_only_attaches`).
         // Every other combination still leaves the id to the first wake: codex has no
         // caller-chosen id, and an Autopilot row is pmd's to launch.
-        let starts_now = engine == Engine::Claude && tier == Tier::Standard;
+        let starts_now = engine != Engine::Codex && tier == Tier::Standard;
         assert_eq!(
             e.conversation_id.is_some(),
             starts_now,
@@ -196,7 +198,7 @@ fn failed_task_create_keeps_the_completed_form_open() {
 
 #[test]
 fn standard_initial_message_is_sent_once_through_the_interactive_engine() {
-    for engine in [Engine::Claude, Engine::Codex] {
+    for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         let dir = tempfile::tempdir().unwrap();
         let reg_path = dir.path().join("registry.json");
         let project = std::fs::canonicalize({
@@ -291,7 +293,7 @@ fn creating_form(app: &App) -> CreateForm {
 fn standard_message_is_bounded_by_the_quoted_launch_command_tmux_accepts() {
     // The Message rides the launch argv into ONE `tmux new-session` command, so the limit is
     // that command's size after shell quoting, not the Message's own byte count.
-    for engine in [Engine::Claude, Engine::Codex] {
+    for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         let dir = tempfile::tempdir().unwrap();
         let reg_path = dir.path().join("registry.json");
         let project = std::fs::canonicalize({
@@ -675,7 +677,7 @@ fn wait_for_the_create_lease(project: &Path) {
 
 #[test]
 fn enter_retry_keeps_the_initial_message_for_the_first_successful_launch() {
-    for engine in [Engine::Claude, Engine::Codex] {
+    for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         let dir = tempfile::tempdir().unwrap();
         let reg_path = dir.path().join("registry.json");
         let project = dir.path().join("project");
@@ -700,7 +702,7 @@ fn enter_retry_keeps_the_initial_message_for_the_first_successful_launch() {
         wait_for_the_create_lease(&project);
         handle_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
         let argv = match engine {
-            Engine::Claude => app
+            Engine::Claude | Engine::Trae => app
                 .pending_create_chat
                 .as_ref()
                 .map(|request| request.argv.clone()),
@@ -721,7 +723,7 @@ fn enter_retry_keeps_the_initial_message_for_the_first_successful_launch() {
             "{engine:?}: initial Message was lost on retry"
         );
         match engine {
-            Engine::Claude => drain_pending_create_chat(&mut app, |_| Ok(true)),
+            Engine::Claude | Engine::Trae => drain_pending_create_chat(&mut app, |_| Ok(true)),
             Engine::Codex => drain_pending_chat(&mut app, |_| Ok(true)),
         }
         assert!(

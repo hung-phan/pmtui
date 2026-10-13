@@ -66,16 +66,18 @@ done
     let socket = TmuxSocket::new(match engine {
         Engine::Claude => "am-direct-claude",
         Engine::Codex => "am-direct-codex",
+        Engine::Trae => panic!("TRAE direct dispatch is not covered by this Claude/Codex test"),
     });
     let host_socket = TmuxSocket::new(match engine {
         Engine::Claude => "am-direct-host-claude",
         Engine::Codex => "am-direct-host-codex",
+        Engine::Trae => panic!("TRAE direct dispatch is not covered by this Claude/Codex test"),
     });
     let host = format!("direct-host-{}-{}", engine.label(), std::process::id());
     let driver = TmuxDriver::with_socket(socket.name());
     let host_driver = TmuxDriver::with_socket(host_socket.name());
     let command = format!(
-        "PATH='{}':\"$PATH\" exec '{}' --socket '{}' --registry '{}'",
+        "PATH='{}':\"$PATH\" PM_TURN_HOOK=off exec '{}' --socket '{}' --registry '{}'",
         bin.display(),
         env!("CARGO_BIN_EXE_pmtui"),
         socket.name(),
@@ -112,6 +114,7 @@ done
                     && wait_for_pane_text(&host_driver, &host, "< codex >")
                     && send_key(host_socket.name(), &host, "BTab")
             }
+            Engine::Trae => panic!("TRAE direct dispatch is not covered by this Claude/Codex test"),
         };
     let message = format!("DIRECT_{}_OK", engine.label().to_ascii_uppercase());
     let submitted = selected

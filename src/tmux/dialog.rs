@@ -184,9 +184,10 @@ pub(super) const DIALOG_MAX_QUESTION_GAP: usize = 4;
 /// Scanning BACKWARDS returns the LOWEST matching block, i.e. the live dialog
 /// rather than an older one still visible further up the transcript.
 ///
-/// ONE PHRASE-ANCHORED EXCEPTION runs afterwards, only on a window these rules have
-/// already declined: codex's **startup trust dialog**
-/// ([`classify_codex_trust_dialog`]). Two clauses above reject it — its `?` sits
+/// PHRASE-ANCHORED EXCEPTIONS run afterwards, only on a window these rules have
+/// already declined: TraeX's hook trust prompt ([`classify_trae_hook_trust_dialog`]) and
+/// sign-in chooser ([`classify_trae_signin_dialog`]), and codex's **startup trust dialog**
+/// ([`classify_codex_trust_dialog`]). Two clauses above reject the codex one — its `?` sits
 /// mid-line in a wrapped paragraph, and its footer is `Press enter to continue`, not
 /// `Esc to cancel` — and neither clause is widened to let it in, because "a mid-line
 /// `?` plus a bare press-enter footer" describes a large amount of ordinary prose and
@@ -250,6 +251,8 @@ pub fn classify_dialog(capture: &str) -> Option<PaneDialog> {
         }
     }
     classify_codex_trust_dialog(window)
+        .or_else(|| classify_trae_hook_trust_dialog(window))
+        .or_else(|| classify_trae_signin_dialog(window))
 }
 
 /// Content anchors that identify authority-changing prompts even if a future CLI
@@ -361,6 +364,8 @@ fn dialog_block_boundary(line: &str) -> bool {
     trimmed.is_empty()
         || lower.contains("esc to cancel")
         || lower.starts_with("press enter to")
+        // TraeX's footer, drawn with no blank row after the last option.
+        || lower.starts_with("enter confirm")
         || trimmed
             .chars()
             .all(|c| matches!(c, '─' | '━' | '═' | '-' | ' '))
@@ -450,6 +455,102 @@ fn classify_codex_trust_dialog(window: &[&str]) -> Option<PaneDialog> {
             checked_indices: Vec::new(),
             class: PaneDialogClass::HumanOnly,
             context_hash: dialog_context_hash(window, q, collected.start),
+        });
+    }
+    None
+}
+
+const TRAE_HOOK_TRUST_HEADING: &str = "hooks need review";
+const TRAE_SIGNIN_HEADING: &str = "sign in to use trae cli";
+
+/// Recognise TraeX's hook trust prompt on a window the general rules declined.
+///
+/// TraeX shows it at launch when a hook is new or changed — which pmtui's own turn-complete
+/// `Stop` hook is, the first time — and accepts no prompt until a person answers it:
+///
+/// ```text
+///   Hooks need review
+///   1 hook is new or changed.
+///   Hooks can run outside the sandbox after you trust them.
+/// ❯ 1. Review hooks
+///   2. Trust all and continue
+///   3. Continue without trusting (hooks won't run)
+///   enter confirm  |  esc go back
+/// ```
+///
+/// The general rule misses it twice: the heading has no `?`, and the footer is not
+/// `Esc to cancel`. Without this, the pane reads `Busy` and an Autopilot session waits there
+/// silently instead of asking its person. Trusting hooks lets them run outside the sandbox, so
+/// the prompt is human-only, and nothing in this module answers it.
+fn classify_trae_hook_trust_dialog(window: &[&str]) -> Option<PaneDialog> {
+    classify_trae_anchored_dialog(window, TRAE_HOOK_TRUST_HEADING, |lines| {
+        lines.iter().map(|line| (*line).to_string()).collect()
+    })
+}
+
+/// Recognise TraeX's sign-in chooser on a window the general rules declined.
+///
+/// TraeX shows it before its first sign-in, and it may sit BELOW TraeX's own input box, so a
+/// prompt on screen does not mean the pane takes text:
+///
+/// ```text
+///   Sign in to use TRAE CLI
+/// > 1. ByteDance Employee
+///      Sign in with Codebase Git or ByteDance SSO
+///   2. Enterprise User
+///      Sign in with email, a custom domain, or a PAT
+///   Press Enter to continue
+/// ```
+///
+/// It marks the selected choice with a plain ASCII `>`. That marker is accepted HERE ONLY, by
+/// rewriting it to `❯` in a copy of the window: accepting `>` in the shared option parser
+/// would turn a quoted `> 1. step` in any engine's transcript into a dialog option. Choosing an
+/// account route is the person's decision, so the chooser is human-only.
+fn classify_trae_signin_dialog(window: &[&str]) -> Option<PaneDialog> {
+    classify_trae_anchored_dialog(window, TRAE_SIGNIN_HEADING, |lines| {
+        lines
+            .iter()
+            .map(|line| {
+                let rest = line.trim_start();
+                match rest.strip_prefix('>') {
+                    Some(after) if dialog_option_text(after).is_some() => format!("❯{after}"),
+                    _ => (*line).to_string(),
+                }
+            })
+            .collect()
+    })
+}
+
+/// A human-only dialog led by the line `heading` (matched whole, case-insensitively), with
+/// [`DIALOG_MIN_OPTIONS`]+ options below it. `normalise` rewrites the window before the
+/// options are collected; the reported dialog keeps the original heading text.
+fn classify_trae_anchored_dialog<F>(
+    window: &[&str],
+    heading: &str,
+    normalise: F,
+) -> Option<PaneDialog>
+where
+    F: Fn(&[&str]) -> Vec<String>,
+{
+    let normalised = normalise(window);
+    let normalised: Vec<&str> = normalised.iter().map(String::as_str).collect();
+    for q in (0..normalised.len()).rev() {
+        let trimmed = normalised[q].trim();
+        if !trimmed.eq_ignore_ascii_case(heading) {
+            continue;
+        }
+        let collected = collect_dialog_options(&normalised, q);
+        if collected.options.len() < DIALOG_MIN_OPTIONS {
+            continue;
+        }
+        return Some(PaneDialog {
+            question: trimmed.to_string(),
+            options: collected.options,
+            selected_index: collected.selected_index,
+            mode: PaneDialogMode::Single,
+            checked_indices: Vec::new(),
+            class: PaneDialogClass::HumanOnly,
+            context_hash: dialog_context_hash(&normalised, q, collected.start),
         });
     }
     None

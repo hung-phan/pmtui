@@ -521,6 +521,21 @@ fn first_wake_action_routes_and_copies_per_engine_and_lease() {
         }
         other => panic!("codex+free must be CreateChatNoSeed, got {other:?}"),
     }
+    // trae + free lock behaves like claude: pmtui owns the session id, so it can
+    // create-and-chat without waiting for a daemon wake.
+    assert_eq!(
+        first_wake_action(Engine::Trae, true, "bot"),
+        FirstWakeAction::CreateAndChat
+    );
+    // trae + held lock still arms; the daemon guard later refuses TRAE Autopilot
+    // rather than constructing an untested loop command.
+    match first_wake_action(Engine::Trae, false, "bot") {
+        FirstWakeAction::Arm(s) => {
+            assert!(s.contains("creating on the first wake"), "{s}");
+            assert!(s.contains("automatically"), "{s}");
+        }
+        other => panic!("trae+held must ARM, got {other:?}"),
+    }
 }
 
 #[test]

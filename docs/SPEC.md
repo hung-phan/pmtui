@@ -43,8 +43,9 @@ An agent that works alone has two opposite faults:
 - it stops the person to ask about routine choices that the goal already answers; or
 - it becomes idle, blocked, repetitive or unavailable, and does not make this clear.
 
-agent-manager keeps Claude and Codex sessions at work on a goal that a person writes. It sends only the
-decisions that a person must make to that person.
+agent-manager manages Claude, Codex, and TRAE CLI sessions around a goal that a person writes.
+TRAE CLI launches use the current `traex` binary. Autopilot keeps Claude, Codex, and TRAE CLI sessions
+at work. It sends only the decisions that a person must make to that person.
 
 agent-manager adds automation above the permission modes of the engines. It does not replace those modes,
 and it does not give permission to use a tool.
@@ -64,7 +65,7 @@ yourself.
 
 ### In Scope
 
-- persistent Claude and Codex sessions;
+- persistent Claude, Codex, and TRAE CLI sessions;
 - the Standard mode and the Autopilot mode;
 - nudges, monitoring, and detection of no progress;
 - decisions that a worker raises, and the terminal menus that the product can read;
@@ -81,7 +82,7 @@ yourself.
 - a workflow engine that makes its own plan;
 - publishing, merging, deployment, use of credentials, payments or destructive actions without a person;
 - a statement that a project is complete, without a person;
-- any way around the permission, trust or command approval of Claude or Codex; or
+- any way around the permission, trust or command approval of Claude, Codex, or TRAE CLI; or
 - a dashboard that hides the agent from the person.
 
 ## 3. Product Model
@@ -92,7 +93,7 @@ yourself.
 |---|---|
 | **Dashboard** | the view and the controls for the person |
 | **Supervisor** | the driver for Autopilot sessions. It is optional. |
-| **Worker** | the Claude or Codex agent that does the project work |
+| **Worker** | the Claude, Codex, or TRAE CLI agent that does the project work |
 | **Decider** | a read-only consult that answers one routine decision from the goal and the project |
 
 ### Technical Names
@@ -574,6 +575,16 @@ For each Autopilot session that is enabled, the supervisor:
 The supervisor MUST NOT make a second conversation for Autopilot. The person and the supervisor use one
 persistent terminal.
 
+The supervisor MAY install an engine hook that records a completed turn. Claude uses a Stop hook. Codex
+uses its notify hook. TRAE CLI uses a `hooks.Stop` command that runs `pmtui hook turn-complete`; that
+command derives the signal path from the managed-session environment, so the trusted hook command is stable
+across sessions. The product MUST NOT bypass hook trust. If the engine asks a person to review the hook, the
+prompt stays in the terminal for that person.
+
+Project-local skills MUST be written once under `.agents/skills/`, which Codex and TraeX discover. Claude
+MAY also receive exact per-skill compatibility symlinks under `.claude/skills/`. The product MUST NOT
+create or edit the user's `AGENTS.md` to deliver a skill.
+
 If an Autopilot session waits for a decision from a person, and the product cannot read its mode setting,
 the supervisor stays available. It MUST NOT type until it can read the setting again. An explicit Standard
 setting stays in force.
@@ -803,8 +814,8 @@ Autopilot handles a decision in three separate layers:
 
 1. **The fixed boundary.** Categories and explicit effects name the decisions that stay with a person.
 2. **The goal-aware answer.** The read-only decider takes the routine decisions that are eligible.
-3. **The permission of the engine.** Claude or Codex still enforces its own permission, trust and command
-   approval for each tool action.
+3. **The permission of the engine.** Claude, Codex, or TRAE CLI still enforces its own permission,
+   trust and command approval for each tool action.
 
 To pass one layer MUST NOT give a way past another layer.
 
@@ -1012,7 +1023,9 @@ happen again. A restart MUST NOT do any of these:
   that closed.
 - To resume or to restart a conversation needs an exact identity.
 - Some engines do not accept an identity from the product. For those, the product MUST learn the identity
-  the engine assigned, and MUST keep it with the session.
+  the engine assigned, and MUST keep it with the session. An engine that accepts a name from the product
+  but cannot resume by that name is in this group, and the product MUST resume it only by the identity
+  the engine reported.
   - It MUST take that identity from what the engine itself reports. It MUST NOT read the private files of
     a running engine to guess it.
   - To restart such a session MUST resume the identity it learned. A restart MUST NOT start a second

@@ -5,6 +5,11 @@
 //! can do is listen. Codex's `notify` hook fires on `agent-turn-complete` with a payload carrying
 //! `thread_id`, and [`crate::worker`] wires that hook to write the id beside the turn signal.
 //!
+//! TraeX reports its thread the same way: its `Stop` hook payload carries `session_id`, and
+//! `pmtui hook turn-complete` writes it to the same file. TraeX does accept a `--session-id`, but
+//! keeps it as a thread NAME that `traex resume` cannot open, so for TraeX this file is the ONLY
+//! resumable id.
+//!
 //! ONE RULE, TWO READERS, like [`super::turn_signal`]: pmd adopts the id into its ledger so a
 //! relaunch RESUMES instead of starting over, and pmtui reads it so `Enter` resumes instead of
 //! opening a second conversation. Both were blind before — a codex session that had run for hours

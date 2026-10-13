@@ -560,8 +560,10 @@ impl JobScheduler {
         // `conversation_id` could land first and win permanently, and nothing authoritative existed
         // to compare it against. Reconciling here closes the window, and lets the ledger converge
         // after any fresh start — which is what makes the one-shot `resume_unconfirmed` dance
-        // unnecessary for codex (see `mint_or_fresh`).
-        if self.engine == Engine::Codex
+        // unnecessary for codex (see `mint_or_fresh`). TraeX reports its thread id the same way,
+        // through its `Stop` hook, and that id is the only one it resumes (see
+        // `resolve_conversation_id`).
+        if matches!(self.engine, Engine::Codex | Engine::Trae)
             && let Some(id) = state::codex_identity::read(&self.paths)
             && ledger.conversation_id.as_deref() != Some(id.as_str())
         {

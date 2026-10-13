@@ -40,11 +40,15 @@ fn managed_env_names_the_session_its_state_dir_and_this_pmtui() {
 
 #[test]
 fn a_standard_create_launches_its_terminal_with_the_new_sessions_identity() {
-    for engine in [Engine::Claude, Engine::Codex] {
+    for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         let dir = tempfile::tempdir().unwrap();
         let reg_path = dir.path().join("registry.json");
-        let project = dir.path().join("project");
-        std::fs::create_dir_all(&project).unwrap();
+        let project = std::fs::canonicalize({
+            let p = dir.path().join("project");
+            std::fs::create_dir_all(&p).unwrap();
+            p
+        })
+        .unwrap();
         let mut app = creating_loop_app(&reg_path, &project, engine, Tier::Standard, "goal", 300);
         let pane = FakePane::default();
         app.agent_tmux = Box::new(pane.clone());
@@ -71,12 +75,12 @@ fn a_standard_create_launches_its_terminal_with_the_new_sessions_identity() {
 
 #[test]
 fn a_launch_refused_before_tmux_reaches_the_human_in_the_drivers_words() {
-    for engine in [Engine::Claude, Engine::Codex] {
+    for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         let dir = tempfile::tempdir().unwrap();
         let pane = FakePane::default();
         let mut app = app_with_driver(vec![], UiMode::Normal, Box::new(pane.clone()));
         let session = session_name("bot", dir.path());
-        let bin = engine.label().to_string();
+        let bin = engine.bin().to_string();
         pane.arm_launch_error(&session, tmux::LaunchError::NotOnPath(bin.clone()));
 
         let outcome = app.start_undriven_session("bot", dir.path(), engine, None, None, None);
@@ -100,11 +104,15 @@ fn a_launch_refused_before_tmux_reaches_the_human_in_the_drivers_words() {
 fn enter_queues_every_chat_launch_with_the_sessions_identity() {
     // First Enter on a Standard row whose immediate launch failed: Claude creates its
     // conversation (`CreateChatReq`), Codex opens a fresh chat (`ChatReq`).
-    for engine in [Engine::Claude, Engine::Codex] {
+    for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         let dir = tempfile::tempdir().unwrap();
         let reg_path = dir.path().join("registry.json");
-        let project = dir.path().join("project");
-        std::fs::create_dir_all(&project).unwrap();
+        let project = std::fs::canonicalize({
+            let p = dir.path().join("project");
+            std::fs::create_dir_all(&p).unwrap();
+            p
+        })
+        .unwrap();
         let mut app =
             creating_loop_app(&reg_path, &project, engine, Tier::Standard, "message", 300);
         app.agent_tmux = Box::new(FakePane::default().with(|inner| inner.fail_launch = true));
@@ -120,7 +128,9 @@ fn enter_queues_every_chat_launch_with_the_sessions_identity() {
         handle_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
 
         let env = match engine {
-            Engine::Claude => app.pending_create_chat.as_ref().map(|req| req.env.clone()),
+            Engine::Claude | Engine::Trae => {
+                app.pending_create_chat.as_ref().map(|req| req.env.clone())
+            }
             Engine::Codex => app.pending_chat.as_ref().map(|req| req.env.clone()),
         };
         assert_eq!(

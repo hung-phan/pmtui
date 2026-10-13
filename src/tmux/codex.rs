@@ -2,17 +2,26 @@
 //! Codex opens its active rollout JSONL for the life of the session, so the process's
 //! file descriptors are a stronger binding than cwd-wide "latest session" scans.
 
+#[cfg(any(target_os = "linux", test))]
 use std::collections::{BTreeSet, HashSet, VecDeque};
+#[cfg(any(target_os = "linux", test))]
 use std::fs::File;
+#[cfg(any(target_os = "linux", test))]
 use std::io::{BufRead, BufReader, Read};
+#[cfg(any(target_os = "linux", test))]
 use std::path::{Path, PathBuf};
 
+#[cfg(any(target_os = "linux", test))]
 use anyhow::{Context, Result, bail};
+#[cfg(any(target_os = "linux", test))]
 use serde::Deserialize;
 
+#[cfg(any(target_os = "linux", test))]
 const MAX_SESSION_META_BYTES: u64 = 1024 * 1024;
+#[cfg(any(target_os = "linux", test))]
 const ESRCH: i32 = 3;
 
+#[cfg(any(target_os = "linux", test))]
 #[derive(Deserialize)]
 struct RolloutRecord {
     #[serde(rename = "type")]
@@ -20,6 +29,7 @@ struct RolloutRecord {
     payload: RolloutMeta,
 }
 
+#[cfg(any(target_os = "linux", test))]
 #[derive(Deserialize)]
 struct RolloutMeta {
     #[serde(default)]
@@ -30,6 +40,7 @@ struct RolloutMeta {
     thread_source: String,
 }
 
+#[cfg(any(target_os = "linux", test))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct ProcessIdentity {
     pub(super) pid: u32,
@@ -43,6 +54,7 @@ pub(super) struct ProcessIdentity {
 /// metadata ID, canonical project cwd, and `thread_source=user`. Subagent rollouts
 /// are deliberately ignored because Codex refuses new user turns on those threads.
 /// More than one distinct user rollout is ambiguous and therefore an error.
+#[cfg(any(target_os = "linux", test))]
 pub(super) fn session_id_from_proc(
     proc_root: &Path,
     root_pid: u32,
@@ -113,6 +125,7 @@ pub(super) fn session_id_from_proc(
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub(super) fn process_tree(proc_root: &Path, root_pid: u32) -> Result<Vec<ProcessIdentity>> {
     let root = process_identity(proc_root, root_pid)?
         .with_context(|| format!("Codex pane process {root_pid} disappeared"))?;
@@ -148,6 +161,7 @@ pub(super) fn process_tree(proc_root: &Path, root_pid: u32) -> Result<Vec<Proces
     Ok(processes)
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub(super) fn process_children(proc_root: &Path, pid: u32) -> Result<Vec<ProcessIdentity>> {
     let task_dir = proc_root.join(pid.to_string()).join("task");
     let tasks = match std::fs::read_dir(&task_dir) {
@@ -181,6 +195,7 @@ pub(super) fn process_children(proc_root: &Path, pid: u32) -> Result<Vec<Process
     Ok(children)
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub(super) fn process_identity(proc_root: &Path, pid: u32) -> Result<Option<ProcessIdentity>> {
     let stat_path = proc_root.join(pid.to_string()).join("stat");
     let stat = match std::fs::read_to_string(&stat_path) {
@@ -197,10 +212,12 @@ pub(super) fn process_identity(proc_root: &Path, pid: u32) -> Result<Option<Proc
     }))
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn same_process(proc_root: &Path, expected: ProcessIdentity) -> Result<bool> {
     Ok(process_identity(proc_root, expected.pid)? == Some(expected))
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub(super) fn process_is_current(
     same: bool,
     pid: u32,
@@ -216,6 +233,7 @@ pub(super) fn process_is_current(
     Ok(false)
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub(super) fn process_parent_and_start_time(stat: &str) -> Result<(u32, u64)> {
     let comm_end = stat
         .rfind(") ")
@@ -235,10 +253,12 @@ pub(super) fn process_parent_and_start_time(stat: &str) -> Result<(u32, u64)> {
     Ok((parent_pid, start_time))
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub(super) fn process_path_gone(err: &std::io::Error) -> bool {
     err.kind() == std::io::ErrorKind::NotFound || err.raw_os_error() == Some(ESRCH)
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub(super) fn live_proc_entry<T>(
     entry: std::io::Result<T>,
     context: &'static str,
@@ -250,6 +270,7 @@ pub(super) fn live_proc_entry<T>(
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub(super) fn collect_live_entries<T>(
     entries: impl IntoIterator<Item = std::io::Result<T>>,
     context: &'static str,
@@ -263,6 +284,7 @@ pub(super) fn collect_live_entries<T>(
     Ok(live)
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub(super) fn is_codex_process(proc_root: &Path, pid: u32) -> Result<bool> {
     let cmdline_path = proc_root.join(pid.to_string()).join("cmdline");
     let cmdline = match std::fs::read(&cmdline_path) {
@@ -281,6 +303,7 @@ pub(super) fn is_codex_process(proc_root: &Path, pid: u32) -> Result<bool> {
         .any(|name| name == "codex" || name == "codex.exe" || name.starts_with("codex-")))
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub(super) fn rollout_from_path(path: &Path) -> Option<(PathBuf, String)> {
     if path.to_string_lossy().ends_with(" (deleted)") {
         return None;
@@ -308,6 +331,7 @@ pub(super) fn is_uuid(value: &str) -> bool {
         })
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub(super) fn validated_rollout(
     fd_path: &Path,
     rollout_path: &Path,

@@ -703,6 +703,105 @@ fn loop_nudge_prompt_writes_the_marker_instruction() {
     assert!(p2.contains("the human said: go"));
 }
 
+/// TRAE sees the `pmtui-spawn` skill and can run it end to end, but never chose it unprompted, so
+/// its nudge names the skill — and ONLY when it is installed. Claude and Codex choose it alone.
+#[test]
+fn only_a_trae_nudge_names_the_spawn_skill_and_only_when_it_is_installed() {
+    let marker = std::path::Path::new("/tmp/proj/.project-state/sessions/s/needs-you.json");
+    let since = SinceLastWake::default();
+    let line = "use your `pmtui-spawn` skill";
+    let render = |engine, spawn_skill| {
+        loop_nudge_prompt_for_engine(
+            LoopNudgePromptInput::new("goal", "", "", "", &since, true, marker)
+                .with_spawn_skill(spawn_skill),
+            engine,
+        )
+    };
+    assert!(render(Engine::Trae, true).contains(line));
+    assert!(
+        !render(Engine::Trae, false).contains(line),
+        "no skill, no pointer"
+    );
+    for engine in [Engine::Claude, Engine::Codex] {
+        assert!(!render(engine, true).contains(line), "{engine:?}");
+    }
+}
+
+#[test]
+fn the_scheduler_names_the_spawn_skill_only_once_it_is_on_disk() {
+    let fx = setup(Tier::Autopilot, Engine::Trae, Some(300));
+    let base = ledger(&fx);
+    let line = "use your `pmtui-spawn` skill";
+    assert!(
+        !fx.sched
+            .compose_nudge(&base, START, false, false)
+            .contains(line)
+    );
+
+    let skill = fx.sched.work_dir.join(crate::skills::SPAWN_SKILL_REL_PATH);
+    std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
+    std::fs::write(&skill, "---\nname: pmtui-spawn\n---\n").unwrap();
+    assert!(
+        fx.sched
+            .compose_nudge(&base, START, false, false)
+            .contains(line)
+    );
+}
+
+/// TRAE's trigger says "follow the inline fallback below", so the fallback MUST be below — with
+/// the report schema's one required field and its values. A live TRAE worker that got the
+/// pointer without the fallback wrote `seq`/`status`/`next_step` and no `state`; every report
+/// failed to parse, and pmd parked the session `Stuck` after three wakes.
+#[test]
+fn a_trae_nudge_carries_the_inline_report_contract_it_points_to() {
+    let marker = std::path::Path::new("/tmp/proj/.project-state/sessions/s/needs-you.json");
+    let since = SinceLastWake::default();
+    let trae = loop_nudge_prompt_for_engine(
+        LoopNudgePromptInput::new("goal", "", "", "", &since, true, marker),
+        Engine::Trae,
+    );
+    assert!(trae.contains("follow the inline fallback below"), "{trae}");
+    for required in [
+        "If your worker skill is not loaded",
+        "seq, state, status, and next_step",
+        "`state` is required",
+        "`working`, `monitoring` or `blocked`",
+    ] {
+        assert!(trae.contains(required), "missing {required:?}: {trae}");
+    }
+
+    // An engine with an installed skill still gets the schema from the skill, not the nudge.
+    for engine in [Engine::Claude, Engine::Codex] {
+        let prompt = loop_nudge_prompt_for_engine(
+            LoopNudgePromptInput::new("goal", "", "", "", &since, true, marker),
+            engine,
+        );
+        assert!(
+            !prompt.contains("`state` is required"),
+            "{engine:?}: {prompt}"
+        );
+    }
+}
+
+#[test]
+fn a_report_without_state_does_not_parse_and_one_with_state_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("needs-you.json");
+    // The live TRAE report that stalled `aspace-contest-2`.
+    std::fs::write(
+        &path,
+        r#"{"seq":2,"status":"Starting ranked games now.","next_step":"Run ranked games.","ts":"2026-10-13T01:30:00Z"}"#,
+    )
+    .unwrap();
+    assert!(crate::job_engine::marker::parse_report(&path).is_err());
+    std::fs::write(
+        &path,
+        r#"{"seq":2,"state":"working","status":"Starting ranked games now.","next_step":"Run ranked games."}"#,
+    )
+    .unwrap();
+    assert!(crate::job_engine::marker::parse_report(&path).is_ok());
+}
+
 #[test]
 fn loop_nudge_prompt_invokes_the_worker_skill_in_the_engines_native_form() {
     let marker = std::path::Path::new("/tmp/proj/.project-state/sessions/s/needs-you.json");
@@ -717,6 +816,13 @@ fn loop_nudge_prompt_invokes_the_worker_skill_in_the_engines_native_form() {
     let codex = loop_nudge_prompt_for_engine(input(true), Engine::Codex);
     assert!(!codex.contains("/agent-manager-worker"));
     assert!(codex.contains("`agent-manager-worker` skill"));
+
+    let trae = loop_nudge_prompt_for_engine(input(true), Engine::Trae);
+    assert!(!trae.contains("/agent-manager-worker"));
+    assert!(
+        trae.contains("follow the inline fallback below"),
+        "TRAE has no proven Autopilot skill contract: {trae}"
+    );
 
     let claude_without_skill = loop_nudge_prompt_for_engine(input(false), Engine::Claude);
     assert!(!claude_without_skill.contains("/agent-manager-worker"));

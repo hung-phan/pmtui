@@ -499,6 +499,13 @@ impl JobScheduler {
                 );
                 (argv, Some(last), model)
             }
+            crate::registry::Engine::Trae => {
+                self.advise_health.latch_off(
+                    &self.project_id,
+                    "TRAE is not a supported decider engine yet",
+                );
+                return Ok(None);
+            }
         };
         let audit = job::DeciderRun {
             seq,

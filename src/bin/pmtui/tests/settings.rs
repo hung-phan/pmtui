@@ -317,8 +317,11 @@ fn a_value_that_cannot_be_applied_is_reported_and_never_saved() {
 /// not survive a restart" are different facts and the human needs the second one.
 #[test]
 fn a_value_that_cannot_be_saved_says_it_is_on_for_now() {
+    let dir = tempfile::tempdir().unwrap();
+    let blocked_parent = dir.path().join("not-a-dir");
+    std::fs::write(&blocked_parent, "file").unwrap();
     let mut app = app_with(Vec::new(), UiMode::Normal);
-    app.settings_path = std::path::PathBuf::from("/nonexistent/pm-settings/pmtui.json");
+    app.settings_path = blocked_parent.join("pmtui.json");
     app.open_settings();
     handle_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
     let (_, open) = cursors(&app);

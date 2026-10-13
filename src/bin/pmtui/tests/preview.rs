@@ -103,9 +103,9 @@ fn preview_shows_marker_report_and_log_tail() {
     );
 }
 
-/// A JOB'S PANEL IS PROSE, NOT ITS WIRE FORMAT. A job runs `claude -p --output-format stream-json`, so
-/// capturing its pane shows a wall of events — user: *"it use the text in raw transcript format and it is
-/// hard to view"*. The preview renders the tee'd `job.log` instead, and says so in its title.
+/// A JOB'S PANEL IS PROSE, NOT ITS WIRE FORMAT. A job runs an event stream, so capturing its pane
+/// shows a wall of events — user: *"it use the text in raw transcript format and it is hard to view"*.
+/// The preview renders the tee'd `job.log` instead, and says so in its title.
 #[test]
 fn a_jobs_preview_renders_its_stream_instead_of_showing_raw_json() {
     let dir = tempfile::tempdir().unwrap();

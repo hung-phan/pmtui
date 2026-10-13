@@ -35,7 +35,7 @@ fn flag(argv: &[String], name: &str) -> Option<String> {
 /// makes `pmtui spawn` inside a job unable to name a calling session, for both engines.
 #[test]
 fn a_job_runs_without_the_managed_session_env() {
-    for engine in [Engine::Claude, Engine::Codex] {
+    for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         let argv = argv(engine, None);
         assert_eq!(argv[0], "env", "{argv:?}");
         let bin = argv
@@ -77,7 +77,7 @@ fn the_claude_job_keeps_a_single_env_prefix() {
 /// what lets a Message start with a dash.
 #[test]
 fn the_prompt_is_the_last_element_after_the_separator() {
-    for engine in [Engine::Claude, Engine::Codex] {
+    for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         let argv = argv(engine, None);
         assert_eq!(argv.last().map(String::as_str), Some(PROMPT), "{argv:?}");
         assert_eq!(
@@ -136,6 +136,40 @@ fn the_codex_job_writes_its_last_message_to_a_file() {
     assert_eq!(flag(&argv, "-s").as_deref(), Some("workspace-write"));
 }
 
+/// TRAE's job shape follows TRAE CLI 2.0: `traex exec --json`, a pinned exec session, and the same
+/// schema + last-message file contract Codex uses.
+#[test]
+fn the_trae_job_uses_traex_exec_json_schema_and_safe_workspace_sandbox() {
+    let argv = argv(Engine::Trae, Some("seed-1"));
+    assert_eq!(argv[0], "env", "{argv:?}");
+    assert!(argv.windows(2).any(|w| w == ["traex", "exec"]), "{argv:?}");
+    assert_eq!(flag(&argv, "--session-id").as_deref(), Some(SESSION_ID));
+    assert_eq!(flag(&argv, "--sandbox").as_deref(), Some("workspace-write"));
+    assert!(
+        argv.iter().any(|arg| arg == "--skip-git-repo-check"),
+        "{argv:?}"
+    );
+    assert!(argv.iter().any(|arg| arg == "--json"), "{argv:?}");
+    assert_eq!(
+        flag(&argv, "--output-schema").as_deref(),
+        Some("/s/job-schema.json")
+    );
+    assert_eq!(flag(&argv, "-o").as_deref(), Some("/s/job.last"));
+    assert_eq!(flag(&argv, "-m").as_deref(), Some("seed-1"));
+    assert!(
+        !argv.iter().any(|arg| matches!(
+            arg.as_str(),
+            "-p" | "--output-format"
+                | "--permission-mode"
+                | "-y"
+                | "--yolo"
+                | "bypass_permissions"
+                | "--json-schema"
+        )),
+        "TRAE jobs must stay permission-safe and avoid v1-only flags: {argv:?}"
+    );
+}
+
 /// A chosen model reaches each CLI under its own flag, and nothing is passed when the session has none.
 #[test]
 fn a_chosen_model_is_passed_per_engine() {
@@ -147,10 +181,15 @@ fn a_chosen_model_is_passed_per_engine() {
         flag(&argv(Engine::Codex, Some("gpt-5")), "-m").as_deref(),
         Some("gpt-5")
     );
+    assert_eq!(
+        flag(&argv(Engine::Trae, Some("seed")), "-m").as_deref(),
+        Some("seed")
+    );
     assert!(
         !argv(Engine::Claude, None)
             .iter()
             .any(|arg| arg == "--model")
     );
     assert!(!argv(Engine::Codex, None).iter().any(|arg| arg == "-m"));
+    assert!(!argv(Engine::Trae, None).iter().any(|arg| arg == "-m"));
 }

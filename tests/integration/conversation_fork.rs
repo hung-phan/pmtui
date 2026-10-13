@@ -189,6 +189,7 @@ fn assert_child_published(rig: &ForkRig, source_before: &agent_manager::registry
             assert!(args.contains("--fork-session"), "{args}");
         }
         Engine::Codex => assert!(args.contains(&format!("fork {SOURCE_ID}")), "{args}"),
+        Engine::Trae => panic!("TRAE fork support is not implemented"),
     }
 }
 
@@ -209,6 +210,10 @@ fn native_conversation_fork_creates_a_standard_child_for_both_engines() {
         return;
     }
     for (tag, engine) in [("forkcl", Engine::Claude), ("forkcx", Engine::Codex)] {
+        if engine == Engine::Codex && !cfg!(target_os = "linux") {
+            eprintln!("skipping Codex fork test: exact fork identity discovery uses Linux /proc");
+            continue;
+        }
         let rig = rig(tag, engine, true, false, SourceStub::Idle);
         let before = source_entry(&rig);
         rig.fork_and_wait_for_child();
@@ -236,6 +241,12 @@ fn native_fork_of_a_live_idle_source_leaves_it_running_for_both_engines() {
         ("forklcl", Engine::Claude, true),
         ("forklcx", Engine::Codex, false),
     ] {
+        if engine == Engine::Codex && !cfg!(target_os = "linux") {
+            eprintln!(
+                "skipping live-source Codex fork test: exact source identity discovery uses Linux /proc"
+            );
+            continue;
+        }
         let rig = rig(tag, engine, saved, true, SourceStub::Idle);
         rig.start_source("earlier answer");
         let before = source_entry(&rig);
@@ -392,6 +403,7 @@ fn install_stub(fx: &EnterFixture, engine: Engine, launches: &Path, source: Sour
                 child = child_rollout.display(),
             )
         }
+        Engine::Trae => panic!("TRAE fork support is not implemented"),
     };
     std::fs::write(&bin, script).unwrap();
     use std::os::unix::fs::PermissionsExt;

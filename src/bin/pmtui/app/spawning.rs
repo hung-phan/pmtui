@@ -1366,11 +1366,11 @@ impl App {
                 return self.discard_unstarted(job, child, &row, LaunchState::Pending, reason);
             }
         };
-        // The conversation a Claude launch creates is saved with the attempt, before the launch,
-        // so a dashboard that stops at any later point leaves a row that names it.
+        // The conversation a caller-pinned launch creates is saved with the attempt, before the
+        // launch, so a dashboard that stops at any later point leaves a row that names it.
         let engine = row.engine.unwrap_or(Engine::Claude);
         let conversation = job_engine::mint_uuid_v4();
-        let pinned = (engine == Engine::Claude).then(|| conversation.clone());
+        let pinned = (engine != Engine::Codex).then(|| conversation.clone());
         if let Err(error) = self.update_child(job, &child, Some(LaunchState::Pending), |entry| {
             set_launch_state(entry, LaunchState::Attempted);
             if pinned.is_some() {

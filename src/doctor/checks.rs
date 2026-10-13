@@ -364,7 +364,7 @@ fn inspect_skill(
         }
         Err(error) => Check::fail(id, format!("{label} {noun} could not be read"))
             .with_detail(error.to_string())
-            .with_remediation("restore access to the project-local .agents skill directory"),
+            .with_remediation("restore access to the project-local skill directory"),
     });
 }
 

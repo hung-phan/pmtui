@@ -24,7 +24,7 @@ struct FakeProbe {
 impl FakeProbe {
     fn healthy(sessions: Vec<String>) -> Self {
         Self {
-            binaries: ["claude", "codex", "notify-send"]
+            binaries: ["claude", "codex", "traex", "notify-send"]
                 .into_iter()
                 .map(str::to_owned)
                 .collect(),
@@ -142,6 +142,30 @@ fn a_healthy_project_passes_every_check() {
     assert_eq!(
         check(&report.checks, "project.0.driver").summary,
         "alpha has no driver record yet"
+    );
+}
+
+#[test]
+fn doctor_checks_trae_skills_under_shared_agents_directory() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("alpha");
+    fs::create_dir(&root).unwrap();
+    seed_project(&root, "alpha", Engine::Trae);
+    write_registry(
+        &options(&dir).registry,
+        vec![project("alpha", &root, true, "trae")],
+    );
+    let expected = session_name("alpha", &root);
+
+    let report = inspect_with(&options(&dir), &FakeProbe::healthy(vec![expected]));
+
+    assert_eq!(
+        check(&report.checks, "project.0.skill").status,
+        CheckStatus::Pass
+    );
+    assert_eq!(
+        check(&report.checks, "project.0.spawn_skill").status,
+        CheckStatus::Pass
     );
 }
 

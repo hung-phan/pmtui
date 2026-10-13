@@ -374,21 +374,31 @@ fn scan_skips_bad_names_and_ignores_receipts_and_temps() {
     ] {
         fs::write(dir.join(ignored), b"{").unwrap();
     }
-    fs::write(dir.join(OsStr::from_bytes(b"\xff.request.json")), &body).unwrap();
+    #[cfg(target_os = "linux")]
+    {
+        fs::write(dir.join(OsStr::from_bytes(b"\xff.request.json")), &body).unwrap();
+    }
 
     let scanned = scan_requests(&dir, "service");
+    let mut expected = Vec::new();
+    if names_in(&dir).contains(&upper) {
+        expected.push(format!("skipped {upper}"));
+    }
+    expected.extend([
+        format!("valid {ID}"),
+        format!("skipped {unhyphenated}"),
+        "skipped not-a-uuid.request.json".to_string(),
+    ]);
+    #[cfg(target_os = "linux")]
+    expected.push("skipped \u{fffd}.request.json".to_string());
 
-    assert_eq!(
-        summary(&scanned),
-        [
-            format!("skipped {upper}"),
-            format!("valid {ID}"),
-            format!("skipped {unhyphenated}"),
-            "skipped not-a-uuid.request.json".to_string(),
-            "skipped \u{fffd}.request.json".to_string(),
-        ]
+    assert_eq!(summary(&scanned), expected);
+    assert!(
+        scanned
+            .iter()
+            .any(|entry| entry == &ScanEntry::Valid(Box::new(req.clone()))),
+        "{scanned:?}"
     );
-    assert_eq!(scanned[1], ScanEntry::Valid(Box::new(req)));
     for entry in &scanned {
         if let ScanEntry::Skipped { reason, .. } = entry {
             assert!(reason.contains("UUID"), "{reason}");

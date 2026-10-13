@@ -1,8 +1,6 @@
 //! Focused coverage for exact Codex rollout discovery and its procfs failure modes.
 
 use std::ffi::OsString;
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use tempfile::{TempDir, tempdir};
@@ -492,6 +490,9 @@ fn fifo_proc_fixture() -> (TempDir, PathBuf, PathBuf, PathBuf) {
 
 #[cfg(target_os = "linux")]
 fn feed_stat_versions(stat_path: PathBuf, start_times: Vec<u64>) -> std::thread::JoinHandle<()> {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
     std::thread::spawn(move || {
         for start_time in start_times {
             let mut pipe = OpenOptions::new().write(true).open(&stat_path).unwrap();
