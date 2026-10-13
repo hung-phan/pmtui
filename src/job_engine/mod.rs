@@ -277,7 +277,8 @@ pub struct JobScheduler {
     advise_last: Option<(u64, String)>,
     /// Whether THIS session's worker got its canonical `.agents/skills` copy and any
     /// engine-compatibility link installed. Set on launch and first adoption; read by the nudge to
-    /// pick the lean skill-available branch. A write failure takes the compact inline degrade.
+    /// name the native skill when safe. A write failure takes the compact inline degrade; TraeX
+    /// still gets the inline schema because pmd may have adopted a process that started earlier.
     /// In-memory only: a daemon restart re-installs on the first sweep.
     worker_skill_installed: bool,
     /// Override for claude's config dir (the `.claude` directory) used ONLY by the

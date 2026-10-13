@@ -59,6 +59,7 @@ fn hook_turn_complete_records_the_thread_id_trae_reported() {
     let dir = tempfile::tempdir().unwrap();
     let paths = agent_manager::state::ProjectPaths::for_session(dir.path(), "bot");
     let state_dir = paths.state_dir();
+    std::fs::create_dir_all(&state_dir).unwrap();
     let env =
         |key: &str| (key == tmux::ENV_STATE_DIR).then(|| state_dir.to_string_lossy().into_owned());
 
@@ -77,6 +78,7 @@ fn hook_turn_complete_signals_the_turn_without_a_usable_id() {
     let dir = tempfile::tempdir().unwrap();
     let paths = agent_manager::state::ProjectPaths::for_session(dir.path(), "bot");
     let state_dir = paths.state_dir();
+    std::fs::create_dir_all(&state_dir).unwrap();
     let env =
         |key: &str| (key == tmux::ENV_STATE_DIR).then(|| state_dir.to_string_lossy().into_owned());
 

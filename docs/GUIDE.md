@@ -85,13 +85,15 @@ the Page keys.
 
 Every terminal that pmtui or pmd launches with `PMTUI_BIN` in its environment first gets the
 `pmtui-spawn` skill in the project root, so the agent inside knows how to ask for a child
-session. Codex and TraeX read it from `.agents/skills/`; Claude gets an exact compatibility
-symlink under `.claude/skills/`. The skill is a short procedure: spawn only independent work,
-write a self-contained Message, run `pmtui spawn` with one generated request id, and act on
-the JSON `state` even on a nonzero exit. Nested spawns are refused and a sixth child waits its
-turn, and neither process ever creates or edits your `AGENTS.md`. See the [`pmtui spawn`
-section in the README](../README.md#handing-work-to-a-child-session-pmtui-spawn) for the
-command itself.
+session. TraeX terminals that pmtui starts also get `agent-manager-worker` before launch, because
+TraeX reads project skills at startup; later nudges still include the compact report schema as a
+fallback for adopted older panes. Codex and TraeX read skills from `.agents/skills/`; Claude gets
+exact compatibility symlinks under `.claude/skills/`. The spawn skill is a short procedure: spawn
+only independent work, write a self-contained Message, run `pmtui spawn` with one generated
+request id, and act on the JSON `state` even on a nonzero exit. Nested spawns are refused and a
+sixth child waits its turn, and neither process ever creates or edits your `AGENTS.md`. See the
+[`pmtui spawn` section in the README](../README.md#handing-work-to-a-child-session-pmtui-spawn)
+for the command itself.
 
 ### What the dashboard said earlier
 

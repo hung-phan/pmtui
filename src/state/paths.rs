@@ -40,6 +40,28 @@ impl ProjectPaths {
             session_seg: Some(seg),
         }
     }
+    pub fn from_state_dir(state_dir: impl Into<PathBuf>) -> Option<Self> {
+        let state_dir = state_dir.into();
+        if state_dir.file_name()?.to_str()? == STATE_DIR {
+            return Some(Self {
+                root: state_dir.parent()?.to_path_buf(),
+                session_seg: None,
+            });
+        }
+        let seg = state_dir.file_name()?.to_str()?.to_string();
+        let sessions = state_dir.parent()?;
+        if sessions.file_name()?.to_str()? != "sessions" {
+            return None;
+        }
+        let state_root = sessions.parent()?;
+        if state_root.file_name()?.to_str()? != STATE_DIR {
+            return None;
+        }
+        Some(Self {
+            root: state_root.parent()?.to_path_buf(),
+            session_seg: Some(seg),
+        })
+    }
     pub fn state_dir(&self) -> PathBuf {
         let base = self.root.join(STATE_DIR);
         match &self.session_seg {

@@ -15,7 +15,8 @@ use crate::tmux::codex::{
 };
 use crate::tmux::fake::FakeDriver;
 use crate::tmux::real::{
-    codex_draft_visible, exact, exact_pane, launched_binary, pane_dimension, shq, wrapper_script,
+    codex_draft_visible, codex_pasted_draft_still_pending, exact, exact_pane, launched_binary,
+    pane_dimension, shq, wrapper_script,
 };
 use crate::tmux::{
     Driver, Observation, PaneDialog, StepHandle, TmuxDriver, classify_dialog, observe,
@@ -111,6 +112,34 @@ fn codex_draft_detection_uses_the_bottom_composer_not_the_transcript_echo() {
         "Would you like to run this command?\n› 1. Yes, proceed\n  2. No\n",
         prompt,
         true
+    ));
+}
+
+#[test]
+fn pasted_submit_retry_ignores_transcript_echoes() {
+    let message = "You are a long-running agent working toward the goal.\nShip the fix.";
+    let plain_after_submit = concat!(
+        "› You are a long-running agent working toward the goal.\n",
+        "Ship the fix.\n",
+        "\n",
+        "• Working (1s • esc to interrupt)\n",
+        "\n",
+        "› Ask Codex to do anything\n",
+        "\n",
+        "  model footer\n",
+    );
+    let styled_placeholder =
+        "\u{1b}[1m›\u{1b}[0m \u{1b}[2mAsk Codex to do anything\u{1b}[0m\n\n  footer\n";
+    assert!(
+        !codex_pasted_draft_still_pending(plain_after_submit, styled_placeholder, message),
+        "a submitted prompt echoed in the transcript must not cause another Enter"
+    );
+
+    let plain_pending = "› [Pasted Content 900 chars]\n\n  footer\n";
+    assert!(codex_pasted_draft_still_pending(
+        plain_pending,
+        plain_pending,
+        message
     ));
 }
 

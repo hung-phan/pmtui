@@ -369,16 +369,28 @@ fn run_turn_complete_hook(env: &dyn Fn(&str) -> Option<String>, payload: &str) -
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
         .with_context(|| format!("{} is not set", tmux::ENV_STATE_DIR))?;
-    let daemon_dir = state_dir.join(".daemon");
-    std::fs::create_dir_all(&daemon_dir)
-        .with_context(|| format!("create_dir_all {}", daemon_dir.display()))?;
+    if !state_dir.is_absolute() || !state_dir.is_dir() {
+        anyhow::bail!(
+            "{}={} is not an existing absolute directory",
+            tmux::ENV_STATE_DIR,
+            state_dir.display()
+        );
+    }
+    let paths = ProjectPaths::from_state_dir(&state_dir).with_context(|| {
+        format!(
+            "{}={} is not a pmtui state directory",
+            tmux::ENV_STATE_DIR,
+            state_dir.display()
+        )
+    })?;
+    std::fs::create_dir_all(paths.daemon_dir())
+        .with_context(|| format!("create_dir_all {}", paths.daemon_dir().display()))?;
     if let Some(id) = reported_thread_id(payload) {
-        // `ProjectPaths::codex_conversation_id`, the file pmd and pmtui both read the reported id from.
-        let path = daemon_dir.join("conversation-id");
+        let path = paths.codex_conversation_id();
         agent_manager::state::write_text_atomic(&path, &id)
             .with_context(|| format!("write {}", path.display()))?;
     }
-    let path = daemon_dir.join("turn-complete");
+    let path = paths.turn_signal();
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)

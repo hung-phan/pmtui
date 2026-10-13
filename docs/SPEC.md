@@ -526,9 +526,17 @@ command derives the signal path from the managed-session environment, so the tru
 across sessions. The product MUST NOT bypass hook trust. If the engine asks a person to review the hook, the
 prompt stays in the terminal for that person.
 
+Managed launches SHOULD set `PMTUI_BIN` to a canonical executable `pmtui` path when one can be
+resolved from the current executable, a sibling install, or the launching process's PATH. They MUST
+omit it rather than pass a path that is not an executable file.
+
 Project-local skills MUST be written once under `.agents/skills/`, which Codex and TraeX discover. Claude
-MAY also receive exact per-skill compatibility symlinks under `.claude/skills/`. The product MUST NOT
-create or edit the user's `AGENTS.md` to deliver a skill.
+MAY also receive exact per-skill compatibility symlinks under `.claude/skills/`. Before pmtui starts a
+TraeX terminal, it SHOULD install `agent-manager-worker` so engines that snapshot skills at startup can
+see the Autopilot protocol before a later mode switch. Because an adopted TraeX pane may have started
+before the file existed, TraeX nudges MUST keep the compact inline report schema. `pmtui-spawn` is
+installed only for a launch that names `PMTUI_BIN`. The product MUST NOT create or edit the user's
+`AGENTS.md` to deliver a skill.
 
 If an Autopilot session waits for a decision from a person, and the product cannot read its mode setting,
 the supervisor stays available. It MUST NOT type until it can read the setting again. An explicit Standard

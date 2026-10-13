@@ -36,6 +36,12 @@ struct StagedFork {
 /// Why `fork_selected` refuses this row before touching any file, or `None` when it may try. The
 /// Board derives its `f` chip from this, so the lane never offers a fork the handler always refuses.
 pub(crate) fn fork_refusal(view: &ProjectView) -> Option<String> {
+    if view.engine == Some(Engine::Trae) {
+        return Some(format!(
+            "{}: TraeX conversation fork is not implemented yet",
+            view.id
+        ));
+    }
     // A staged spawn has not launched: its spawn request owns the row's first start.
     if view.spawn_staged {
         return Some(staged_refusal(&view.id));
@@ -299,7 +305,7 @@ impl App {
             source.worker_model.as_deref(),
         );
         let env = self.managed_env(&fork.child_id, &fork.root);
-        crate::session::install_spawn_skill(&fork.root, engine, &env);
+        crate::session::install_prelaunch_skills(&fork.root, engine, &env);
         let launched = self
             .agent_tmux
             .launch_interactive(&fork.session, &fork.root, &argv, &env);

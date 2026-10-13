@@ -6,6 +6,15 @@ use super::*;
 
 #[test]
 fn fork_refuses_unknown_disagreeing_and_working_sources_without_launching() {
+    let mut unsupported = fork_fixture(Engine::Trae);
+    unsupported.app.fork_selected();
+    assert_refused_without_launch(&unsupported, "TraeX conversation fork is not implemented");
+    assert_eq!(
+        fork_refusal(unsupported.app.selected_view().unwrap()).as_deref(),
+        Some("bot: TraeX conversation fork is not implemented yet"),
+        "the Board keybar must hide the same fork the handler refuses"
+    );
+
     let mut missing = fork_fixture(Engine::Claude);
     Registry::update(&missing.registry, |registry| {
         registry.projects[0].conversation_id = None;

@@ -83,6 +83,10 @@ pub(super) fn codex_draft_visible(capture: &str, text: &str, pasted: bool) -> bo
     })
 }
 
+pub(super) fn codex_pasted_draft_still_pending(plain: &str, styled: &str, text: &str) -> bool {
+    super::activity::has_composer(plain) && codex_draft_visible(styled, text, true)
+}
+
 /// Whether the composer row's first visible character after its `›` lead is drawn dim, the style
 /// Codex gives its placeholder and never typed text.
 fn placeholder_drawn(row: &Line<'_>) -> bool {
@@ -1004,17 +1008,11 @@ impl Driver for TmuxDriver {
             // Styled, so the dim placeholder can be told from a still-typed draft.
             let capture = self.capture_tail_styled(session, 80)?;
             let draft_visible = codex_draft_visible(&capture, text, uses_paste_buffer);
-            if !draft_visible && uses_paste_buffer && attempt + 1 < attempts {
-                // Retry only while an input prompt is on screen. With none, there is nothing
-                // left to submit, and the `Enter` would go to whatever replaced the prompt —
-                // including a dialog this capture could not recognise.
-                if !super::activity::has_composer(&plain) {
-                    return Ok(());
-                }
-                let prefix: String = text.chars().take(CODEX_DRAFT_MATCH_CHARS).collect();
-                if !prefix.is_empty() && plain.contains(&prefix) {
-                    continue;
-                }
+            if uses_paste_buffer
+                && attempt + 1 < attempts
+                && codex_pasted_draft_still_pending(&plain, &capture, text)
+            {
+                continue;
             }
             if !draft_visible {
                 return Ok(());

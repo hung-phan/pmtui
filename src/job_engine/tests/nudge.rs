@@ -748,21 +748,23 @@ fn the_scheduler_names_the_spawn_skill_only_once_it_is_on_disk() {
     );
 }
 
-/// TRAE's trigger says "follow the inline fallback below", so the fallback MUST be below — with
-/// the report schema's one required field and its values. A live TRAE worker that got the
-/// pointer without the fallback wrote `seq`/`status`/`next_step` and no `state`; every report
-/// failed to parse, and pmd parked the session `Stuck` after three wakes.
+/// TraeX can snapshot skills before pmd first sees the pane. Even when the canonical skill file is
+/// now on disk, its nudge keeps the compact schema so a late install cannot make every report fail
+/// to parse.
 #[test]
-fn a_trae_nudge_carries_the_inline_report_contract_it_points_to() {
+fn a_trae_nudge_keeps_the_inline_report_contract_even_when_the_skill_file_exists() {
     let marker = std::path::Path::new("/tmp/proj/.project-state/sessions/s/needs-you.json");
     let since = SinceLastWake::default();
     let trae = loop_nudge_prompt_for_engine(
         LoopNudgePromptInput::new("goal", "", "", "", &since, true, marker),
         Engine::Trae,
     );
-    assert!(trae.contains("follow the inline fallback below"), "{trae}");
+    assert!(trae.contains("`agent-manager-worker` skill"), "{trae}");
+    assert!(
+        trae.contains("If your worker skill is not loaded"),
+        "{trae}"
+    );
     for required in [
-        "If your worker skill is not loaded",
         "seq, state, status, and next_step",
         "`state` is required",
         "`working`, `monitoring` or `blocked`",
@@ -819,10 +821,8 @@ fn loop_nudge_prompt_invokes_the_worker_skill_in_the_engines_native_form() {
 
     let trae = loop_nudge_prompt_for_engine(input(true), Engine::Trae);
     assert!(!trae.contains("/agent-manager-worker"));
-    assert!(
-        trae.contains("follow the inline fallback below"),
-        "TRAE has no proven Autopilot skill contract: {trae}"
-    );
+    assert!(trae.contains("`agent-manager-worker` skill"), "{trae}");
+    assert!(!trae.contains("follow the inline fallback below"), "{trae}");
 
     let claude_without_skill = loop_nudge_prompt_for_engine(input(false), Engine::Claude);
     assert!(!claude_without_skill.contains("/agent-manager-worker"));

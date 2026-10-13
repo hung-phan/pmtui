@@ -22,7 +22,7 @@ mod supervisor;
 
 pub use launch::{
     PermissionMode, Resume, build_command, build_fork_command, build_job_command,
-    build_loop_command, build_standard_command, turn_hook_enabled,
+    build_loop_command, build_standard_command, turn_hook_enabled, turn_hook_enabled_for,
 };
 pub use result::{
     CompletionDigest, EffectAuthority, EffectReversibility, EffectScope, StopDraft, StopEffect,

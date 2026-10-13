@@ -650,7 +650,7 @@ fn ensure_session_installs_the_native_trae_skill() {
     );
     assert!(
         fx.sched.worker_skill_available(),
-        "a successful native TraeX install takes the lean nudge branch"
+        "a successful native TraeX install lets the nudge name the worker skill"
     );
     assert!(!fx.paths.claude_project_skill_dir().exists());
     assert!(
@@ -985,6 +985,37 @@ fn a_trae_relaunch_resumes_the_thread_its_hook_reported() {
         Some(TRAE_THREAD)
     );
     assert_eq!(ledger(&fx).conversation_id.as_deref(), Some(TRAE_THREAD));
+    assert!(ledger(&fx).resume_unconfirmed);
+}
+
+#[test]
+fn a_stale_trae_reported_thread_falls_back_to_a_fresh_conversation_once() {
+    let mut fx = setup(Tier::Autopilot, Engine::Trae, Some(300));
+    trae_hook_reported(&fx, TRAE_THREAD);
+    let sess = loop_session(&fx);
+
+    fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+
+    assert_eq!(
+        launched_flag(&fx, &sess, "resume").as_deref(),
+        Some(TRAE_THREAD)
+    );
+    assert!(ledger(&fx).resume_unconfirmed);
+
+    fx.driver.set_alive(&sess, false);
+    fx.clock.set(START + LAUNCH_GRACE_S);
+    fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+
+    let argv = launched_argv(&fx, &sess).expect("TraeX fallback launched");
+    assert!(
+        !argv.iter().any(|arg| arg == "resume" || arg == TRAE_THREAD),
+        "the stale thread must not be resumed again: {argv:?}"
+    );
+    assert!(
+        argv.windows(2).any(|pair| pair[0] == "--session-id"),
+        "fallback starts a fresh named TraeX conversation: {argv:?}"
+    );
+    assert!(!fx.paths.codex_conversation_id().exists());
     assert!(!ledger(&fx).resume_unconfirmed);
 }
 

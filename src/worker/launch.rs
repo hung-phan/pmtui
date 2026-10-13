@@ -58,8 +58,16 @@ pub fn turn_hook_enabled() -> bool {
     turn_hook_value_enabled(std::env::var("PM_TURN_HOOK").ok().as_deref())
 }
 
+pub fn turn_hook_enabled_for(engine: Engine) -> bool {
+    turn_hook_value_enabled_for(engine, std::env::var("PM_TURN_HOOK").ok().as_deref())
+}
+
 pub(super) fn turn_hook_value_enabled(value: Option<&str>) -> bool {
     !matches!(value.map(str::trim), Some("off" | "0" | "false"))
+}
+
+pub(super) fn turn_hook_value_enabled_for(engine: Engine, value: Option<&str>) -> bool {
+    engine == Engine::Trae || turn_hook_value_enabled(value)
 }
 
 /// Build the argv to launch a phase worker for `engine`. The worker is told (in

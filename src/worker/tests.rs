@@ -30,6 +30,22 @@ fn turn_hook_kill_switch_parsing_is_shared_and_explicit() {
 }
 
 #[test]
+fn trae_turn_hook_ignores_the_global_kill_switch() {
+    assert!(super::launch::turn_hook_value_enabled_for(
+        Engine::Trae,
+        Some("off")
+    ));
+    assert!(!super::launch::turn_hook_value_enabled_for(
+        Engine::Claude,
+        Some("off")
+    ));
+    assert!(!super::launch::turn_hook_value_enabled_for(
+        Engine::Codex,
+        Some("off")
+    ));
+}
+
+#[test]
 fn standard_persistent_commands_keep_human_posture_and_install_turn_hook() {
     let signal = PathBuf::from("/tmp/project/.project-state/sessions/a/.daemon/turn-complete");
 

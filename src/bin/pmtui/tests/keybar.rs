@@ -214,6 +214,14 @@ fn keybar_hides_chips_that_do_not_apply() {
         assert!(text.contains(shown), "{shown} chip missing: {text}");
     }
 
+    let mut trae = agent_loop_view("trae-row");
+    trae.engine = Some(Engine::Trae);
+    let text = line_text(&keybar_line(&app_with(vec![trae], UiMode::Normal), 220));
+    assert!(
+        !text.contains("Fork"),
+        "TraeX cannot fork, so the keybar must not offer it: {text}"
+    );
+
     // An AUTOPILOT row: `Goal` applies (it is the direction pmd steers by). Still no
     // `Answer` without an open stop.
     let text = line_text(&keybar_line(

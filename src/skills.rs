@@ -148,6 +148,20 @@ pub fn ensure_claude_skill_link(paths: &ProjectPaths, name: &str) -> io::Result<
     Ok(())
 }
 
+/// Install the worker skill in `paths.root`: write the canonical
+/// `.agents/skills/agent-manager-worker/SKILL.md` (atomically, replacing a stale copy) and, for
+/// Claude, ensure its exact `.claude/skills/agent-manager-worker` alias. NEVER creates or modifies
+/// the user's `AGENTS.md`, and never touches sibling skills.
+pub fn install_worker_skill(paths: &ProjectPaths, engine: Engine) -> anyhow::Result<()> {
+    // TraeX snapshots project skills on process startup; callers that launch TraeX write this
+    // before `launch_interactive`, while pmd still installs it for every adopted Autopilot pane.
+    crate::state::write_text_atomic(&paths.canonical_worker_skill_file(), WORKER_SKILL_MD)?;
+    if engine == Engine::Claude {
+        ensure_claude_worker_skill_link(paths)?;
+    }
+    Ok(())
+}
+
 /// Install the spawn skill in `paths.root`: write the canonical
 /// `.agents/skills/pmtui-spawn/SKILL.md` (atomically, replacing a stale copy) and, for Claude,
 /// ensure its exact `.claude/skills/pmtui-spawn` alias. NEVER creates or modifies the user's
@@ -161,10 +175,9 @@ pub fn install_spawn_skill(paths: &ProjectPaths, engine: Engine) -> anyhow::Resu
     Ok(())
 }
 
-/// The shared pre-launch installer every pmtui and pmd launch site calls just before
-/// `launch_interactive`: install the spawn skill into `root` for a terminal about to start with
-/// `env`, but only when `env` names pmtui (`PMTUI_BIN`). The skill's command runs `"$PMTUI_BIN"`,
-/// so a launch without it gets nothing and returns `Ok(())`.
+/// The shared pre-launch installer for the spawn skill: install it into `root` for a terminal about
+/// to start with `env`, but only when `env` names pmtui (`PMTUI_BIN`). The skill's command runs
+/// `"$PMTUI_BIN"`, so a launch without it gets nothing and returns `Ok(())`.
 ///
 /// Callers treat a failure as non-fatal: the launch proceeds, and `pmd doctor` reports the
 /// missing or stale skill.

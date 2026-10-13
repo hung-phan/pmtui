@@ -548,7 +548,7 @@ impl App {
         };
         let session = session_name(id, root);
         let env = self.managed_env(id, root);
-        crate::session::install_spawn_skill(root, engine, &env);
+        crate::session::install_prelaunch_skills(root, engine, &env);
         if engine == Engine::Codex && existing.is_none() {
             let argv = with_initial_prompt(
                 build_codex_fresh_chat(model, &paths.turn_signal()),

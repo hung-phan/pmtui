@@ -1,11 +1,13 @@
-//! Every terminal the dashboard launches with `PMTUI_BIN` ships the pmtui-spawn skill into its
-//! project root first: the canonical `.agents/skills/pmtui-spawn/SKILL.md` for every engine, plus
-//! Claude's exact `.claude/skills/pmtui-spawn` alias. A launch that names no pmtui ships nothing,
-//! and a failed install never blocks the launch.
+//! Dashboard launches ship only the skills that are useful before that terminal starts:
+//! `agent-manager-worker` for TraeX, plus `pmtui-spawn` when `PMTUI_BIN` is present. A failed
+//! install never blocks the launch, and an attach to an existing terminal does not rewrite skills.
 
 use super::*;
 
-use agent_manager::skills::{CLAUDE_SPAWN_SKILL_LINK_TARGET, SPAWN_SKILL_MD};
+use agent_manager::skills::{
+    CLAUDE_SPAWN_SKILL_LINK_TARGET, CLAUDE_WORKER_SKILL_LINK_TARGET, SPAWN_SKILL_MD,
+    WORKER_SKILL_MD,
+};
 
 const PMTUI: &str = "/opt/am/pmtui";
 
@@ -63,14 +65,45 @@ fn assert_spawn_skill(root: &Path, engine: Engine) {
     );
 }
 
+fn assert_worker_skill(root: &Path, engine: Engine) {
+    let paths = ProjectPaths::new(root);
+    assert_eq!(
+        std::fs::read_to_string(paths.canonical_worker_skill_file())
+            .ok()
+            .as_deref(),
+        Some(WORKER_SKILL_MD),
+        "{engine:?}: canonical worker skill"
+    );
+    match engine {
+        Engine::Claude => {
+            assert_eq!(
+                std::fs::read_link(paths.claude_project_skill_dir()).ok(),
+                Some(PathBuf::from(CLAUDE_WORKER_SKILL_LINK_TARGET)),
+                "Claude reaches it through its exact per-skill alias"
+            );
+            assert_eq!(
+                std::fs::read_to_string(paths.claude_project_skill_dir().join("SKILL.md")).unwrap(),
+                WORKER_SKILL_MD
+            );
+        }
+        Engine::Codex | Engine::Trae => {}
+    }
+}
+
 fn assert_no_spawn_skill(root: &Path) {
     let paths = ProjectPaths::new(root);
     assert!(!paths.canonical_spawn_skill_file().exists());
     assert!(std::fs::symlink_metadata(paths.claude_spawn_skill_dir()).is_err());
 }
 
+fn assert_no_worker_skill(root: &Path) {
+    let paths = ProjectPaths::new(root);
+    assert!(!paths.canonical_worker_skill_file().exists());
+    assert!(std::fs::symlink_metadata(paths.claude_project_skill_dir()).is_err());
+}
+
 #[test]
-fn standard_create_installs_the_spawn_skill_and_claude_link() {
+fn standard_create_installs_prelaunch_skills_before_launch() {
     for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         let dir = tempfile::tempdir().unwrap();
         let reg_path = dir.path().join("registry.json");
@@ -84,11 +117,16 @@ fn standard_create_installs_the_spawn_skill_and_claude_link() {
 
         assert_eq!(pane.launches().len(), 1, "{engine:?}: {}", app.status);
         assert_spawn_skill(&project, engine);
+        if engine == Engine::Trae {
+            assert_worker_skill(&project, engine);
+        } else {
+            assert_no_worker_skill(&project);
+        }
     }
 }
 
 #[test]
-fn no_pmtui_bin_means_no_spawn_skill() {
+fn no_pmtui_bin_means_only_trae_gets_its_prelaunch_worker_skill() {
     for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         let dir = tempfile::tempdir().unwrap();
         let reg_path = dir.path().join("registry.json");
@@ -102,13 +140,18 @@ fn no_pmtui_bin_means_no_spawn_skill() {
 
         assert_eq!(pane.launches().len(), 1, "{engine:?}: {}", app.status);
         assert_no_spawn_skill(&project);
+        if engine == Engine::Trae {
+            assert_worker_skill(&project, engine);
+        } else {
+            assert_no_worker_skill(&project);
+        }
     }
 }
 
 #[test]
-fn resume_and_restart_ship_the_skill_before_the_terminal_starts() {
+fn resume_and_restart_ship_prelaunch_skills_before_the_terminal_starts() {
     // `start_undriven_session` is the launch behind Enter-after-pause and `r`. The install runs
-    // before the launch, so even a launch tmux refuses leaves the skill for the retry.
+    // before the launch, so even a launch tmux refuses leaves the skills for the retry.
     for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         let dir = tempfile::tempdir().unwrap();
         let pane = FakePane::default();
@@ -131,6 +174,11 @@ fn resume_and_restart_ship_the_skill_before_the_terminal_starts() {
             "{engine:?}: the armed launch error must reach the caller"
         );
         assert_spawn_skill(dir.path(), engine);
+        if engine == Engine::Trae {
+            assert_worker_skill(dir.path(), engine);
+        } else {
+            assert_no_worker_skill(dir.path());
+        }
     }
 }
 
@@ -155,7 +203,7 @@ fn a_failed_install_never_blocks_a_standard_launch() {
 }
 
 #[test]
-fn chat_launches_ship_the_skill_before_the_terminal_starts() {
+fn chat_launches_ship_prelaunch_skills_before_the_terminal_starts() {
     for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         let dir = tempfile::tempdir().unwrap();
         let paths = ProjectPaths::for_session(dir.path(), "bot");
@@ -179,6 +227,11 @@ fn chat_launches_ship_the_skill_before_the_terminal_starts() {
         chat_with_handoff(&mut NoHandoff, &pane, &req, || {}).unwrap_err();
 
         assert_spawn_skill(dir.path(), engine);
+        if engine == Engine::Trae {
+            assert_worker_skill(dir.path(), engine);
+        } else {
+            assert_no_worker_skill(dir.path());
+        }
     }
 
     let dir = tempfile::tempdir().unwrap();
@@ -203,10 +256,11 @@ fn chat_launches_ship_the_skill_before_the_terminal_starts() {
     create_chat_with_handoff(&mut NoHandoff, &pane, req, || {}).unwrap_err();
 
     assert_spawn_skill(dir.path(), Engine::Claude);
+    assert_no_worker_skill(dir.path());
 }
 
 #[test]
-fn a_chat_launch_that_names_no_pmtui_ships_no_skill() {
+fn a_chat_launch_that_names_no_pmtui_ships_only_the_trae_worker_skill() {
     let dir = tempfile::tempdir().unwrap();
     let paths = ProjectPaths::for_session(dir.path(), "bot");
     let req = ChatReq {
@@ -223,6 +277,51 @@ fn a_chat_launch_that_names_no_pmtui_ships_no_skill() {
     chat_with_handoff(&mut NoHandoff, &FakePane::default(), &req, || {}).unwrap();
 
     assert_no_spawn_skill(dir.path());
+    assert_no_worker_skill(dir.path());
+
+    let dir = tempfile::tempdir().unwrap();
+    let paths = ProjectPaths::for_session(dir.path(), "bot");
+    let req = ChatReq {
+        session_paths: paths.clone(),
+        root: dir.path().to_path_buf(),
+        argv: vec!["agent".into()],
+        label: "bot".into(),
+        socket: "pm-test".into(),
+        session: "pm-bot".into(),
+        engine: Engine::Trae,
+        env: tmux::ManagedEnv::default(),
+    };
+
+    chat_with_handoff(&mut NoHandoff, &FakePane::default(), &req, || {}).unwrap();
+
+    assert_no_spawn_skill(dir.path());
+    assert_worker_skill(dir.path(), Engine::Trae);
+}
+
+#[test]
+fn attaching_to_an_existing_chat_terminal_does_not_rewrite_skills() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = ProjectPaths::for_session(dir.path(), "bot");
+    let req = ChatReq {
+        session_paths: paths.clone(),
+        root: dir.path().to_path_buf(),
+        argv: vec!["agent".into()],
+        label: "bot".into(),
+        socket: "pm-test".into(),
+        session: "pm-bot".into(),
+        engine: Engine::Trae,
+        env: tmux::ManagedEnv {
+            session_id: "bot".into(),
+            state_dir: paths.state_dir(),
+            pmtui_bin: Some(PathBuf::from(PMTUI)),
+        },
+    };
+    let pane = FakePane::live_quiet("pm-bot");
+
+    chat_with_handoff(&mut NoHandoff, &pane, &req, || {}).unwrap();
+
+    assert_no_spawn_skill(dir.path());
+    assert_no_worker_skill(dir.path());
 }
 
 #[test]

@@ -2132,6 +2132,58 @@ fn the_claude_conversation_id_is_saved_with_the_attempt_before_the_launch() {
 }
 
 #[test]
+fn a_kept_trae_job_pins_the_thread_reported_by_exec_json() {
+    const THREAD: &str = "01a133c3-b12f-7033-ae77-38f3294fb68e";
+
+    let mut b = broker();
+    b.publish(
+        REQ,
+        SpawnArgs {
+            agent: Some(Engine::Trae),
+            ..args(MESSAGE)
+        },
+    );
+    b.settle();
+
+    let launches = b.pane.steps();
+    assert_eq!(launches.len(), 1);
+    let argv = &launches[0].2;
+    assert!(
+        argv.iter().any(|arg| arg == "--session-id"),
+        "TraeX exec still receives the launch name: {argv:?}"
+    );
+    assert_eq!(
+        b.row("service-2").unwrap().conversation_id,
+        None,
+        "the launch name is not resumable, so the row must wait for the reported thread"
+    );
+
+    let paths = ProjectPaths::for_session(&b.root, "service-2");
+    std::fs::write(
+        paths.job_log(),
+        format!(r#"{{"type":"thread.started","thread_id":"{THREAD}"}}"#)
+            + "\n"
+            + r#"{"type":"turn.completed"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        paths.job_last_message(),
+        r#"{"outcome":"needs_human","summary":"needs a person"}"#,
+    )
+    .unwrap();
+    std::fs::write(paths.job_done_signal(), "0").unwrap();
+
+    b.restart(FakePane::default());
+    b.step();
+    b.app.refresh();
+
+    let kept = b.row("service-2").expect("needs_human keeps the row");
+    assert!(!kept.enabled);
+    assert_eq!(kept.conversation_id.as_deref(), Some(THREAD));
+    assert_eq!(b.state(REQ), Some(ReceiptState::NeedsHuman));
+}
+
+#[test]
 fn an_ambiguous_claude_launch_keeps_its_conversation_id() {
     let mut b = broker_with(|inner, child| {
         inner.armed_launch_errors.get_mut().unwrap().insert(

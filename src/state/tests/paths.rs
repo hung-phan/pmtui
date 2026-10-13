@@ -71,6 +71,25 @@ fn for_session_rebases_state_under_sessions_id() {
 }
 
 #[test]
+fn paths_can_be_recovered_from_a_managed_state_dir() {
+    let root = ProjectPaths::from_state_dir("/tmp/proj/.project-state").unwrap();
+    assert_eq!(
+        root.state_dir(),
+        std::path::PathBuf::from("/tmp/proj/.project-state")
+    );
+    assert_eq!(
+        root.turn_signal(),
+        std::path::PathBuf::from("/tmp/proj/.project-state/.daemon/turn-complete")
+    );
+
+    let session = ProjectPaths::for_session("/tmp/proj", "bot-1");
+    let recovered = ProjectPaths::from_state_dir(session.state_dir()).unwrap();
+    assert_eq!(recovered.state_dir(), session.state_dir());
+    assert_eq!(recovered.turn_signal(), session.turn_signal());
+    assert!(ProjectPaths::from_state_dir("/tmp/proj/not-state/bot").is_none());
+}
+
+#[test]
 fn worker_skill_paths_are_correct() {
     let paths = ProjectPaths::for_session("/proj", "s1");
     assert_eq!(

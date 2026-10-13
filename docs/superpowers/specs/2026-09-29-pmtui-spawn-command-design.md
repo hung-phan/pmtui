@@ -110,7 +110,7 @@ names the requirement.
 |---|---|
 | `PMTUI_SESSION` | the stable session id |
 | `PMTUI_STATE_DIR` | the session's canonical state directory (`.project-state/sessions/<id>-<fnv8>`) |
-| `PMTUI_BIN` | canonical `pmtui` executable (pmd passes its sibling `pmtui`, or omits the variable when that file does not exist) |
+| `PMTUI_BIN` | canonical `pmtui` executable, resolved from the current executable, a sibling install, or the launching process's PATH; omitted when no executable file can be resolved |
 
 The variables are routing, not authentication. A session started before this
 change gets them at its next launch (Enter after pause, or `r`). Without
