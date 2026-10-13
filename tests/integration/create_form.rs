@@ -141,14 +141,12 @@ fn create_with_autopilot_starts_the_daemon() {
     // pmd is the point: a status claiming "daemon started" is worthless if no process
     // exists. Two independent observables — a live pid, and the singleton flock being
     // UNAVAILABLE to us (which is exactly how pmtui itself probes liveness).
+    let daemon_lock = agent_manager::lease::daemon_lock_path(&reg_path, socket.name());
+    let lock_held = wait_until(Duration::from_secs(10), || {
+        !pmd_pids_for(socket.name()).is_empty()
+            && matches!(agent_manager::lease::is_held(&daemon_lock), Ok(Some(true)))
+    });
     let pmd_pids = pmd_pids_for(socket.name());
-    let lock_held = matches!(
-        agent_manager::lease::try_acquire(&agent_manager::lease::daemon_lock_path(
-            &reg_path,
-            socket.name()
-        )),
-        Ok(None)
-    );
 
     // On-disk proof the form really submitted (independent of any pane text).
     let registry = Registry::load(&reg_path);

@@ -501,7 +501,7 @@ fn codex_visible_literal_message_is_retried_until_submitted() {
     let codex = dir.path().join("codex");
     std::fs::copy("/bin/sh", &codex).expect("copy shell as codex fixture");
     let command = format!(
-        "IFS= read -r first; printf '\n› %s\n' \"$first\"; IFS= read -r ignored; printf '\n› Ask Codex to do anything\n'; printf '%s\n' \"$first\" > {}; sleep 5",
+        "printf '› Ask Codex to do anything\n'; IFS= read -r first; printf '\n› %s\n' \"$first\"; IFS= read -r ignored; printf '\n› Ask Codex to do anything\n'; printf '%s\n' \"$first\" > {}; sleep 5",
         received.display()
     );
     driver
@@ -512,6 +512,10 @@ fn codex_visible_literal_message_is_retried_until_submitted() {
             &agent_manager::tmux::ManagedEnv::default(),
         )
         .expect("launch literal fixture");
+    assert!(
+        wait_for_pane_text(&driver, &session, "Ask Codex"),
+        "Codex-like fixture never drew its composer"
+    );
     let payload = "AM_LITERAL_MESSAGE_SUBMIT_OK";
     driver
         .send_keys(&session, payload)
@@ -590,7 +594,8 @@ fn codex_wrapped_literal_message_is_retried_until_submitted() {
     // Draw the swallowed draft as Codex does: 60 columns on the `›` row, the rest indented below,
     // then the blank row and footer. Only the second Enter submits.
     let command = format!(
-        "IFS= read -r first; rest=$(printf '%s' \"$first\" | cut -c61-); \
+        "printf '› Ask Codex to do anything\n'; \
+         IFS= read -r first; rest=$(printf '%s' \"$first\" | cut -c61-); \
          printf '\\n› %.60s\\n  %s\\n\\n  footer\\n' \"$first\" \"$rest\"; \
          IFS= read -r ignored; \
          printf '\\n\\033[1m›\\033[0m \\033[2mAsk Codex to do anything\\033[0m\\n'; \
@@ -605,6 +610,10 @@ fn codex_wrapped_literal_message_is_retried_until_submitted() {
             &agent_manager::tmux::ManagedEnv::default(),
         )
         .expect("launch wrapped-literal fixture");
+    assert!(
+        wait_for_pane_text(&driver, &session, "Ask Codex"),
+        "Codex-like fixture never drew its composer"
+    );
     let payload = format!(
         "AM_WRAPPED_LITERAL_{} please review the recent commits and summarize the three riskiest changes END",
         std::process::id()

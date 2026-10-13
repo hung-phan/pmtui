@@ -571,7 +571,9 @@ look stalled. A live busy terminal is newer evidence, and the product continues 
 **On a session that the supervisor does not drive, live activity wins over recorded state.** Nothing
 advances the record of that session, so the record stays as it was when the mode last changed. A working
 terminal therefore sets the state that the dashboard shows. The open decision stays in the record and
-stays visible. Only the claim that the product waits for a person goes away.
+stays visible. Only the claim that the product waits for a person goes away. A hook or turn signal from
+the last driven state is not authority after the session leaves Autopilot; the live terminal is the newer
+source.
 
 A session that is idle at its prompt with an open decision still needs a person. A decision on a session
 that the supervisor does drive keeps its place.

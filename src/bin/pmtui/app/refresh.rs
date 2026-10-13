@@ -33,6 +33,7 @@ enum ActivityObservation {
 }
 
 fn merge_activity(
+    hook_authoritative: bool,
     engine: Option<Engine>,
     hook_working: Option<bool>,
     observation: ActivityObservation,
@@ -47,7 +48,9 @@ fn merge_activity(
         // banner while a turn runs; after two byte-stable idle-composer captures, an unchanged
         // optional notify byte is stale rather than stronger evidence of work.
         ActivityObservation::IdleConfirmed
-            if hook_working == Some(true) && engine != Some(Engine::Codex) =>
+            if hook_authoritative
+                && hook_working == Some(true)
+                && engine != Some(Engine::Codex) =>
         {
             Some(true)
         }
@@ -58,10 +61,16 @@ fn merge_activity(
 /// [`merge_activity`] for a caller that ran its own two-capture idle confirmation, so the fork's
 /// source recheck weighs the turn hook exactly as the dashboard row does.
 pub(super) fn confirmed_idle_activity(
+    hook_authoritative: bool,
     engine: Option<Engine>,
     hook_working: Option<bool>,
 ) -> Option<bool> {
-    merge_activity(engine, hook_working, ActivityObservation::IdleConfirmed)
+    merge_activity(
+        hook_authoritative,
+        engine,
+        hook_working,
+        ActivityObservation::IdleConfirmed,
+    )
 }
 
 impl App {
@@ -215,18 +224,28 @@ impl App {
                     // A capture error on an otherwise-live pane stays working rather than
                     // preserving a stale completed-turn/idle value.
                     let hook_working = v.agent_working;
+                    let hook_authoritative = agent_manager::daemon::pmd_drives_row(v.mode, v.tier);
                     v.agent_working = match &live_pane {
-                        None => {
-                            merge_activity(v.engine, hook_working, ActivityObservation::Missing)
-                        }
+                        None => merge_activity(
+                            hook_authoritative,
+                            v.engine,
+                            hook_working,
+                            ActivityObservation::Missing,
+                        ),
                         Some(pane) => match driver.capture_tail(pane, ACTIVITY_CAPTURE_LINES) {
                             Err(_) => merge_activity(
+                                hook_authoritative,
                                 v.engine,
                                 hook_working,
                                 ActivityObservation::Unreadable,
                             ),
                             Ok(cap) if tmux::classify_pane(&cap) == tmux::PaneActivity::Busy => {
-                                merge_activity(v.engine, hook_working, ActivityObservation::Busy)
+                                merge_activity(
+                                    hook_authoritative,
+                                    v.engine,
+                                    hook_working,
+                                    ActivityObservation::Busy,
+                                )
                             }
                             Ok(cap) => {
                                 let (fp, count) = idle_gate_step(
@@ -235,6 +254,7 @@ impl App {
                                 );
                                 new_gate.insert(p.id.clone(), (fp, count));
                                 merge_activity(
+                                    hook_authoritative,
                                     v.engine,
                                     hook_working,
                                     if count < ACTIVITY_IDLE_CONFIRMATIONS {
@@ -549,7 +569,12 @@ mod idle_gate_tests {
     fn live_activity_combines_with_the_hook_in_the_fail_safe_direction() {
         for hook in [None, Some(false), Some(true)] {
             assert_eq!(
-                merge_activity(Some(Engine::Claude), hook, ActivityObservation::Missing),
+                merge_activity(
+                    true,
+                    Some(Engine::Claude),
+                    hook,
+                    ActivityObservation::Missing
+                ),
                 Some(false),
                 "no live pane is idle regardless of stale hook state"
             );
@@ -559,7 +584,7 @@ mod idle_gate_tests {
                 ActivityObservation::IdleUnconfirmed,
             ] {
                 assert_eq!(
-                    merge_activity(Some(Engine::Claude), hook, active),
+                    merge_activity(true, Some(Engine::Claude), hook, active),
                     Some(true),
                     "a live pane without confirmed idleness stays working: {hook:?} {active:?}"
                 );
@@ -567,6 +592,7 @@ mod idle_gate_tests {
         }
         assert_eq!(
             merge_activity(
+                true,
                 Some(Engine::Claude),
                 Some(true),
                 ActivityObservation::IdleConfirmed
@@ -576,6 +602,17 @@ mod idle_gate_tests {
         );
         assert_eq!(
             merge_activity(
+                false,
+                Some(Engine::Claude),
+                Some(true),
+                ActivityObservation::IdleConfirmed
+            ),
+            Some(false),
+            "an undriven row's stale hook cannot outrank a confirmed idle pane"
+        );
+        assert_eq!(
+            merge_activity(
+                true,
                 Some(Engine::Claude),
                 Some(false),
                 ActivityObservation::IdleConfirmed
@@ -585,6 +622,7 @@ mod idle_gate_tests {
         );
         assert_eq!(
             merge_activity(
+                true,
                 Some(Engine::Claude),
                 None,
                 ActivityObservation::IdleConfirmed
@@ -594,6 +632,7 @@ mod idle_gate_tests {
         );
         assert_eq!(
             merge_activity(
+                true,
                 Some(Engine::Codex),
                 Some(true),
                 ActivityObservation::IdleConfirmed

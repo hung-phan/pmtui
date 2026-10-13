@@ -103,11 +103,13 @@ fn run_finite_wake_case(engine: Engine) {
     let socket = TmuxSocket::new(match engine {
         Engine::Claude => "pm-finite-claude",
         Engine::Codex => "pm-finite-codex",
+        Engine::Trae => "pm-finite-trae",
     });
     let driver = TmuxDriver::with_socket(socket.name());
     let id = match engine {
         Engine::Claude => "finite-claude",
         Engine::Codex => "finite-codex",
+        Engine::Trae => "finite-trae",
     };
     let root = dir.path().to_path_buf();
     let paths = ProjectPaths::for_session(&root, id);
@@ -220,12 +222,12 @@ fn run_finite_wake_case(engine: Engine) {
 
 #[test]
 #[ignore]
-fn finite_wakes_reconcile_bounded_work_for_claude_and_codex() {
+fn finite_wakes_reconcile_bounded_work_for_every_autopilot_engine() {
     if !tmux_available() {
         eprintln!("skipping finite-wake test: tmux not available");
         return;
     }
-    for engine in [Engine::Claude, Engine::Codex] {
+    for engine in [Engine::Claude, Engine::Codex, Engine::Trae] {
         run_finite_wake_case(engine);
     }
 }

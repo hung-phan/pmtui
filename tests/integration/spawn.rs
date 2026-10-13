@@ -1079,9 +1079,19 @@ fn five_children_commit_the_same_file_in_their_own_worktrees() {
             // Each child writes the same path and commits it, which is what the branch has to carry.
             job_on_start: concat!(
                 "printf '// %s\\n' \"$sid\" > shared.rs\n",
-                "git add -A >/dev/null 2>&1\n",
-                "git -c user.email=pm@example.invalid -c user.name=pm -c commit.gpgsign=false \\\n",
-                "  commit --quiet -m \"work from $sid\" >/dev/null 2>&1\n"
+                "# Five child commits share repository metadata; wait out a transient git lock instead of\n",
+                "# turning it into a false done-with-uncommitted-work result.\n",
+                "committed=0\n",
+                "for attempt in 1 2 3 4 5; do\n",
+                "  if git add -A >> \"$logs/$sid.git.log\" 2>&1 && \\\n",
+                "     git -c user.email=pm@example.invalid -c user.name=pm -c commit.gpgsign=false \\\n",
+                "       commit --quiet -m \"work from $sid\" >> \"$logs/$sid.git.log\" 2>&1; then\n",
+                "    committed=1\n",
+                "    break\n",
+                "  fi\n",
+                "  sleep 0.1\n",
+                "done\n",
+                "[ \"$committed\" = 1 ] || exit 1\n"
             )
             .to_string(),
             ..Stub::default()

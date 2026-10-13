@@ -485,11 +485,17 @@ impl App {
         let Some(second) = self.idle_source_fingerprint(source, session) else {
             return false;
         };
-        let hook_working =
-            ProjectView::read_agent_loop(&source.id, paths, source.enabled, SystemClock.now())
-                .agent_working;
+        let source_view =
+            ProjectView::read_agent_loop(&source.id, paths, source.enabled, SystemClock.now());
+        let hook_working = source_view.agent_working;
+        let hook_authoritative =
+            agent_manager::daemon::pmd_drives_row(source_view.mode, source_view.tier);
         if first != second
-            || super::refresh::confirmed_idle_activity(Some(engine), hook_working) != Some(false)
+            || super::refresh::confirmed_idle_activity(
+                hook_authoritative,
+                Some(engine),
+                hook_working,
+            ) != Some(false)
         {
             self.status = format!("{}: still working; fork once it is idle", source.id);
             return false;

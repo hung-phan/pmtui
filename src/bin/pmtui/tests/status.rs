@@ -3,6 +3,7 @@
 //! a status behind instead of pressing nothing.
 
 use super::*;
+use std::time::Instant;
 
 #[test]
 fn cycle_tier_without_a_selection_or_registry_entry_explains_itself() {
@@ -398,6 +399,22 @@ fn refresh_reads_an_idle_claude_prompt_as_idle_not_running() {
             &tmux::ManagedEnv::default(),
         )
         .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if driver
+            .capture_tail(&chat, 20)
+            .is_ok_and(|capture| capture.contains("auto mode on"))
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        driver
+            .capture_tail(&chat, 20)
+            .is_ok_and(|capture| capture.contains("auto mode on")),
+        "idle fixture never reached the pane"
+    );
 
     let mut app = loop_app(&reg_path);
     app.socket = socket.name().to_string();
