@@ -112,9 +112,10 @@ fn caret_motion_keeps_the_result_cursor_while_paste_resets_it() {
 #[test]
 fn page_navigation_clamps_to_filtered_results() {
     let mut app = switcher_app(0);
-    app.move_switch_cursor(app::scroll::PAGE_LINES as isize);
+    // The key path must keep navigation in the switcher rather than scroll the dashboard.
+    handle_key(&mut app, KeyCode::PageDown, KeyModifiers::NONE);
     assert!(matches!(app.mode, UiMode::Switching { cursor: 1, .. }));
-    app.move_switch_cursor(-(app::scroll::PAGE_LINES as isize));
+    handle_key(&mut app, KeyCode::PageUp, KeyModifiers::NONE);
     assert!(matches!(app.mode, UiMode::Switching { cursor: 0, .. }));
 }
 

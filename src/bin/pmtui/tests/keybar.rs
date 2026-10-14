@@ -218,8 +218,8 @@ fn keybar_hides_chips_that_do_not_apply() {
     trae.engine = Some(Engine::Trae);
     let text = line_text(&keybar_line(&app_with(vec![trae], UiMode::Normal), 220));
     assert!(
-        !text.contains("Fork"),
-        "TraeX cannot fork, so the keybar must not offer it: {text}"
+        text.contains("Fork"),
+        "TraeX supports native conversation forks: {text}"
     );
 
     // An AUTOPILOT row: `Goal` applies (it is the direction pmd steers by). Still no

@@ -25,7 +25,7 @@ private-socket tmux server (`tmux -L <socket>`). On its heartbeat the daemon:
 3. **reads decisions** from the agent's marker and from positively identified in-terminal
    choice menus;
 4. **routes** each decision. An ordinary one can be auto-handled by a **decider** consult on
-   the session's chosen engine (`claude -p` by default, `codex` optional; switch with `e`),
+   the session's chosen engine (Claude by default, Codex or TRAE optional; switch with `e`),
    which checks the concrete choice against the goal, the latest accepted result, and project
    evidence. Anything clearly human-owned — external, privileged, irreversible, or outside
    the goal — **escalates** to the log plus a desktop notification and parks the session for
@@ -85,15 +85,13 @@ the Page keys.
 
 Every terminal that pmtui or pmd launches with `PMTUI_BIN` in its environment first gets the
 `pmtui-spawn` skill in the project root, so the agent inside knows how to ask for a child
-session. TraeX terminals that pmtui starts also get `agent-manager-worker` before launch, because
-TraeX reads project skills at startup; later nudges still include the compact report schema as a
-fallback for adopted older panes. Codex and TraeX read skills from `.agents/skills/`; Claude gets
-exact compatibility symlinks under `.claude/skills/`. The spawn skill is a short procedure: spawn
-only independent work, write a self-contained Message, run `pmtui spawn` with one generated
-request id, and act on the JSON `state` even on a nonzero exit. Nested spawns are refused and a
-sixth child waits its turn, and neither process ever creates or edits your `AGENTS.md`. See the
-[`pmtui spawn` section in the README](../README.md#handing-work-to-a-child-session-pmtui-spawn)
-for the command itself.
+session. Codex and TraeX read it from `.agents/skills/`; Claude gets an exact compatibility
+symlink under `.claude/skills/`. The skill is a short procedure: spawn only independent work,
+write a self-contained Message, run `pmtui spawn` with one generated request id, and act on
+the JSON `state` even on a nonzero exit. Nested spawns are refused and a sixth child waits its
+turn, and neither process ever creates or edits your `AGENTS.md`. See the [`pmtui spawn`
+section in the README](../README.md#handing-work-to-a-child-session-pmtui-spawn) for the
+command itself.
 
 ### What the dashboard said earlier
 
@@ -180,9 +178,16 @@ typed in full, type the `/` and its children become candidates.
 ### Engine sessions and their conversations
 
 Claude lets pmtui name a conversation up front. Codex does not — it assigns its own. TRAE CLI
-accepts a name but cannot resume by it. So Codex and TRAE CLI sessions learn their identity from the
-engine itself, reported when their **first turn finishes**. Until then the session has no conversation to go back to, which is why a brand-new
-Codex row shows none.
+accepts a name but cannot resume by it. Both learn their identity from the engine itself.
+Codex reports it when the **first turn finishes**. TRAE can report it at session startup,
+and reports it again when a turn finishes. Until an identity arrives, the session has no
+conversation to go back to.
+
+TRAE forks use the session-start hook to identify the child before it runs a turn.
+Review the new hook in an ordinary TRAE session first. Existing sessions need a restart
+to load it; hook trust remains a choice for you.
+Hook injection can be disabled with `PM_TURN_HOOK=off`, `0`, or `false`. When hooks are
+enabled, the managed terminal must carry `PMTUI_BIN`; hooks do not search PATH for `pmtui`.
 
 Once it has one, `Enter` resumes that conversation and a restart keeps it. Before this, neither the
 dashboard nor the driver had any way to know the id, so a Codex session that had been working for hours
@@ -453,12 +458,13 @@ it at all; you drive by hand. See
 <summary><b>What engine and model does the decider use? (<code>e</code>)</b></summary>
 
 **Claude** by default. On an **autopilot** row, press **`e`** to pick that session's decider
-engine and model in two steps: the engine (`claude` or `codex`), then **Enter** for its model
+engine and model in two steps: the engine (`claude`, `codex`, or `traex`), then **Enter** for its model
 list (`(default)` plus the models discovered for that engine). ↑↓ move, Enter selects, Esc
 steps back or cancels. It writes only `config.json`, so it applies to the next decision with
 no restart, and `(default)` falls back to the engine's own default. Whatever you pick, a
 reply that is not a clean verdict escalates to you. (`e` on a `standard` row refuses and
-points you at `m`.)
+points you at `m`.) TRAE uses a read-only, bounded `traex exec` run. A saved model wins over
+`PM_SUPERVISOR_TRAE_MODEL`; with neither set, TraeX selects its default model.
 </details>
 
 <details>

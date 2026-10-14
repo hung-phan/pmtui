@@ -36,12 +36,6 @@ struct StagedFork {
 /// Why `fork_selected` refuses this row before touching any file, or `None` when it may try. The
 /// Board derives its `f` chip from this, so the lane never offers a fork the handler always refuses.
 pub(crate) fn fork_refusal(view: &ProjectView) -> Option<String> {
-    if view.engine == Some(Engine::Trae) {
-        return Some(format!(
-            "{}: TraeX conversation fork is not implemented yet",
-            view.id
-        ));
-    }
     // A staged spawn has not launched: its spawn request owns the row's first start.
     if view.spawn_staged {
         return Some(staged_refusal(&view.id));
@@ -150,20 +144,6 @@ impl App {
                 return;
             }
         };
-        let ledger_id = ledger
-            .as_ref()
-            .and_then(|state| state.conversation_id.as_deref());
-        let saved = match (ledger_id, source.conversation_id.as_deref()) {
-            (Some(ledger), Some(registry)) if ledger != registry => {
-                self.status = format!(
-                    "{}: ledger conversation {ledger} disagrees with registry {registry}",
-                    source.id
-                );
-                return;
-            }
-            (Some(id), _) | (None, Some(id)) => Some(id.to_string()),
-            (None, None) => None,
-        };
         let engine = match (ledger.as_ref().map(|state| state.engine), source.engine) {
             (Some(ledger), Some(registry)) if ledger != registry => {
                 self.status = format!(
@@ -174,6 +154,22 @@ impl App {
             }
             (Some(engine), _) | (None, Some(engine)) => engine,
             (None, None) => Engine::Claude,
+        };
+        let ledger_id = ledger
+            .as_ref()
+            .and_then(|state| state.conversation_id.as_deref());
+        let saved = match (ledger_id, source.conversation_id.as_deref()) {
+            // TRAE can save a caller-chosen name here; only its hook below identifies a thread.
+            _ if engine == Engine::Trae => None,
+            (Some(ledger), Some(registry)) if ledger != registry => {
+                self.status = format!(
+                    "{}: ledger conversation {ledger} disagrees with registry {registry}",
+                    source.id
+                );
+                return;
+            }
+            (Some(id), _) | (None, Some(id)) => Some(id.to_string()),
+            (None, None) => None,
         };
         // A Claude id is minted before the first turn, and Claude writes no transcript until
         // that turn runs. `--resume` of such an id opens an empty session, so a confidently
@@ -296,11 +292,16 @@ impl App {
             }
         };
 
-        let identity_file = fork.paths.daemon_dir().join("fork-conversation-id");
+        let identity_file = if engine == Engine::Trae {
+            fork.paths.codex_conversation_id()
+        } else {
+            fork.paths.daemon_dir().join("fork-conversation-id")
+        };
         let argv = agent_manager::worker::build_fork_command(
             engine,
             &source_conversation,
-            agent_manager::worker::turn_hook_enabled().then_some(&fork.paths.turn_signal()),
+            agent_manager::worker::turn_hook_enabled_for(engine)
+                .then_some(&fork.paths.turn_signal()),
             (engine == Engine::Claude).then_some(identity_file.as_path()),
             source.worker_model.as_deref(),
         );
@@ -398,13 +399,13 @@ impl App {
             let probe = match engine {
                 Engine::Claude => self.agent_tmux.claude_session_id(session, identity_file),
                 Engine::Codex => self.agent_tmux.codex_session_id(session, root),
-                Engine::Trae => anyhow::bail!("TRAE fork support is not implemented yet"),
+                Engine::Trae => Ok(agent_manager::state::codex_identity::read_at(identity_file)),
             };
             match probe {
                 // Codex holds the source rollout open while it copies the history, so seeing
                 // it is a startup state. Claude's hook reports once, so its answer is final.
                 Ok(Some(id)) if id.eq_ignore_ascii_case(source_id) => {
-                    if engine == Engine::Claude {
+                    if engine != Engine::Codex {
                         anyhow::bail!("engine returned the source conversation id");
                     }
                     last_error = Some(anyhow::anyhow!(
@@ -540,6 +541,14 @@ impl App {
         terminal: SourceTerminal,
         saved: Option<String>,
     ) -> Option<String> {
+        if engine == Engine::Trae {
+            // Standard sessions have no daemon to copy the hook's identity into a ledger.
+            let identity = read_captured_conversation_id(&entry_state_paths(source));
+            if identity.is_none() {
+                self.refuse_unstarted_fork(&source.id);
+            }
+            return identity;
+        }
         if engine == Engine::Codex && matches!(terminal, SourceTerminal::Idle) {
             let session = session_name(&source.id, &source.root);
             match self.agent_tmux.codex_session_id(&session, &source.root) {

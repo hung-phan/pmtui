@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use crate::clock::Epoch;
+use crate::registry::Engine;
 
 use super::dialog_keys;
 use super::driver::{Driver, StepHandle};
@@ -81,10 +82,6 @@ pub(super) fn codex_draft_visible(capture: &str, text: &str, pasted: bool) -> bo
         let prefix: String = line.chars().take(CODEX_DRAFT_MATCH_CHARS).collect();
         !prefix.is_empty() && draft.starts_with(&prefix)
     })
-}
-
-pub(super) fn codex_pasted_draft_still_pending(plain: &str, styled: &str, text: &str) -> bool {
-    super::activity::has_composer(plain) && codex_draft_visible(styled, text, true)
 }
 
 /// Whether the composer row's first visible character after its `›` lead is drawn dim, the style
@@ -842,6 +839,15 @@ impl Driver for TmuxDriver {
     /// because copy-mode swallows the submitting Enter while `paste-buffer` still reports success —
     /// the silent-payload-loss bug that made a parked human answer disappear.
     fn send_keys(&self, session: &str, text: &str) -> Result<()> {
+        self.send_keys_for_engine(session, text, None)
+    }
+
+    fn send_keys_for_engine(
+        &self,
+        session: &str,
+        text: &str,
+        engine: Option<Engine>,
+    ) -> Result<()> {
         let target = exact_pane(session);
         // A pane left in COPY-MODE eats the nudge (see `Driver::pane_in_mode` for the
         // measurements), and the paste path does it while still returning `Ok` — so leave
@@ -881,14 +887,13 @@ impl Driver for TmuxDriver {
         const CODEX_SUBMIT_RECHECK_GUARD: Duration = Duration::from_millis(300);
         const CODEX_SUBMIT_ATTEMPTS: usize = 3;
         let uses_paste_buffer = text.contains('\n') || text.len() > LITERAL_MAX;
-        let command_is_codex = self.pane_current_command(session)?.as_deref() == Some("codex");
-        let content_is_codex = !command_is_codex
-            && self
-                .capture_tail(session, 40)
-                .is_ok_and(|capture| capture.lines().any(super::activity::is_codex_composer));
-        // tmux can report the shell wrapper instead of the engine. Codex's composer is the
-        // fallback identity signal, which keeps retry behavior tied to visible UI state.
-        let retry_observed_draft = command_is_codex || content_is_codex;
+        let retry_observed_draft = match engine {
+            Some(Engine::Codex) => true,
+            Some(_) => false,
+            // Legacy direct callers have no row engine. Restrict the fallback to tmux's process
+            // identity; pane content can include quoted Codex output from another agent.
+            None => self.pane_current_command(session)?.as_deref() == Some("codex"),
+        };
         let codex_paste = uses_paste_buffer && retry_observed_draft;
         if !uses_paste_buffer {
             // `-l` sends the text literally (no key-name interpretation); `--` guards a leading dash.
@@ -1008,12 +1013,6 @@ impl Driver for TmuxDriver {
             // Styled, so the dim placeholder can be told from a still-typed draft.
             let capture = self.capture_tail_styled(session, 80)?;
             let draft_visible = codex_draft_visible(&capture, text, uses_paste_buffer);
-            if uses_paste_buffer
-                && attempt + 1 < attempts
-                && codex_pasted_draft_still_pending(&plain, &capture, text)
-            {
-                continue;
-            }
             if !draft_visible {
                 return Ok(());
             }

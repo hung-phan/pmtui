@@ -31,6 +31,7 @@ use super::supervisor::*;
 
 mod awaiting_report_exit;
 mod budget;
+mod decider_selection_recovery;
 mod dialog_advice;
 mod drive;
 mod fallback;
@@ -38,10 +39,12 @@ mod lifecycle;
 mod marker;
 mod nudge;
 mod progress;
+mod reported_identity;
 mod scenarios;
 mod session;
 mod stops;
 mod supervisor;
+mod trae_decider;
 
 struct Fx {
     _dir: TempDir,

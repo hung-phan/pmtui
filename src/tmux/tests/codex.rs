@@ -215,6 +215,101 @@ fn process_children_validates_each_threads_children_file() {
 }
 
 #[test]
+fn process_children_keeps_live_siblings_when_a_task_has_disappeared() {
+    let dir = tempdir().unwrap();
+    let proc_root = dir.path();
+    write_proc_node(proc_root, 100, 0, "101");
+    write_proc_node(proc_root, 101, 100, "");
+    // A thread can exit after task enumeration; its missing children file is not fatal.
+    std::fs::create_dir_all(proc_root.join("100/task/102")).unwrap();
+
+    assert_eq!(
+        process_children(proc_root, 100).unwrap(),
+        vec![ProcessIdentity {
+            pid: 101,
+            parent_pid: 100,
+            start_time: 10_100,
+        }]
+    );
+}
+
+#[test]
+fn session_probe_propagates_a_descendants_invalid_process_identity() {
+    let dir = tempdir().unwrap();
+    let project = project_dir(&dir, "project");
+    let proc_root = dir.path().join("proc");
+    write_proc_node(&proc_root, 100, 0, "101");
+    write_proc_node(&proc_root, 101, 100, "");
+    let stat = proc_root.join("101/stat");
+    std::fs::write(&stat, "101 (codex) S not-a-pid").unwrap();
+
+    // Invalid process evidence must not become a successful "no conversation" result.
+    let error = session_id_from_proc(&proc_root, 100, &project).unwrap_err();
+    let chain = format!("{error:#}");
+    assert!(
+        chain.contains(&format!("parse {}", stat.display())),
+        "{chain}"
+    );
+    assert!(chain.contains("parent pid is not an integer"), "{chain}");
+}
+
+#[test]
+#[cfg(unix)]
+fn session_probe_ignores_non_rollout_descriptors_but_keeps_the_user_identity() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempdir().unwrap();
+    let project = project_dir(&dir, "project");
+    let proc_root = dir.path().join("proc");
+    write_proc_node(&proc_root, 100, 0, "");
+    let sessions = dir.path().join("sessions");
+    std::fs::create_dir(&sessions).unwrap();
+    let rollout = sessions.join(format!("rollout-{ID}.jsonl"));
+    std::fs::write(
+        &rollout,
+        metadata_line("session_meta", Some(ID), None, &project, "user"),
+    )
+    .unwrap();
+    symlink(&rollout, proc_root.join("100/fd/7")).unwrap();
+    // Codex also holds terminals, pipes and unrelated files open; none proves a thread.
+    for (fd, target) in [("0", "/dev/pts/1"), ("1", "pipe:[1234]"), ("2", "/tmp/log")] {
+        symlink(target, proc_root.join("100/fd").join(fd)).unwrap();
+    }
+
+    assert_eq!(
+        session_id_from_proc(&proc_root, 100, &project).unwrap(),
+        Some(ID.to_string())
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn session_probe_preserves_rollout_validation_errors() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempdir().unwrap();
+    let project = project_dir(&dir, "project");
+    let proc_root = dir.path().join("proc");
+    write_proc_node(&proc_root, 100, 0, "");
+    let sessions = dir.path().join("sessions");
+    std::fs::create_dir(&sessions).unwrap();
+    let rollout = sessions.join(format!("rollout-{ID}.jsonl"));
+    std::fs::write(
+        &rollout,
+        metadata_line("session_meta", Some(OTHER_ID), None, &project, "user"),
+    )
+    .unwrap();
+    symlink(&rollout, proc_root.join("100/fd/7")).unwrap();
+
+    // A plausible filename cannot override conflicting metadata from the open file.
+    let error = session_id_from_proc(&proc_root, 100, &project).unwrap_err();
+    assert!(
+        error.to_string().contains("does not match filename id"),
+        "{error:#}"
+    );
+}
+
+#[test]
 #[cfg(unix)]
 fn codex_process_detection_accepts_supported_names_and_fails_closed() {
     use std::os::unix::fs::symlink;

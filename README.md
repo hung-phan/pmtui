@@ -15,7 +15,7 @@
 
 ---
 
-`pmtui` is a native Rust supervisor for long-running `claude` / `codex` sessions. Each project
+`pmtui` is a native Rust supervisor for long-running `claude` / `codex` / `traex` sessions. Each project
 session owns **one persistent tmux terminal**. It gets nudged on a cadence so it keeps making
 progress toward a goal you set, and reaches you **only when a decision genuinely needs a human**.
 
@@ -79,8 +79,7 @@ In the dashboard:
    work in it, press **`ctrl+q`** to leave it, and the session keeps its conversation — the agent
    keeps running, and you are back on the dashboard.
 3. **`m`** turns on **autopilot**. From then on a running `pmd` nudges that session on its
-   cadence, auto-handles ordinary choices, and escalates the rest to you. TRAE CLI rows stay
-   Standard for now. Give an autopilot session a goal with **`g`** — it is the direction every
+   cadence, auto-handles ordinary choices, and escalates the rest to you. Give an autopilot session a goal with **`g`** — it is the direction every
    nudge steers by.
 4. **`1`**, **`2`** and **`0`** switch views: **Sessions**, the terminal-first list with the selected
    session's transcript beside it, **Tasks**, the same sessions as cards in Paused, Needs You,
@@ -169,8 +168,8 @@ cargo test --test integration -- --ignored --test-threads=1
 Some integration tests shell out to **real tmux** and are `#[ignore]`d so `cargo test` stays fast;
 that real-tmux acceptance is the load-bearing end-to-end gate. [`AGENTS.md`](AGENTS.md) has the
 full test and eval matrix (real-tmux acceptance, the LLM nudge judge, and the decider benchmark).
-The decider benchmark runs **both** engines by default; set `PM_DECIDER_BENCH_ENGINE=claude` or
-`=codex` to run just one. The original design write-up is
+The decider benchmark runs **all three** engines by default; set
+`PM_DECIDER_BENCH_ENGINE=claude`, `=codex`, or `=traex` to run one. The original design write-up is
 [`docs/superpowers/specs/2026-08-12-agent-manager-daemon-design.md`](docs/superpowers/specs/2026-08-12-agent-manager-daemon-design.md).
 
 ## Star history

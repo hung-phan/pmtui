@@ -67,9 +67,8 @@ impl Engine {
     /// picker overlay, and the picker cursor all index into, so they cannot disagree about
     /// which engines exist or in what order.
     pub const ALL: [Engine; 3] = [Engine::Claude, Engine::Codex, Engine::Trae];
-    /// Engines with a tested supervisor/decider contract. TRAE is excluded until its hook and
-    /// structured consult behavior are proven.
-    pub const DECIDERS: [Engine; 2] = [Engine::Claude, Engine::Codex];
+    /// Keep both selectors aligned: each engine has a bounded, read-only consult.
+    pub const DECIDERS: [Engine; 3] = Self::ALL;
 
     /// The binary name to launch.
     pub fn bin(self) -> &'static str {

@@ -269,6 +269,8 @@ pub struct JobScheduler {
     advise_binary: Option<bool>,
     /// The supervisor's latch + streaks (see [`AdviseHealth`]).
     advise_health: AdviseHealth,
+    /// Persist the selection with its health so a config edit can recover a restarted daemon.
+    advise_selection: Option<job::DeciderHealthSelection>,
     /// `(pane fingerprint, advice text)` of the last verdict actually delivered — the
     /// anti-ping-pong memory (Rule 7). If a consult proposes byte-identical advice about
     /// a byte-identical pane, the worker did not act on what we already typed, so typing
@@ -349,6 +351,7 @@ impl JobScheduler {
             advice_cleanup_seq: Cell::new(0),
             advise_binary: None,
             advise_health: AdviseHealth::default(),
+            advise_selection: None,
             advise_last: None,
             worker_skill_installed: false,
             claude_home: None,
@@ -486,6 +489,7 @@ impl JobScheduler {
             self.run = l.run.clone();
             self.advise_health.latched = l.decider_latched;
             self.advise_health.reason = l.decider_latch_reason.clone();
+            self.advise_selection = l.decider_health_selection.clone();
             self.advise_seq = self
                 .advise_seq
                 .max(l.decider_runs.iter().map(|run| run.seq).max().unwrap_or(0));
@@ -534,6 +538,8 @@ impl JobScheduler {
         let mut ledger = loaded.unwrap_or_else(|| AgentLoopState::fresh(self.engine, None, now));
         let control = state::read_control(&self.paths)
             .with_context(|| format!("read control for {}", self.project_id))?;
+        self.reconcile_decider_selection(config.decider_engine, config.decider_model.as_deref());
+        let selection_changed = ledger.decider_health_selection != self.advise_selection;
         let mut control_changed = was_missing;
         let mut human_cadence_changed = false;
         if let Some(secs) = control.human_cadence_s
@@ -553,28 +559,55 @@ impl JobScheduler {
             ledger.updated_at = now;
             control_changed = true;
         }
-        // CODEX IDENTITY, reconciled on EVERY tick rather than only when a session is relaunched.
+        // CODEX/TRAE IDENTITY, reconciled on EVERY tick rather than only when a session is
+        // relaunched.
         //
         // Codex is handed no conversation id and reports its own through the turn hook, so the
         // ledger is the last to know. Reading that file only at relaunch left the ledger empty for
         // the whole life of a live session — a window, not merely a delay: a worker-authored
         // `conversation_id` could land first and win permanently, and nothing authoritative existed
-        // to compare it against. Reconciling here closes the window, and lets the ledger converge
-        // after any fresh start — which is what makes the one-shot `resume_unconfirmed` dance
-        // unnecessary for codex (see `mint_or_fresh`). TraeX reports its thread id the same way,
-        // through its `Stop` hook, and that id is the only one it resumes (see
-        // `resolve_conversation_id`).
+        // to compare it against. TraeX reports its thread id the same way, through its hooks, and a
+        // NEW revision of the SAME id is proof that a resume reached the engine again even if the
+        // worker crashes before writing its normal marker.
         if matches!(self.engine, Engine::Codex | Engine::Trae)
-            && let Some(id) = state::codex_identity::read(&self.paths)
-            && ledger.conversation_id.as_deref() != Some(id.as_str())
+            && let Some((id, revision)) =
+                marker::reported_identity_revision(&self.paths.codex_conversation_id())
         {
-            ledger.conversation_id = Some(id);
-            ledger.updated_at = now;
-            control_changed = true;
+            let id_changed = ledger.conversation_id.as_deref() != Some(id.as_str());
+            let revision_changed = ledger.conversation_id_revision.as_ref() != Some(&revision);
+            let confirmed_trae_resume = self.engine == Engine::Trae
+                && !id_changed
+                && ledger.resume_unconfirmed
+                && ledger
+                    .conversation_id_revision
+                    .as_ref()
+                    .is_some_and(|prior| prior != &revision);
+            let baseline_legacy_trae_resume = self.engine == Engine::Trae
+                && !id_changed
+                && ledger.resume_unconfirmed
+                && ledger.conversation_id_revision.is_none();
+            if id_changed
+                || confirmed_trae_resume
+                || (revision_changed && !baseline_legacy_trae_resume)
+            {
+                if id_changed {
+                    ledger.conversation_id = Some(id);
+                }
+                if confirmed_trae_resume {
+                    ledger.resume_unconfirmed = false;
+                }
+                ledger.conversation_id_revision = Some(revision);
+                ledger.updated_at = now;
+                control_changed = true;
+            }
         }
-        if control_changed {
+        if control_changed || selection_changed {
             self.save_control_ledger(&mut ledger, human_cadence_changed)?;
-            self.run = ledger.run.clone();
+            // A selection-only save must not replace a recovered legacy worker handle: the
+            // Running arm still owes that process cleanup before the persistent session drives.
+            if control_changed {
+                self.run = ledger.run.clone();
+            }
         }
 
         match self.run.clone() {
@@ -659,6 +692,7 @@ impl JobScheduler {
         next.advice_inflight = self.parked_advice();
         next.decider_latched = self.advise_health.latched;
         next.decider_latch_reason = self.advise_health.reason.clone();
+        next.decider_health_selection = self.advise_selection.clone();
         // PRESERVE A HUMAN-PINNED CADENCE across this write. pmtui's `c` edit
         // (`AgentLoopState::retime`) sets `cadence_s` AND `cadence_pinned` on disk out of
         // band; pmd's `next` was cloned from the `base` it loaded at the START of this tick,

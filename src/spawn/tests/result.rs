@@ -285,6 +285,20 @@ fn a_codex_stream_names_the_thread_it_started() {
     }
 }
 
+#[test]
+fn an_older_trae_result_event_names_the_thread_it_used() {
+    let log = concat!(
+        r#"{"type":"assistant","message":"done"}"#,
+        "\n",
+        r#"{"type":"result","subtype":"success","session_id":"01a133c3-b12f-7033-ae77-38f3294fb68e","result":"ok"}"#,
+        "\n",
+    );
+    assert_eq!(
+        codex_thread_id(log).as_deref(),
+        Some("01a133c3-b12f-7033-ae77-38f3294fb68e")
+    );
+}
+
 /// A codex stream with no terminator is no result — same rule as claude's missing `result` event.
 #[test]
 fn an_unterminated_codex_turn_has_no_result() {

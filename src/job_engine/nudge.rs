@@ -183,7 +183,10 @@ impl JobScheduler {
         // disk, the agent's own `pending_context`/`last_status`/`last_plan`, and the WHITELISTED
         // "Since last wake" signal flags (elapsed bucket, answer-just-arrived, stale-plan streak).
         let text = self.compose_nudge(base, now, answer_arrived, marker_less_finish);
-        if driver.send_keys(&session, &text).is_err() {
+        if driver
+            .send_keys_for_engine(&session, &text, Some(self.engine))
+            .is_err()
+        {
             // Transient tmux error: route through `busy_recheck` (NOT a bare re-park) so a
             // PERSISTENTLY failing send escalates a human-dismissable Stuck at
             // `DEFAULT_STALL_BUSY_S` (~30min) instead of festering until only the 24h

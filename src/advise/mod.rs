@@ -82,3 +82,14 @@ pub use pane_text::{apply_text, has_forbidden_control_bytes, sanitize_control_by
 pub use preflight::{hard_floor_hit, hard_floor_hit_in, supervisor_enabled};
 pub use prompt::{OUTPUT_SCHEMA, SUPERVISOR_SYSTEM_PROMPT, build_consult_prompt};
 pub use reply::{Refusal, Verdict, validate};
+
+/// Keep live consults and their benchmark on the same instructions. Milestone E moved the
+/// decider protocol into a skill, but headless consults cannot depend on engine skill discovery:
+/// Claude runs `--bare`, and exec-style engines may not load project skills before the prompt.
+/// The skill body is therefore appended to the prompt bytes every decider engine receives.
+pub fn supervisor_system_prompt() -> String {
+    format!(
+        "{SUPERVISOR_SYSTEM_PROMPT}\n\n{}",
+        crate::skills::DECIDER_SKILL_MD
+    )
+}

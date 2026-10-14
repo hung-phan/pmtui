@@ -28,6 +28,30 @@ fn pmtui_arguments_reject_unknown_or_missing_values() {
 }
 
 #[test]
+fn session_start_hook_records_identity_without_claiming_a_completed_turn() {
+    // Fork publication needs the assigned child id before any agent turn has run.
+    let args = strings(&["hook", "session-start"]);
+    assert_eq!(parse_action(&args).unwrap(), Action::HookSessionStart);
+    let dir = tempfile::tempdir().unwrap();
+    let paths = ProjectPaths::for_session(dir.path(), "bot");
+    std::fs::create_dir_all(paths.state_dir()).unwrap();
+    let env = |key: &str| {
+        (key == tmux::ENV_STATE_DIR).then(|| paths.state_dir().to_string_lossy().into_owned())
+    };
+    record_session_identity(&env, TRAE_STOP_PAYLOAD).unwrap();
+    assert_eq!(
+        read_captured_conversation_id(&paths).as_deref(),
+        Some("01a133c3-b12f-7033-ae77-38f3294fb68e")
+    );
+    assert!(!paths.turn_signal().exists());
+    record_session_identity(&env, r#"{"session_id":"invalid"}"#).unwrap();
+    assert_eq!(
+        read_captured_conversation_id(&paths).as_deref(),
+        Some("01a133c3-b12f-7033-ae77-38f3294fb68e")
+    );
+}
+
+#[test]
 fn hook_turn_complete_appends_to_the_managed_state_dir() {
     let dir = tempfile::tempdir().unwrap();
     let state_dir = dir.path().join(".project-state/sessions/bot");

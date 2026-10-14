@@ -63,6 +63,13 @@ shipped green:
 PM_CODEX_IDENTITY=1 cargo test --test integration codex_identity -- --ignored --nocapture
 ```
 
+For changes to TRAE identity hooks or native forking, run its real-engine gate after a person has
+reviewed the hooks in an ordinary TRAE session. The gate never approves trust prompts:
+
+```bash
+PM_TRAE_IDENTITY=1 cargo test --test integration trae_identity -- --ignored --nocapture
+```
+
 For decider, policy, or situation-projection changes, run the decider benchmark:
 
 ```bash
@@ -88,6 +95,8 @@ server and daemon when the test ends.
 
 ## Invariants
 
+- Keep engine-specific dispatch and command builders separate for Claude, Codex and TRAE.
+  A provider's CLI or lifecycle change must not silently change another provider's behavior.
 - One project session, one tmux terminal. Never create separate human and pmd
   terminals for the same session.
 - pmd is the sole writer of `state.json`. The worker is the sole writer of
@@ -177,9 +186,12 @@ server and daemon when the test ends.
   parse is "not known yet" — never an argument.
 - TraeX RESUMES ONLY THE THREAD ITS HOOK REPORTED. It accepts `--session-id <uuid>` but stores it as a
   thread NAME, and `traex resume <uuid>` looks a UUID up as a thread id only, so a name never resumes.
-  `pmtui hook turn-complete` writes the `session_id` of the `Stop` payload to the same
+  `pmtui hook session-start` and `pmtui hook turn-complete` write the `session_id` of their
+  `SessionStart` and `Stop` payloads to the same
   `ProjectPaths::codex_conversation_id` file Codex uses; pmd adopts it on every tick, and a TraeX
   session with no reported thread starts a new conversation rather than resuming a name.
+  A startup hook records identity only, never a completed turn. A native TRAE fork waits for its
+  child's startup identity, and refuses the source id. Both hooks remain subject to human trust.
 - No machine declares a project done. The human closes the session.
 
 ## Spawn Command Surface
@@ -196,7 +208,8 @@ pmtui spawn --cancel --request-id ID      # ask once; asking twice is asking onc
 
 `--cancel` names its child through `--request-id`; it takes no value of its own. The agent flag is
 `--agent`, not `--engine`, and accepts `claude`, `codex`, or `traex`. TRAE supports Standard
-sessions, spawned jobs, and Autopilot. Autopilot uses TraeX `hooks.Stop` plus
+sessions, spawned jobs, Autopilot, native forks, and read-only decider consults. TraeX uses
+`hooks.SessionStart` plus `pmtui hook session-start`, and `hooks.Stop` plus
 `pmtui hook turn-complete`; hook trust remains an engine prompt that a person answers once.
 
 Exit codes are the contract an agent branches on. `--json` still prints a result document on a

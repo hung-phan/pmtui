@@ -8,6 +8,7 @@
 //! failure may have left an agent that read its initial Message, so a caller must never
 //! launch that Message again.
 
+#[cfg(test)]
 use std::ffi::OsStr;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -114,12 +115,11 @@ impl std::error::Error for LaunchError {}
 /// Canonical pmtui path for this process: itself for `pmtui`, a sibling for `pmd`,
 /// or the `pmtui` this process could run from PATH.
 pub fn pmtui_bin_for_current_process() -> Option<PathBuf> {
-    let path = std::env::var_os("PATH");
-    pmtui_bin_for_exe_with_path(&std::env::current_exe().ok()?, path.as_deref())
+    pmtui_bin_for_exe(&std::env::current_exe().ok()?)
 }
 
-/// [`pmtui_bin_for_current_process`] without the PATH fallback: `exe` itself when it is named
-/// `pmtui`, otherwise the `pmtui` beside it.
+/// [`pmtui_bin_for_current_process`]: `exe` itself when it is named `pmtui`, otherwise the
+/// `pmtui` beside it.
 pub(crate) fn pmtui_bin_for_exe(exe: &Path) -> Option<PathBuf> {
     let candidate = if exe.file_name().is_some_and(|name| name == "pmtui") {
         exe.to_path_buf()
@@ -129,15 +129,12 @@ pub(crate) fn pmtui_bin_for_exe(exe: &Path) -> Option<PathBuf> {
     executable_file(&candidate)
 }
 
-/// [`pmtui_bin_for_exe`] plus the PATH fallback pmd needs when it was launched from a layout where
-/// `pmtui` is not its sibling. The path is captured before launching agents so TraeX hooks do not
-/// depend on the engine process preserving pmd's PATH.
+/// Back-compatible test seam for callers that still pass a PATH. The value is ignored because a
+/// PATH hit can be an older `pmtui` without the hook subcommand.
+#[cfg(test)]
 pub(crate) fn pmtui_bin_for_exe_with_path(exe: &Path, path: Option<&OsStr>) -> Option<PathBuf> {
-    pmtui_bin_for_exe(exe).or_else(|| {
-        path.into_iter()
-            .flat_map(std::env::split_paths)
-            .find_map(|dir| executable_file(&dir.join("pmtui")))
-    })
+    let _ = path;
+    pmtui_bin_for_exe(exe)
 }
 
 fn executable_file(candidate: &Path) -> Option<PathBuf> {

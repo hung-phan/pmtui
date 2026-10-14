@@ -234,22 +234,30 @@ fn codex_result(log: &str, result_file: Option<&str>) -> Option<JobResult> {
     Some(JobResult::clamped(outcome, &text, None))
 }
 
-/// The thread id codex announced for this run, from the FIRST `thread.started` event in its stream.
+/// The thread id an engine announced for this run, from the FIRST `thread.started` event or the
+/// older TraeX `type=result` shape with `session_id`.
 ///
 /// codex has no caller-chosen conversation id — the one flag claude does have (`--session-id`) — so the
-/// only way to learn which conversation a run created is to read the id codex generated. A job exits, so
-/// it never resumes itself; this is what lets a HUMAN pick up the conversation of a job that failed or
-/// asked for them, instead of losing it with the process.
+/// only way to learn which conversation a run created is to read the id codex generated. TraeX has the
+/// same problem in practice: its caller-chosen `--session-id` is a name, not the resumable thread id.
+/// A job exits, so it never resumes itself; this is what lets a HUMAN pick up the conversation of a job
+/// that failed or asked for them, instead of losing it with the process.
 pub fn codex_thread_id(log: &str) -> Option<String> {
     json_lines(log)
-        .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("thread.started"))
         .find_map(|v| {
-            Some(
-                v.get("thread_id")
+            let ty = v.get("type").and_then(|t| t.as_str())?;
+            match ty {
+                "thread.started" => v
+                    .get("thread_id")
                     .or_else(|| v.get("thread").and_then(|t| t.get("id")))?
-                    .as_str()?
-                    .to_string(),
-            )
+                    .as_str()
+                    .map(str::to_string),
+                "result" => v
+                    .get("session_id")
+                    .and_then(|id| id.as_str())
+                    .map(str::to_string),
+                _ => None,
+            }
         })
         .filter(|id| !id.is_empty())
 }

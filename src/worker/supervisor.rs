@@ -1,10 +1,10 @@
-//! The supervisor consult: one headless, model-pinned, clock-bounded `claude` that is
-//! handed a goal plus a worker's question and returns small JSON. Separate from
-//! [`super::launch`] because it is a deliberately different shape — one JSON envelope
-//! rather than a token stream — with its own model pin and spend knob, and every flag
-//! here was measured against the installed CLI rather than assumed.
+//! A supervisor consult is one bounded, read-only run that returns a JSON verdict.
+//! Each engine owns its command builder so a provider's CLI changes cannot affect
+//! another provider. These are separate from worker launches because a consult
+//! must observe the worker's tree without changing it.
 
 use super::launch::PermissionMode;
+use crate::registry::Engine;
 
 /// The model the SUPERVISOR consult is pinned to (m20). See
 /// [`build_supervisor_command`] for why an explicit full id is mandatory and why this
@@ -41,6 +41,9 @@ pub const SUPERVISOR_BUDGET_USD_ENV: &str = "PM_SUPERVISOR_BUDGET_USD";
 /// `openai.gpt-5.5` with no `-m`), so we pass `-m` only when the operator names one, rather than
 /// inventing a default id that is wrong on another deployment.
 pub const SUPERVISOR_CODEX_MODEL_ENV: &str = "PM_SUPERVISOR_CODEX_MODEL";
+
+/// Separate from Codex because the two providers need not accept the same model ids.
+pub const SUPERVISOR_TRAE_MODEL_ENV: &str = "PM_SUPERVISOR_TRAE_MODEL";
 
 // There was a `SUPERVISOR_DENIED_TOOLS` here, denying every built-in tool. Its argument was
 // that the supervisor is "asked for ONE judgement about text it was handed, so it needs no tools
@@ -205,31 +208,72 @@ pub fn build_supervisor_command_codex(
     timeout_s: u64,
     kill_grace_s: u64,
 ) -> Vec<String> {
-    // Seeded from a literal (rather than `Vec::new()` + a run of `push`) so the fixed prefix reads
-    // in one place and clippy's `vec_init_then_push` stays quiet — same posture as the claude
-    // builder above, which seeds its `env …` prefix the same way.
+    build_exec_supervisor_command(ExecSupervisorSpec {
+        engine: Engine::Codex,
+        model,
+        system_prompt,
+        prompt,
+        last_message_path,
+        timeout_s,
+        kill_grace_s,
+        extra_flags: &[],
+    })
+}
+
+/// Keep TRAE consults ephemeral because they must not create resumable worker threads.
+pub fn build_supervisor_command_trae(
+    model: Option<&str>,
+    system_prompt: &str,
+    prompt: &str,
+    last_message_path: &str,
+    timeout_s: u64,
+    kill_grace_s: u64,
+) -> Vec<String> {
+    build_exec_supervisor_command(ExecSupervisorSpec {
+        engine: Engine::Trae,
+        model,
+        system_prompt,
+        prompt,
+        last_message_path,
+        timeout_s,
+        kill_grace_s,
+        extra_flags: &["--ephemeral"],
+    })
+}
+
+struct ExecSupervisorSpec<'a> {
+    engine: Engine,
+    model: Option<&'a str>,
+    system_prompt: &'a str,
+    prompt: &'a str,
+    last_message_path: &'a str,
+    timeout_s: u64,
+    kill_grace_s: u64,
+    extra_flags: &'a [&'a str],
+}
+
+fn build_exec_supervisor_command(spec: ExecSupervisorSpec<'_>) -> Vec<String> {
     let mut argv: Vec<String> = vec![
         "timeout".into(),
         "-k".into(),
-        kill_grace_s.to_string(),
-        timeout_s.to_string(),
-        "codex".into(),
+        spec.kill_grace_s.to_string(),
+        spec.timeout_s.to_string(),
+        spec.engine.bin().into(),
         "exec".into(),
         "-s".into(),
         "read-only".into(),
         "--skip-git-repo-check".into(),
         "--output-last-message".into(),
-        last_message_path.to_string(),
+        spec.last_message_path.to_string(),
     ];
-    if let Some(m) = model {
+    argv.extend(spec.extra_flags.iter().map(|flag| (*flag).to_string()));
+    if let Some(model) = spec.model {
         argv.push("-m".into());
-        argv.push(m.to_string());
+        argv.push(model.to_string());
     }
-    // No --system-prompt on codex: fold it into the prompt head. The prompt is the trailing
-    // positional after `--`, same three reasons as the claude builder (dash-leading text,
-    // subcommand shadowing, variadic flags).
+    // These CLIs have no system-prompt flag, so keep instructions ahead of worker-derived data.
     argv.push("--".into());
-    argv.push(format!("{system_prompt}\n\n{prompt}"));
+    argv.push(format!("{}\n\n{}", spec.system_prompt, spec.prompt));
     argv
 }
 

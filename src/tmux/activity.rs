@@ -4,7 +4,7 @@
 //! because a false Idle is the dangerous direction — it types a nudge into a
 //! working agent — so no predicate here can be changed without the others in view.
 
-use super::dialog::dialog_option_text;
+use super::dialog::{classify_dialog, dialog_option_text};
 
 /// Whether an interactive claude pane is mid-response or idle at its prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +56,10 @@ pub(super) const PANE_TAIL_LINES: usize = 16;
 ///      which is NEVER bare — it carries a rotating placeholder).
 ///   3. Else Busy (conservative default — unknown ⇒ don't nudge).
 pub fn classify_pane(capture: &str) -> PaneActivity {
+    // TraeX can leave its input box visible behind a blocking chooser.
+    if classify_dialog(capture).is_some() {
+        return PaneActivity::Busy;
+    }
     let non_empty: Vec<&str> = capture.lines().filter(|l| !l.trim().is_empty()).collect();
     // No content at all ⇒ we cannot confirm an idle prompt ⇒ stay conservative.
     if non_empty.is_empty() {
@@ -85,7 +89,8 @@ pub fn classify_pane(capture: &str) -> PaneActivity {
     // two can never disagree about what counts as an input field.
     if window
         .iter()
-        .any(|line| is_bare_prompt(line) || is_codex_composer(line))
+        .enumerate()
+        .any(|(at, _)| is_composer_at(window, at))
     {
         PaneActivity::Idle
     } else {
@@ -161,6 +166,10 @@ pub(super) fn is_busy_spinner_line(line: &str) -> bool {
 /// Deliberately independent of Busy/Idle: claude and codex both keep their composer on
 /// screen while generating, so a mid-response pane still has one.
 pub fn has_composer(capture: &str) -> bool {
+    // A visible input box does not own Enter while a dialog owns the keyboard.
+    if classify_dialog(capture).is_some() {
+        return false;
+    }
     let non_empty: Vec<&str> = capture.lines().filter(|l| !l.trim().is_empty()).collect();
     if non_empty.is_empty() {
         return false;
@@ -168,7 +177,8 @@ pub fn has_composer(capture: &str) -> bool {
     let start = non_empty.len().saturating_sub(PANE_TAIL_LINES);
     non_empty[start..]
         .iter()
-        .any(|l| is_bare_prompt(l) || is_codex_composer(l))
+        .enumerate()
+        .any(|(at, _)| is_composer_at(&non_empty[start..], at))
 }
 
 /// A content fingerprint of the TRANSCRIPT REGION of an Idle-classified capture — the
@@ -205,7 +215,8 @@ pub fn idle_fingerprint(capture: &str) -> u64 {
     let lines: Vec<&str> = capture.lines().collect();
     let boundary = lines
         .iter()
-        .rposition(|l| is_bare_prompt(l) || is_codex_composer(l))
+        .enumerate()
+        .rposition(|(at, _)| is_composer_at(&lines, at))
         .unwrap_or(lines.len());
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for line in &lines[..boundary] {
@@ -227,7 +238,8 @@ pub fn progress_fingerprint(capture: &str) -> u64 {
     let lines: Vec<&str> = capture.lines().collect();
     let boundary = lines
         .iter()
-        .rposition(|line| is_bare_prompt(line) || is_codex_composer(line))
+        .enumerate()
+        .rposition(|(at, _)| is_composer_at(&lines, at))
         .unwrap_or(lines.len());
     let mut hash = FNV_OFFSET;
     for line in &lines[..boundary] {
@@ -254,6 +266,28 @@ fn is_volatile_busy_line(line: &str) -> bool {
         || lower.contains("ctrl+c to interrupt")
         || line.chars().any(|c| matches!(c, '\u{2800}'..='\u{28FF}'))
         || is_busy_spinner_line(line)
+}
+
+fn is_composer_at(lines: &[&str], at: usize) -> bool {
+    let line = lines[at];
+    if is_bare_prompt(line) || is_codex_composer(line) {
+        return true;
+    }
+    // TraeX shares Claude's transcript lead, so prose alone cannot establish Idle.
+    // Only captured empty-field hints inside the ruled input box qualify; keeping
+    // this separate also prevents TraeX from enabling Codex-only Enter retries.
+    let hint = line.trim().strip_prefix('❯').map(str::trim);
+    matches!(
+        hint,
+        Some("Explain this codebase" | "Ask TRAE CLI to do anything")
+    ) && at
+        .checked_sub(1)
+        .and_then(|before| lines.get(before))
+        .is_some_and(|top| top.trim().starts_with("────"))
+        && lines.get(at + 1).is_some_and(|bottom| {
+            let bottom = bottom.trim();
+            bottom.starts_with("────") && bottom.chars().all(|ch| ch == '─')
+        })
 }
 
 /// A bare claude prompt: `>` or `❯` followed only by whitespace. The real UI pads

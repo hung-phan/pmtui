@@ -13,6 +13,7 @@ use anyhow::Result;
 use crate::advise::{self, Consult, Refusal};
 use crate::clock::Epoch;
 use crate::job::{self, AgentLoopState, AutopilotEventKind, JobRun};
+use crate::registry::Engine;
 use crate::tmux::{self, Driver};
 use crate::worker;
 
@@ -162,7 +163,54 @@ pub(super) struct DeciderSkip<'a> {
     pub(super) effect: Option<crate::worker::StopEffect>,
 }
 
+/// Health follows the model actually launched, including an environment override,
+/// so changing that override while pmd is stopped can recover a failed transport.
+fn resolved_decider_model(engine: Engine, model: Option<&str>) -> Option<String> {
+    if let Some(model) = model.filter(|model| !model.trim().is_empty()) {
+        return Some(model.to_string());
+    }
+    match engine {
+        Engine::Claude => Some(
+            std::env::var(worker::SUPERVISOR_MODEL_ENV)
+                .ok()
+                .filter(|model| !model.trim().is_empty())
+                .unwrap_or_else(|| worker::SUPERVISOR_MODEL.to_string()),
+        ),
+        Engine::Codex => std::env::var(worker::SUPERVISOR_CODEX_MODEL_ENV)
+            .ok()
+            .filter(|model| !model.trim().is_empty())
+            .map(|model| model.trim().to_string()),
+        Engine::Trae => std::env::var(worker::SUPERVISOR_TRAE_MODEL_ENV)
+            .ok()
+            .filter(|model| !model.trim().is_empty())
+            .map(|model| model.trim().to_string()),
+    }
+}
+
 impl JobScheduler {
+    pub(super) fn reconcile_decider_selection(
+        &mut self,
+        engine: crate::registry::Engine,
+        model: Option<&str>,
+    ) {
+        // An old consult must finish against its original health and verdict source. The next
+        // consult (or idle tick) adopts the new selection after that debt has been resolved.
+        if self.advise.is_some() || self.advise_orphaned.is_some() {
+            return;
+        }
+        let model = resolved_decider_model(engine, model);
+        if let Some(previous) = &self.advise_selection {
+            if previous.engine == engine && previous.model == model {
+                return;
+            }
+            self.advise_health = super::fallback::AdviseHealth::default();
+            self.advise_binary = None;
+        }
+        // An older ledger cannot prove a selection changed. Record a baseline without clearing
+        // its latch, so merely restarting pmd never re-enables a known broken transport.
+        self.advise_selection = Some(job::DeciderHealthSelection { engine, model });
+    }
+
     pub(super) fn cleanup_completed_advice_artifacts(&self, state: &AgentLoopState) {
         let active = state.advice_inflight.as_ref().map(|parked| parked.seq);
         let mut cleaned_through = self.advice_cleanup_seq.get();
@@ -316,6 +364,7 @@ impl JobScheduler {
         decider_engine: crate::registry::Engine,
         decider_model: Option<&str>,
     ) -> Result<AdviceSpawn> {
+        self.reconcile_decider_selection(decider_engine, decider_model);
         if !self.advise_enabled || self.advise_health.latched {
             return Ok(AdviceSpawn::Unavailable);
         }
@@ -408,6 +457,7 @@ impl JobScheduler {
             effect,
             policy,
         } = decider;
+        self.reconcile_decider_selection(decider_engine, decider_model);
         // A missing binary does not fail `spawn_step`: its shell exits 127 later.
         // Probe first so a missing binary reaches the human without paying for a doomed consult.
         let decider_bin = decider_engine.bin();
@@ -423,41 +473,23 @@ impl JobScheduler {
         }
         let seq = self.next_decider_seq();
         let session = tmux::supervisor_session_name(&self.project_id, &self.work_dir, seq);
-        // Milestone E: the decider skill is APPENDED to the consult's `--system-prompt` because the
-        // consult runs `--bare` (which disables skill auto-discovery, so a file-based skill cannot
-        // reach it). The `SUPERVISOR_SYSTEM_PROMPT` const now carries a conditional DIRECTIVE
-        // paragraph (added for the human-directive channel), but C's supervisor tests assert its
-        // exact SUBSTRINGS via `.contains()`, so those still hold; the decider body is purely
-        // additive after it.
-        let system_prompt = format!(
-            "{}\n\n{}",
-            advise::SUPERVISOR_SYSTEM_PROMPT,
-            crate::skills::DECIDER_SKILL_MD
-        );
-        // Dispatch on the SELECTED engine. The claude arm is byte-for-byte the pre-switch path
-        // (model pin + `--json-schema` + opt-in budget, verdict read from the tee'd log); the
-        // codex arm builds `codex exec … --output-last-message <path>` and points the reap at that
-        // isolated file. `advise::validate` re-derives every guarantee from whatever the engine
-        // emits, so a non-verdict reply on either arm escalates rather than being trusted.
-        let (argv, verdict_path, resolved_model) = match decider_engine {
-            crate::registry::Engine::Claude => {
-                // The pinned model is overridable because WHICH id resolves is deployment
-                // specific, and a wrong one fails SILENTLY (see `build_supervisor_command`).
-                // The per-session `config.decider_model` wins when set; otherwise the existing
-                // env→const fallback is used byte-for-byte (backward-compat: the decider
-                // benchmark relies on the unset behaviour). An empty/whitespace override reads
-                // as unset (filtered here, exactly like the env branch below does its own).
-                let model = decider_model
-                    .filter(|s| !s.trim().is_empty())
-                    .map(str::to_string)
-                    .unwrap_or_else(|| {
-                        std::env::var(worker::SUPERVISOR_MODEL_ENV)
-                            .ok()
-                            .filter(|s| !s.trim().is_empty())
-                            .unwrap_or_else(|| worker::SUPERVISOR_MODEL.to_string())
-                    });
+        // Milestone E: the decider skill is appended to the consult's system prompt because
+        // headless consults cannot rely on engine skill discovery. Claude runs `--bare`, and
+        // exec-style engines may not load project skills before they read the prompt. The
+        // fixed supervisor prompt still owns the non-worker-influenced policy; the skill body
+        // is purely additive protocol text after it.
+        let system_prompt = advise::supervisor_system_prompt();
+        // Dispatch on the SELECTED engine. Each arm owns its launch and verdict source so a
+        // provider's CLI or lifecycle change cannot silently alter another provider's contract.
+        // `advise::validate` re-derives every guarantee from whatever the engine emits, so a
+        // non-verdict reply on any arm escalates rather than being trusted.
+        let resolved_model = resolved_decider_model(decider_engine, decider_model);
+        let (argv, verdict_path) = match decider_engine {
+            Engine::Claude => {
                 let argv = worker::build_supervisor_command(
-                    &model,
+                    resolved_model
+                        .as_deref()
+                        .unwrap_or(worker::SUPERVISOR_MODEL),
                     &system_prompt,
                     advise::OUTPUT_SCHEMA,
                     &advise::build_consult_prompt(&consult),
@@ -472,39 +504,32 @@ impl JobScheduler {
                         .filter(|s| !s.is_empty())
                         .as_deref(),
                 );
-                (argv, None, Some(model))
+                (argv, None)
             }
-            crate::registry::Engine::Codex => {
-                // Opt-in model pin (codex resolves a default itself); no `--json-schema`/budget.
-                // The per-session `config.decider_model` wins when set; otherwise the existing
-                // env→`None` fallback. `None`/empty ⇒ no `-m`, exactly as the builder documents:
-                // an empty/whitespace override is filtered here so it behaves identically to `None`.
-                let model = decider_model
-                    .filter(|s| !s.trim().is_empty())
-                    .map(str::to_string)
-                    .or_else(|| {
-                        std::env::var(worker::SUPERVISOR_CODEX_MODEL_ENV)
-                            .ok()
-                            .map(|s| s.trim().to_string())
-                            .filter(|s| !s.is_empty())
-                    });
+            engine @ (Engine::Codex | Engine::Trae) => {
                 let last = self.paths.advice_last_message(seq);
-                let argv = worker::build_supervisor_command_codex(
-                    model.as_deref(),
-                    &system_prompt,
-                    &advise::build_consult_prompt(&consult),
-                    &last.to_string_lossy(),
-                    SUPERVISOR_SHELL_TIMEOUT_S,
-                    SUPERVISOR_KILL_GRACE_S,
-                );
-                (argv, Some(last), model)
-            }
-            crate::registry::Engine::Trae => {
-                self.advise_health.latch_off(
-                    &self.project_id,
-                    "TRAE is not a supported decider engine yet",
-                );
-                return Ok(None);
+                let prompt = advise::build_consult_prompt(&consult);
+                let last_text = last.to_string_lossy();
+                let argv = match engine {
+                    Engine::Codex => worker::build_supervisor_command_codex(
+                        resolved_model.as_deref(),
+                        &system_prompt,
+                        &prompt,
+                        &last_text,
+                        SUPERVISOR_SHELL_TIMEOUT_S,
+                        SUPERVISOR_KILL_GRACE_S,
+                    ),
+                    Engine::Trae => worker::build_supervisor_command_trae(
+                        resolved_model.as_deref(),
+                        &system_prompt,
+                        &prompt,
+                        &last_text,
+                        SUPERVISOR_SHELL_TIMEOUT_S,
+                        SUPERVISOR_KILL_GRACE_S,
+                    ),
+                    Engine::Claude => unreachable!("matched above"),
+                };
+                (argv, Some(last))
             }
         };
         let audit = job::DeciderRun {

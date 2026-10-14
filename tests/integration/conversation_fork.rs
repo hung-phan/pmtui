@@ -136,6 +136,10 @@ fn rig(tag: &str, engine: Engine, saved: bool, paused: bool, source: SourceStub)
     ledger.engine = engine;
     ledger.conversation_id = saved.then(|| SOURCE_ID.to_string());
     job::save(&source_paths, &ledger).unwrap();
+    if engine == Engine::Trae && saved {
+        // A stopped TRAE source is resumable only through its retained engine report.
+        state::write_text_atomic(&source_paths.codex_conversation_id(), SOURCE_ID).unwrap();
+    }
     state::write_text_atomic(&source_paths.brief(), "fork acceptance goal").unwrap();
     state::write_text_atomic(&source_paths.directive(), "do not publish").unwrap();
 
@@ -188,8 +192,12 @@ fn assert_child_published(rig: &ForkRig, source_before: &agent_manager::registry
             assert!(args.contains(&format!("--resume {SOURCE_ID}")), "{args}");
             assert!(args.contains("--fork-session"), "{args}");
         }
-        Engine::Codex => assert!(args.contains(&format!("fork {SOURCE_ID}")), "{args}"),
-        Engine::Trae => panic!("TRAE fork support is not implemented"),
+        Engine::Codex | Engine::Trae => {
+            assert!(args.contains(&format!("fork {SOURCE_ID}")), "{args}")
+        }
+    }
+    if rig.engine == Engine::Trae {
+        assert!(!child_paths.turn_signal().exists());
     }
 }
 
@@ -204,12 +212,16 @@ fn source_entry(rig: &ForkRig) -> agent_manager::registry::ProjectEntry {
 
 #[test]
 #[ignore]
-fn native_conversation_fork_creates_a_standard_child_for_both_engines() {
+fn native_conversation_fork_creates_a_standard_child_for_all_engines() {
     if !tmux_available() {
         eprintln!("skipping conversation fork test: tmux not available");
         return;
     }
-    for (tag, engine) in [("forkcl", Engine::Claude), ("forkcx", Engine::Codex)] {
+    for (tag, engine) in [
+        ("forkcl", Engine::Claude),
+        ("forkcx", Engine::Codex),
+        ("forktr", Engine::Trae),
+    ] {
         if engine == Engine::Codex && !cfg!(target_os = "linux") {
             eprintln!("skipping Codex fork test: exact fork identity discovery uses Linux /proc");
             continue;
@@ -230,7 +242,7 @@ fn native_conversation_fork_creates_a_standard_child_for_both_engines() {
 
 #[test]
 #[ignore]
-fn native_fork_of_a_live_idle_source_leaves_it_running_for_both_engines() {
+fn native_fork_of_a_live_idle_source_leaves_it_running_for_all_engines() {
     if !tmux_available() {
         eprintln!("skipping live-source fork test: tmux not available");
         return;
@@ -240,6 +252,7 @@ fn native_fork_of_a_live_idle_source_leaves_it_running_for_both_engines() {
     for (tag, engine, saved) in [
         ("forklcl", Engine::Claude, true),
         ("forklcx", Engine::Codex, false),
+        ("forkltr", Engine::Trae, false),
     ] {
         if engine == Engine::Codex && !cfg!(target_os = "linux") {
             eprintln!(
@@ -403,7 +416,33 @@ fn install_stub(fx: &EnterFixture, engine: Engine, launches: &Path, source: Sour
                 child = child_rollout.display(),
             )
         }
-        Engine::Trae => panic!("TRAE fork support is not implemented"),
+        Engine::Trae => {
+            // Execute the launcher's command, so quoting or a missing hook cannot
+            // pass merely because this fixture knows how to write an identity.
+            format!(
+                "#!/bin/sh\n\
+                 printf '%s\\n' \"$*\" >> '{}'\n\
+                 case \" $* \" in\n\
+                 *\" fork \"*) identity='{CHILD_ID}';;\n\
+                 *) identity='{SOURCE_ID}';;\n\
+                 esac\n\
+                 hook=''\n\
+                 for arg do\n\
+                   case \"$arg\" in\n\
+                   hooks.SessionStart=*)\n\
+                     value=${{arg#*command=}}\n\
+                     value=${{value%,timeout=*}}\n\
+                     hook=$(printf '%s' \"$value\" | jq -er '.') || exit 1\n\
+                     ;;\n\
+                   esac\n\
+                 done\n\
+                 [ -n \"$hook\" ] || exit 1\n\
+                 printf '{{\"session_id\":\"%s\",\"hook_event_name\":\"SessionStart\"}}' \"$identity\" | sh -c \"$hook\" || exit 1\n\
+                 printf 'earlier answer\\n──────────────────────────────\\n❯ Ask TRAE CLI to do anything\\n──────────────────────────────\\n'\n\
+                 exec cat\n",
+                launches.display()
+            )
+        }
     };
     std::fs::write(&bin, script).unwrap();
     use std::os::unix::fs::PermissionsExt;

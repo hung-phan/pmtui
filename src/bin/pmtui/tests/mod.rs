@@ -128,6 +128,7 @@ mod events;
 mod forking;
 mod goal;
 mod help;
+mod hook_regressions;
 mod keybar;
 mod keys;
 mod launch_env;
@@ -510,6 +511,21 @@ impl Driver for FakePane {
         }
         if !self.0.skip_launch_alive {
             self.0.alive.lock().unwrap().insert(session.to_string());
+        }
+        if argv.iter().any(|arg| arg.contains("hooks.SessionStart"))
+            && let Some(identity) = self.0.codex_session_ids.get(session)
+        {
+            // Model the engine's startup event, so the fork must read its own file
+            // instead of borrowing the source identity from the fake process probe.
+            let payload = serde_json::json!({"session_id": identity}).to_string();
+            record_session_identity(
+                &|key| {
+                    (key == tmux::ENV_STATE_DIR)
+                        .then(|| env.state_dir.to_string_lossy().into_owned())
+                },
+                &payload,
+            )
+            .map_err(|error| tmux::LaunchError::Probe(error.to_string()))?;
         }
         Ok(tmux::LaunchOutcome::Started)
     }

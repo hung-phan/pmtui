@@ -66,8 +66,8 @@ pub(super) fn turn_hook_value_enabled(value: Option<&str>) -> bool {
     !matches!(value.map(str::trim), Some("off" | "0" | "false"))
 }
 
-pub(super) fn turn_hook_value_enabled_for(engine: Engine, value: Option<&str>) -> bool {
-    engine == Engine::Trae || turn_hook_value_enabled(value)
+pub(super) fn turn_hook_value_enabled_for(_engine: Engine, value: Option<&str>) -> bool {
+    turn_hook_value_enabled(value)
 }
 
 /// Build the argv to launch a phase worker for `engine`. The worker is told (in
@@ -497,6 +497,8 @@ pub fn build_loop_command(
             if turn_signal.is_some() {
                 argv.push("-c".into());
                 argv.push(trae_turn_hook_config());
+                argv.push("-c".into());
+                argv.push(trae_session_start_hook_config());
             }
             match resume {
                 Resume::Fresh {
@@ -579,6 +581,8 @@ pub fn build_standard_command(
             if turn_signal.is_some() {
                 argv.push("-c".into());
                 argv.push(trae_turn_hook_config());
+                argv.push("-c".into());
+                argv.push(trae_session_start_hook_config());
             }
             match resume {
                 Resume::Fresh {
@@ -632,7 +636,7 @@ pub fn build_fork_command(
             argv.push("--fork-session".into());
             argv
         }
-        Engine::Codex => {
+        Engine::Codex | Engine::Trae => {
             let mut argv = build_standard_command(
                 engine,
                 &Resume::Fresh { session_id: None },
@@ -642,9 +646,6 @@ pub fn build_fork_command(
             argv.push("fork".into());
             argv.push(source_id.to_string());
             argv
-        }
-        Engine::Trae => {
-            panic!("TRAE fork support is not implemented yet");
         }
     }
 }
@@ -790,11 +791,23 @@ fn codex_turn_notify_config(turn_signal: &Path) -> String {
 
 /// The stable command TraeX's Stop hook runs. It is deliberately path-free because TraeX
 /// persists hook trust by command hash; per-session paths would turn one approval into many.
-const TRAE_TURN_HOOK_COMMAND: &str = r#"sh -c 'exec "${PMTUI_BIN:-pmtui}" hook turn-complete'"#;
+/// `PMTUI_BIN` is required so a hook never executes an older `pmtui` found through PATH.
+const TRAE_TURN_HOOK_COMMAND: &str =
+    r#"sh -c 'test -n "${PMTUI_BIN:-}" && exec "$PMTUI_BIN" hook turn-complete'"#;
 
 fn trae_turn_hook_config() -> String {
     let cmd = toml_basic_escape(TRAE_TURN_HOOK_COMMAND);
     format!("hooks.Stop=[{{hooks=[{{type=\"command\",async=false,command=\"{cmd}\",timeout=5}}]}}]")
+}
+
+fn trae_session_start_hook_config() -> String {
+    // Install this on ordinary launches too, so a human can review the stable
+    // hook before a detached fork needs its child identity.
+    let command = r#"sh -c 'test -n "${PMTUI_BIN:-}" && exec "$PMTUI_BIN" hook session-start'"#;
+    let cmd = toml_basic_escape(command);
+    format!(
+        "hooks.SessionStart=[{{hooks=[{{type=\"command\",async=false,command=\"{cmd}\",timeout=5}}]}}]"
+    )
 }
 
 fn toml_basic_escape(value: &str) -> String {

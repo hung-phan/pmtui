@@ -89,6 +89,14 @@ pub struct AgentLoopState {
     /// default that always resumes.
     #[serde(default)]
     pub resume_unconfirmed: bool,
+    /// The file revision of the hook-reported conversation id that started the current
+    /// unconfirmed TraeX resume.
+    ///
+    /// TraeX can report the SAME thread id again after a successful resume. The value is
+    /// proof only if the file revision changed after the launch; the id text alone cannot
+    /// distinguish a fresh hook event from the stale id that caused the resume attempt.
+    #[serde(default)]
+    pub conversation_id_revision: Option<MarkerRevision>,
     pub engine: Engine,
     /// Per-session heartbeat cadence in seconds; `None` ⇒ the harness default.
     #[serde(default)]
@@ -232,6 +240,9 @@ pub struct AgentLoopState {
     pub decider_latched: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decider_latch_reason: Option<String>,
+    /// Keep health tied to its selection so a restart cannot hide a configuration change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decider_health_selection: Option<DeciderHealthSelection>,
     /// Bounded, structured audit history for read-only decider consults. Operational behavior never
     /// depends on it: pmd writes it alongside the existing lifecycle state and pmtui only reads it.
     #[serde(
@@ -288,6 +299,13 @@ pub struct AgentLoopState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub situation: Option<LedgerSituation>,
     pub updated_at: Epoch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeciderHealthSelection {
+    pub engine: Engine,
+    pub model: Option<String>,
 }
 
 /// A supervisor consult that is spawned-but-unhonoured, recorded on the ledger so a
@@ -977,6 +995,7 @@ impl AgentLoopState {
             created_at: now,
             conversation_id: None,
             resume_unconfirmed: false,
+            conversation_id_revision: None,
             engine,
             cadence_s,
             cadence_pinned: false,
@@ -1000,6 +1019,7 @@ impl AgentLoopState {
             advice_inflight: None,
             decider_latched: false,
             decider_latch_reason: None,
+            decider_health_selection: None,
             decider_runs: Vec::new(),
             turn_seq: 0,
             turn_trace: Vec::new(),
@@ -1162,6 +1182,7 @@ mod tests {
         // A pre-fallback ledger has no `resume_unconfirmed`; it defaults to `false` — a
         // confirmed cid that always RESUMES (never the one-shot create-fallback).
         assert!(!st.resume_unconfirmed);
+        assert!(st.conversation_id_revision.is_none());
 
         // Full: round-trips a Monitoring run + conversation id + cadence + status +
         // a pending auto-flow context to inject on the next wake + the marker watermark.
@@ -1171,6 +1192,12 @@ mod tests {
             // An adopted-but-unproven seed: the round-trip must preserve the fallback gate
             // across a save, or a relaunch after a daemon restart would resume a ghost id.
             resume_unconfirmed: true,
+            conversation_id_revision: Some(MarkerRevision {
+                modified_ns: 4,
+                len: 36,
+                inode: 5,
+                fingerprint: "uuid-1".into(),
+            }),
             engine: Engine::Codex,
             cadence_s: Some(300),
             // PINNED, so the round-trip covers the flag too: a ledger that forgot it across a save
@@ -1206,6 +1233,10 @@ mod tests {
             }),
             decider_latched: true,
             decider_latch_reason: Some("transport unavailable".into()),
+            decider_health_selection: Some(DeciderHealthSelection {
+                engine: Engine::Claude,
+                model: Some("unavailable-model".into()),
+            }),
             decider_runs: Vec::new(),
             turn_seq: 0,
             turn_trace: Vec::new(),
@@ -1251,6 +1282,10 @@ mod tests {
             serde_json::from_str(&serde_json::to_string(&full).unwrap()).unwrap();
         assert_eq!(round, full);
         assert!(round.resume_unconfirmed, "the fallback gate round-trips");
+        assert!(
+            round.conversation_id_revision.is_some(),
+            "the hook-id revision round-trips"
+        );
         assert_eq!(round.stale_plan_streak, 4);
         assert_eq!(round.marker_less_rechecks, 2);
         assert_eq!(round.last_plan.as_deref(), Some("wire the alert"));

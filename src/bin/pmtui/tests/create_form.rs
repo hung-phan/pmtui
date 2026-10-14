@@ -65,6 +65,8 @@ fn create_form_navigation_and_editing() {
     f.adjust(true);
     assert_eq!(f.decider_engine, Engine::Codex);
     f.adjust(false);
+    assert_eq!(f.decider_engine, Engine::Trae);
+    f.adjust(true);
     assert_eq!(f.decider_engine, Engine::Claude);
     // Decider Model is the LAST field (index 7), APPENDED after Decider — shown here because
     // the walk switched to Autopilot above. A ←→ stepper like the worker model: → steps the value.
@@ -101,11 +103,9 @@ fn worker_engine_cycles_through_all_engines_but_decider_stays_two_engine() {
     f.adjust(true);
     assert_eq!(f.decider_engine, Engine::Codex);
     f.adjust(true);
-    assert_eq!(
-        f.decider_engine,
-        Engine::Claude,
-        "TRAE is not a decider engine in this slice"
-    );
+    assert_eq!(f.decider_engine, Engine::Trae);
+    f.adjust(true);
+    assert_eq!(f.decider_engine, Engine::Claude);
 }
 
 #[test]
@@ -502,6 +502,8 @@ fn decider_field_is_autopilot_only_and_defaults_to_claude() {
     form.field = CreateForm::DECIDER;
     form.adjust(true);
     assert_eq!(form.decider_engine, Engine::Codex);
+    form.adjust(true);
+    assert_eq!(form.decider_engine, Engine::Trae);
     form.adjust(true);
     assert_eq!(form.decider_engine, Engine::Claude);
 }

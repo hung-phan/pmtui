@@ -101,6 +101,19 @@ pub trait Driver: Send + Sync {
         bail!("send_keys is not supported by this Driver (session {session})");
     }
 
+    /// Type `text` when the caller knows which engine owns the pane.
+    ///
+    /// Codex needs submit retries for its collapsed paste composer. The engine comes from row
+    /// state, not pane text, because Claude and TraeX can display quoted Codex output.
+    fn send_keys_for_engine(
+        &self,
+        session: &str,
+        text: &str,
+        _engine: Option<crate::registry::Engine>,
+    ) -> Result<()> {
+        self.send_keys(session, text)
+    }
+
     /// Move a numbered dialog's live highlight from `current` to `target`, then
     /// submit exactly once. This is deliberately separate from [`Driver::send_keys`]:
     /// `Up`/`Down`/`Enter` are terminal key names, not text that may be pasted into a

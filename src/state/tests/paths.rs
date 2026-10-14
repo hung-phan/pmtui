@@ -90,6 +90,94 @@ fn paths_can_be_recovered_from_a_managed_state_dir() {
 }
 
 #[test]
+fn state_dir_recovery_rejects_incomplete_or_unrelated_layouts() {
+    // A malformed hook path must not redirect identity writes into an unrelated project.
+    for path in [
+        "",
+        "/",
+        ".",
+        "..",
+        "session-id",
+        "sessions/session-id",
+        "/sessions/session-id",
+        "/tmp/proj/not-state/sessions/session-id",
+        "/tmp/proj/.project-state/session-id",
+        "/tmp/proj/.project-state/sessions/session-id/.daemon",
+    ] {
+        assert!(
+            ProjectPaths::from_state_dir(path).is_none(),
+            "accepted unrelated state directory {path:?}"
+        );
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn state_dir_recovery_rejects_non_utf8_layout_names_but_preserves_project_roots() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    use std::path::PathBuf;
+
+    let non_utf8 = OsString::from_vec(b"project-\xff".to_vec());
+    for path in [
+        PathBuf::from("/tmp/proj/.project-state/sessions").join(&non_utf8),
+        PathBuf::from("/tmp/proj")
+            .join(&non_utf8)
+            .join("session-id"),
+        PathBuf::from("/tmp/proj")
+            .join(&non_utf8)
+            .join("sessions/session-id"),
+    ] {
+        assert!(
+            ProjectPaths::from_state_dir(&path).is_none(),
+            "accepted an invalid state layout: {path:?}"
+        );
+    }
+
+    // The project root is an OS path, not a protocol name, so it must survive unchanged.
+    let root = PathBuf::from("/tmp").join(non_utf8);
+    for original in [
+        ProjectPaths::new(&root),
+        ProjectPaths::for_session(&root, "worker"),
+    ] {
+        let recovered = ProjectPaths::from_state_dir(original.state_dir()).unwrap();
+        assert_eq!(recovered.root, root);
+        assert_eq!(
+            recovered.codex_conversation_id(),
+            original.codex_conversation_id()
+        );
+        assert_eq!(recovered.turn_signal(), original.turn_signal());
+    }
+}
+
+#[test]
+fn recovering_runtime_paths_keeps_session_identity_separate_from_state_files() {
+    let first = ProjectPaths::for_session("/tmp/proj", "a/b");
+    let second = ProjectPaths::for_session("/tmp/proj", "a.b");
+    for original in [&first, &second] {
+        let recovered = ProjectPaths::from_state_dir(original.state_dir()).unwrap();
+        assert_eq!(recovered.pmstate(), original.pmstate());
+        assert_eq!(
+            recovered.codex_conversation_id(),
+            original.codex_conversation_id()
+        );
+        // A file or hook output is not a state directory, even inside a valid session.
+        for file in [
+            original.pmstate(),
+            original.checkpoint(),
+            original.turn_signal(),
+            original.codex_conversation_id(),
+        ] {
+            assert!(ProjectPaths::from_state_dir(file).is_none());
+        }
+    }
+    assert_ne!(
+        first.codex_conversation_id(),
+        second.codex_conversation_id()
+    );
+}
+
+#[test]
 fn worker_skill_paths_are_correct() {
     let paths = ProjectPaths::for_session("/proj", "s1");
     assert_eq!(

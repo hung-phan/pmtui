@@ -61,6 +61,46 @@ fn parses_models_from_json_array() {
 }
 
 #[test]
+fn blank_display_metadata_keeps_a_usable_label_and_the_launch_name() {
+    // Optional display metadata must not hide a usable model or change its launch value.
+    let got = trae::parse(
+        r#"[
+            {"name":"seed-default"},
+            {"name":"seed-blank","config_name":" \t","real_name":"\n","description":" "},
+            {"name":"seed-real","config_name":" ","real_name":"Seed Real","description":"\t"},
+            {"name":"seed-config","config_name":"Seed Config","real_name":"Internal Name"},
+            {"name":"seed-described","description":"fast"},
+            {"name":" \t","config_name":"Not launchable"}
+        ]"#,
+    );
+    assert_eq!(
+        got,
+        vec![
+            ModelInfo {
+                label: "seed-default".into(),
+                value: "seed-default".into(),
+            },
+            ModelInfo {
+                label: "seed-blank".into(),
+                value: "seed-blank".into(),
+            },
+            ModelInfo {
+                label: "Seed Real".into(),
+                value: "seed-real".into(),
+            },
+            ModelInfo {
+                label: "Seed Config".into(),
+                value: "seed-config".into(),
+            },
+            ModelInfo {
+                label: "seed-described - fast".into(),
+                value: "seed-described".into(),
+            },
+        ]
+    );
+}
+
+#[test]
 fn empty_on_malformed() {
     assert!(trae::parse("nonsense").is_empty());
     assert!(trae::parse(r#"{"models":[]}"#).is_empty());

@@ -29,7 +29,8 @@ pub use result::{
 };
 pub use supervisor::{
     SUPERVISOR_BUDGET_USD_ENV, SUPERVISOR_CODEX_MODEL_ENV, SUPERVISOR_MODEL, SUPERVISOR_MODEL_ENV,
-    build_supervisor_command, build_supervisor_command_codex,
+    SUPERVISOR_TRAE_MODEL_ENV, build_supervisor_command, build_supervisor_command_codex,
+    build_supervisor_command_trae,
 };
 #[cfg(test)]
 mod tests;

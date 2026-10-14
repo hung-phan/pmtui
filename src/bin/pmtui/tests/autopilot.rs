@@ -622,6 +622,40 @@ fn decider_commit_writes_engine_and_model_to_config_only_ledger_untouched() {
 }
 
 #[test]
+fn trae_decider_picker_saves_engine_and_model_without_changing_the_ledger() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reg_path, root) = reg_with_tier(dir.path(), "bot", Tier::Autopilot);
+    let paths = ProjectPaths::for_session(&root, "bot");
+    let before = std::fs::read(paths.pmstate()).unwrap();
+    let mut app = loop_app(&reg_path);
+    for engine in Engine::ALL {
+        app.model_catalog.insert(
+            engine,
+            vec![ModelInfo {
+                label: "test".into(),
+                value: "test-model".into(),
+            }],
+        );
+    }
+    app.begin_model_pick(PickTarget::Decider);
+    handle_key(&mut app, KeyCode::Down, KeyModifiers::NONE);
+    handle_key(&mut app, KeyCode::Down, KeyModifiers::NONE);
+    handle_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+    handle_key(&mut app, KeyCode::Down, KeyModifiers::NONE);
+    handle_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+    let config: Config = state::read_json(&paths.config()).unwrap();
+    assert_eq!(config.decider_engine, Engine::Trae);
+    assert_eq!(config.decider_model.as_deref(), Some("test-model"));
+    assert_eq!(std::fs::read(paths.pmstate()).unwrap(), before);
+
+    let mut form = CreateForm::new();
+    form.decider_engine = Engine::Codex;
+    form.field = CreateForm::DECIDER;
+    form.adjust(true);
+    assert_eq!(form.decider_engine, Engine::Trae);
+}
+
+#[test]
 fn decider_commit_on_the_default_row_stores_none() {
     // The `(default)` row (cursor 0) stores `None`, never an empty string — and it CLEARS a
     // previously-set model.
@@ -703,16 +737,18 @@ fn engine_stage_cursor_clamps_and_empty_catalog_leaves_only_the_default_row() {
         }
     ));
     handle_key(&mut app, KeyCode::Down, KeyModifiers::NONE);
+    handle_key(&mut app, KeyCode::Down, KeyModifiers::NONE);
     handle_key(&mut app, KeyCode::Char('j'), KeyModifiers::NONE); // clamp at Engine::ALL.len()-1
     assert!(matches!(
         app.mode,
         UiMode::ModelPicker {
             stage: PickStage::Engine,
-            cursor: 1,
+            cursor: 2,
             ..
         }
     ));
     // Back to claude, advance to the (empty) Model stage.
+    handle_key(&mut app, KeyCode::Up, KeyModifiers::NONE);
     handle_key(&mut app, KeyCode::Up, KeyModifiers::NONE);
     handle_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
     handle_key(&mut app, KeyCode::Down, KeyModifiers::NONE); // only the (default) row exists

@@ -62,7 +62,7 @@ pub(super) struct MarkerStamp {
 }
 
 impl MarkerStamp {
-    fn from_file(file: &File) -> Result<Self> {
+    pub(super) fn from_file(file: &File) -> Result<Self> {
         let metadata = file.metadata()?;
         Ok(Self {
             modified: metadata.modified()?,
@@ -85,6 +85,15 @@ impl MarkerStamp {
             fingerprint,
         }
     }
+}
+
+pub(super) fn reported_identity_revision(path: &Path) -> Option<(String, MarkerRevision)> {
+    let mut file = File::open(path).ok()?;
+    let stamp = MarkerStamp::from_file(&file).ok()?;
+    let mut raw = String::new();
+    file.read_to_string(&mut raw).ok()?;
+    let id = crate::state::codex_identity::parse(&raw)?.to_string();
+    Some((id.clone(), stamp.with_fingerprint(id)))
 }
 
 pub(super) struct UnresolvedAdvice<'a> {
@@ -329,19 +338,10 @@ impl JobScheduler {
         // FO-2 (Milestone D): any accepted marker bump means the agent reported — a
         // marker-less finish is over, so the recheck counter resets on every valid bump.
         next.marker_less_rechecks = 0;
-        // OQ6: capture the agent-reported conversation id when the ledger has none — EXCEPT on
-        // codex, where the engine itself is now the authority.
-        //
-        // OQ6 existed *for* codex: it had no harness-pinned id, so the agent was asked to report
-        // its own rollout id. The turn hook now reports that id as a FACT, which makes the agent's
-        // self-declaration both redundant and dangerous — a worker could name any conversation,
-        // including another session's, and because `resolve_conversation_id` consults the ledger
-        // first it would outrank the engine's own answer. The claim also used to arrive FIRST: the
-        // hook was read only at relaunch, so a report landing mid-session won permanently.
-        //
-        // Claude keeps the path: there the ledger is filled by mint or seed before any report, so
-        // an agent echoing its id corroborates a value pmtui chose rather than making a new claim.
-        if self.engine != Engine::Codex
+        // Only Claude can corroborate a product-pinned identity. Codex and TraeX assign their
+        // own identities: before their hook arrives, a worker claim could make ledger readers
+        // such as fork act on another session's conversation.
+        if self.engine == Engine::Claude
             && next.conversation_id.is_none()
             && let Some(cid) = report.conversation_id.as_ref()
         {

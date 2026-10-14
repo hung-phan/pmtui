@@ -7,6 +7,7 @@
 use std::process::Command;
 use std::time::Duration;
 
+use agent_manager::registry::Engine;
 use agent_manager::tmux::{Driver, TmuxDriver};
 
 use crate::probe::TmuxSocket;
@@ -518,7 +519,7 @@ fn codex_visible_literal_message_is_retried_until_submitted() {
     );
     let payload = "AM_LITERAL_MESSAGE_SUBMIT_OK";
     driver
-        .send_keys(&session, payload)
+        .send_keys_for_engine(&session, payload, Some(Engine::Codex))
         .expect("literal Codex message should retry Enter while draft remains");
     let output = wait_for_file_contents(&received, payload, Duration::from_secs(2));
     let _ = driver.terminate(&session);
@@ -592,15 +593,17 @@ fn codex_wrapped_literal_message_is_retried_until_submitted() {
     let codex = dir.path().join("codex");
     std::fs::copy("/bin/sh", &codex).expect("copy shell as codex fixture");
     // Draw the swallowed draft as Codex does: 60 columns on the `›` row, the rest indented below,
-    // then the blank row and footer. Only the second Enter submits.
+    // then the blank row and footer. Only the second Enter submits. Shell pattern removal avoids
+    // a subprocess delaying the redraw until after the driver has already rechecked the placeholder.
     let command = format!(
         "printf '› Ask Codex to do anything\n'; \
-         IFS= read -r first; rest=$(printf '%s' \"$first\" | cut -c61-); \
+         IFS= read -r first; rest=${{first#{skip}}}; \
          printf '\\n› %.60s\\n  %s\\n\\n  footer\\n' \"$first\" \"$rest\"; \
          IFS= read -r ignored; \
          printf '\\n\\033[1m›\\033[0m \\033[2mAsk Codex to do anything\\033[0m\\n'; \
          printf '%s\\n' \"$first\" > {}; sleep 5",
-        received.display()
+        received.display(),
+        skip = "?".repeat(60),
     );
     driver
         .launch_interactive(
@@ -618,15 +621,17 @@ fn codex_wrapped_literal_message_is_retried_until_submitted() {
         "AM_WRAPPED_LITERAL_{} please review the recent commits and summarize the three riskiest changes END",
         std::process::id()
     );
-    let sent = driver.send_keys(&session, &payload);
+    let sent = driver.send_keys_for_engine(&session, &payload, Some(Engine::Codex));
     let output = wait_for_file_contents(&received, "AM_WRAPPED_LITERAL_", Duration::from_secs(2));
+    // Preserve the live draft on failure because terminating the fixture destroys the evidence.
+    let pane = driver.capture_tail_styled(&session, 80);
     let _ = driver.terminate(&session);
 
     assert!(payload.len() > 60 && payload.len() <= 800 && !payload.contains('\n'));
     sent.expect("a wrapped literal Codex message should retry Enter while its draft remains");
     assert!(
         output.contains("END"),
-        "the wrapped draft was reported delivered but never submitted: {output:?}"
+        "the wrapped draft was reported delivered but never submitted: {output:?}; pane: {pane:?}"
     );
 }
 

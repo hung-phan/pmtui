@@ -49,11 +49,20 @@ fn fork_fixture_with_identity(engine: Engine, child_identity: &str) -> ForkFixtu
     ledger.engine = engine;
     ledger.conversation_id = Some(SOURCE_ID.into());
     job::save(&source_paths, &ledger).unwrap();
+    if engine == Engine::Trae {
+        // Saved UUIDs can be thread names, so the fixture must also model the engine's report.
+        state::write_text_atomic(&source_paths.codex_conversation_id(), SOURCE_ID).unwrap();
+    }
     state::write_text_atomic(&source_paths.brief(), "preserve this goal").unwrap();
     state::write_text_atomic(&source_paths.directive(), "never publish").unwrap();
 
     let child_session = session_name("bot-fork", &root);
-    let pane = FakePane::with_codex_session(&child_session, child_identity);
+    let pane = FakePane::with_codex_session(&child_session, child_identity).with(|inner| {
+        if engine == Engine::Trae {
+            // Its startup hook belongs to the launch, not to a pre-existing fake pane.
+            inner.alive.lock().unwrap().remove(&child_session);
+        }
+    });
     let mut view = ProjectView::read_agent_loop("bot", &source_paths, true, SystemClock.now());
     view.engine = Some(engine);
     let mut app = app_with_driver(vec![view], UiMode::Normal, Box::new(pane.clone()));
@@ -188,3 +197,4 @@ mod lineage;
 mod refusals;
 mod source_identity;
 mod source_state;
+mod trae_identity;

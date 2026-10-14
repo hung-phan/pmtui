@@ -57,6 +57,18 @@ fn launch_pane(driver: &TmuxDriver, session: &str, root: &Path, pane: &str) {
             &tmux::ManagedEnv::default(),
         )
         .unwrap();
+    // Both refreshes must observe the fixture, not the shell's blank startup frame.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if driver
+            .capture_tail(session, 20)
+            .is_ok_and(|capture| capture.contains(pane.trim()))
+        {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    panic!("fixture pane text never reached {session}: {pane:?}");
 }
 
 #[test]

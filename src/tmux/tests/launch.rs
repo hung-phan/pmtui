@@ -157,7 +157,7 @@ fn pmtui_bin_is_the_pmtui_executable_itself_or_the_one_beside_pmd() {
 }
 
 #[test]
-fn pmd_resolves_pmtui_from_path_when_no_sibling_exists() {
+fn pmd_does_not_pick_a_pmtui_from_path_when_no_sibling_exists() {
     use std::os::unix::fs::PermissionsExt;
     let pmd_dir = tempdir().unwrap();
     let path_dir = tempdir().unwrap();
@@ -171,17 +171,13 @@ fn pmd_resolves_pmtui_from_path_when_no_sibling_exists() {
     let path = std::env::join_paths([path_dir.path()]).unwrap();
     assert_eq!(
         pmtui_bin_for_exe_with_path(&pmd, Some(path.as_os_str())),
-        Some(std::fs::canonicalize(&pmtui).unwrap()),
-        "pmd must freeze the pmtui it could run, so TraeX hooks do not depend on engine PATH"
+        None,
+        "a PATH hit may be an older pmtui without the hook subcommand"
     );
 }
 
 #[test]
 fn the_current_process_resolves_through_its_own_executable() {
     let exe = std::env::current_exe().unwrap();
-    let path = std::env::var_os("PATH");
-    assert_eq!(
-        pmtui_bin_for_current_process(),
-        pmtui_bin_for_exe_with_path(&exe, path.as_deref())
-    );
+    assert_eq!(pmtui_bin_for_current_process(), pmtui_bin_for_exe(&exe));
 }

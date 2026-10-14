@@ -9,14 +9,14 @@ use std::time::Duration;
 
 use tempfile::tempdir;
 
+use crate::registry::Engine;
 use crate::tmux::codex::{
     process_parent_and_start_time, process_path_gone,
     session_id_from_proc as codex_session_id_from_proc,
 };
 use crate::tmux::fake::FakeDriver;
 use crate::tmux::real::{
-    codex_draft_visible, codex_pasted_draft_still_pending, exact, exact_pane, launched_binary,
-    pane_dimension, shq, wrapper_script,
+    codex_draft_visible, exact, exact_pane, launched_binary, pane_dimension, shq, wrapper_script,
 };
 use crate::tmux::{
     Driver, Observation, PaneDialog, StepHandle, TmuxDriver, classify_dialog, observe,
@@ -112,34 +112,6 @@ fn codex_draft_detection_uses_the_bottom_composer_not_the_transcript_echo() {
         "Would you like to run this command?\n› 1. Yes, proceed\n  2. No\n",
         prompt,
         true
-    ));
-}
-
-#[test]
-fn pasted_submit_retry_ignores_transcript_echoes() {
-    let message = "You are a long-running agent working toward the goal.\nShip the fix.";
-    let plain_after_submit = concat!(
-        "› You are a long-running agent working toward the goal.\n",
-        "Ship the fix.\n",
-        "\n",
-        "• Working (1s • esc to interrupt)\n",
-        "\n",
-        "› Ask Codex to do anything\n",
-        "\n",
-        "  model footer\n",
-    );
-    let styled_placeholder =
-        "\u{1b}[1m›\u{1b}[0m \u{1b}[2mAsk Codex to do anything\u{1b}[0m\n\n  footer\n";
-    assert!(
-        !codex_pasted_draft_still_pending(plain_after_submit, styled_placeholder, message),
-        "a submitted prompt echoed in the transcript must not cause another Enter"
-    );
-
-    let plain_pending = "› [Pasted Content 900 chars]\n\n  footer\n";
-    assert!(codex_pasted_draft_still_pending(
-        plain_pending,
-        plain_pending,
-        message
     ));
 }
 
@@ -1137,6 +1109,25 @@ fn a_codex_submit_retry_never_presses_enter_on_a_dialog_or_a_pane_without_a_prom
             .count();
         assert_eq!(enters, 1, "{session}: a retry Enter was sent\n{calls}");
     }
+}
+
+#[test]
+fn non_codex_sends_do_not_retry_from_quoted_codex_composer_text() {
+    let fx = ScriptedTmux::new();
+    fx.driver
+        .send_keys_for_engine("long", &"x".repeat(801), Some(Engine::Trae))
+        .unwrap();
+
+    let calls = std::fs::read_to_string(&fx.log).unwrap();
+    assert_eq!(
+        calls.matches("send-keys -t =long: Enter").count(),
+        1,
+        "TraeX/Claude panes must not receive Codex retry Enters:\n{calls}"
+    );
+    assert!(
+        !calls.contains("capture-pane -p -t =long:"),
+        "non-Codex sends should not spend a capture on Codex draft detection:\n{calls}"
+    );
 }
 
 #[test]
