@@ -197,6 +197,7 @@ fn composing_wheel_scrolls_text_panes_but_never_moves_the_session_selection() {
         UiMode::Sending {
             target: SendTarget {
                 id: "one".into(),
+                engine: None,
                 root: PathBuf::from("/nonexistent"),
                 session: "pm-one".into(),
                 agent_loop: true,
@@ -1000,6 +1001,7 @@ fn directive_edits_report_saved_empty_and_failed_results() {
 fn send_editor_requests_report_empty_error_and_submit_saved_text() {
     let target = SendTarget {
         id: "bot".into(),
+        engine: None,
         root: PathBuf::from("/tmp/bot"),
         session: "pm-bot".into(),
         agent_loop: true,

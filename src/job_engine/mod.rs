@@ -559,37 +559,36 @@ impl JobScheduler {
             ledger.updated_at = now;
             control_changed = true;
         }
-        // CODEX/TRAE IDENTITY, reconciled on EVERY tick rather than only when a session is
-        // relaunched.
+        // CODEX IDENTITY, reconciled by VALUE only. The notify hook rewrites the file on every
+        // completed turn, so a same-id rewrite must not become a scheduler state save.
+        if self.engine == Engine::Codex
+            && let Some(id) = state::codex_identity::read(&self.paths)
+            && ledger.conversation_id.as_deref() != Some(id.as_str())
+        {
+            ledger.conversation_id = Some(id);
+            ledger.updated_at = now;
+            control_changed = true;
+        }
+
+        // TRAE IDENTITY, reconciled on EVERY tick rather than only when a session is relaunched.
         //
-        // Codex is handed no conversation id and reports its own through the turn hook, so the
-        // ledger is the last to know. Reading that file only at relaunch left the ledger empty for
-        // the whole life of a live session — a window, not merely a delay: a worker-authored
-        // `conversation_id` could land first and win permanently, and nothing authoritative existed
-        // to compare it against. TraeX reports its thread id the same way, through its hooks, and a
-        // NEW revision of the SAME id is proof that a resume reached the engine again even if the
-        // worker crashes before writing its normal marker.
-        if matches!(self.engine, Engine::Codex | Engine::Trae)
+        // TraeX reports its thread id through hooks, and a NEW revision of the SAME id is proof
+        // that a resume reached the engine again even if the worker crashes before writing its
+        // normal marker. Codex also writes this file, but its notify hook rewrites it every turn;
+        // treating each inode change as scheduler state would save the ledger and overwrite the
+        // in-memory run on every completed Codex turn.
+        if self.engine == Engine::Trae
             && let Some((id, revision)) =
                 marker::reported_identity_revision(&self.paths.codex_conversation_id())
         {
             let id_changed = ledger.conversation_id.as_deref() != Some(id.as_str());
-            let revision_changed = ledger.conversation_id_revision.as_ref() != Some(&revision);
-            let confirmed_trae_resume = self.engine == Engine::Trae
-                && !id_changed
+            let confirmed_trae_resume = !id_changed
                 && ledger.resume_unconfirmed
                 && ledger
                     .conversation_id_revision
                     .as_ref()
                     .is_some_and(|prior| prior != &revision);
-            let baseline_legacy_trae_resume = self.engine == Engine::Trae
-                && !id_changed
-                && ledger.resume_unconfirmed
-                && ledger.conversation_id_revision.is_none();
-            if id_changed
-                || confirmed_trae_resume
-                || (revision_changed && !baseline_legacy_trae_resume)
-            {
+            if id_changed || confirmed_trae_resume {
                 if id_changed {
                     ledger.conversation_id = Some(id);
                 }

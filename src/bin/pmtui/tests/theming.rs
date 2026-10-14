@@ -66,6 +66,7 @@ fn every_view() -> Vec<ViewCase> {
         ("send", || UiMode::Sending {
             target: SendTarget {
                 id: "auth-rewrite".into(),
+                engine: None,
                 root: PathBuf::from("/nonexistent"),
                 session: "pm-auth".into(),
                 agent_loop: true,

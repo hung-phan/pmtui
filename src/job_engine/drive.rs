@@ -376,7 +376,7 @@ impl JobScheduler {
                     );
                     return self.park_dialog(now, &audited, dialog);
                 }
-                match tmux::classify_pane(&capture) {
+                match tmux::classify_pane_for_engine(&capture, self.engine) {
                     PaneActivity::Idle => self.idle_observed(driver, now, base, &capture),
                     // Busy: re-check soon, consume nothing (no nudge, no budget, no answer)
                     // — but run the stall backstop so a Busy-forever pane can't hang
@@ -563,7 +563,7 @@ impl JobScheduler {
     }
 
     fn idle_confirmation_ready(&mut self, capture: &str) -> bool {
-        let fingerprint = tmux::idle_fingerprint(capture);
+        let fingerprint = tmux::idle_fingerprint_for_engine(capture, self.engine);
         if self.last_idle_fingerprint == Some(fingerprint) {
             self.idle_confirmations = self.idle_confirmations.saturating_add(1);
         } else {
@@ -652,7 +652,7 @@ impl JobScheduler {
         capture: &str,
         reason: HoldReason,
     ) -> Result<JobTick> {
-        let fingerprint = tmux::progress_fingerprint(capture);
+        let fingerprint = tmux::progress_fingerprint_for_engine(capture, self.engine);
         if self.busy_since.is_none() || self.last_busy_progress_fingerprint != Some(fingerprint) {
             self.busy_since = Some(now);
             self.last_busy_progress_fingerprint = Some(fingerprint);
@@ -739,7 +739,22 @@ impl JobScheduler {
         if self.engine == Engine::Codex {
             return None;
         }
-        match turn_signal_health(&self.paths.turn_signal(), base.report_generation) {
+        let health = turn_signal_health(&self.paths.turn_signal(), base.report_generation);
+        if self.engine == Engine::Trae
+            && self.pmtui_bin.is_none()
+            && matches!(
+                health,
+                TurnSignalHealth::NeverFired { .. } | TurnSignalHealth::Partial { .. }
+            )
+        {
+            return Some(
+                "this TraeX session has no turn-end hook because no pmtui binary was available to \
+                 pmd (PMTUI_BIN was not set from a pmtui next to pmd), so pmd cannot learn the \
+                 resumable thread id or tell when turns end"
+                    .to_string(),
+            );
+        }
+        match health {
             TurnSignalHealth::NeverFired { reports } => Some(format!(
                 "this session's turn-end hook has never fired across {reports} reports, so pmd \
                  cannot tell when a turn ends and every check-in now waits the full \

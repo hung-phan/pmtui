@@ -1288,6 +1288,7 @@ fn task_origin_overlays_render_over_the_task_view() {
     sending.mode = UiMode::Sending {
         target: SendTarget {
             id: "needs".into(),
+            engine: None,
             root: PathBuf::from("/tmp"),
             session: "pm-needs".into(),
             agent_loop: true,

@@ -303,8 +303,13 @@ fn standard_message_is_bounded_by_the_quoted_launch_command_tmux_accepts() {
         })
         .unwrap();
         let probe = standard_form_in(&reg_path, &project, engine, "x");
-        let base = initial_launch_bytes(&creating_form(&probe), &project, &Registry::default())
-            .expect("a Standard Message is bounded");
+        let base = initial_launch_bytes(
+            &creating_form(&probe),
+            &project,
+            &Registry::default(),
+            probe.pmtui_bin.as_deref(),
+        )
+        .expect("a Standard Message is bounded");
         let fits = "x".repeat(tmux::LAUNCH_COMMAND_MAX_BYTES - base + 1);
 
         // One byte over: refused on the form, with nothing written or launched.
@@ -366,7 +371,13 @@ fn launch_budget_counts_the_id_the_create_will_actually_reserve() {
     assert_eq!(registry.projects[0].id, "project");
 
     let probe = standard_form_in(&reg_path, &project, Engine::Claude, "x");
-    let base = initial_launch_bytes(&creating_form(&probe), &project, &registry).unwrap();
+    let base = initial_launch_bytes(
+        &creating_form(&probe),
+        &project,
+        &registry,
+        probe.pmtui_bin.as_deref(),
+    )
+    .unwrap();
     let fits = "x".repeat(tmux::LAUNCH_COMMAND_MAX_BYTES - base + 1);
     let pane = FakePane::default();
     let mut app = standard_form_in(&reg_path, &project, Engine::Claude, &fits);
@@ -437,13 +448,13 @@ fn only_a_standard_message_is_bounded_by_the_launch_command() {
     let mut form = CreateForm::new();
     form.goal = Field::from("   ");
     assert_eq!(
-        initial_launch_bytes(&form, project, &Registry::default()),
+        initial_launch_bytes(&form, project, &Registry::default(), None),
         None
     );
     form.goal = Field::from("x".repeat(tmux::LAUNCH_COMMAND_MAX_BYTES * 2).as_str());
     form.tier = Tier::Autopilot;
     assert_eq!(
-        initial_launch_bytes(&form, project, &Registry::default()),
+        initial_launch_bytes(&form, project, &Registry::default(), None),
         None,
         "an Autopilot goal goes to brief.md, not the launch argv"
     );

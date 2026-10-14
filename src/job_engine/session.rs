@@ -80,14 +80,15 @@ impl JobScheduler {
         // `idle_fingerprint` content-stability gate. When on, the engine appends one byte to
         // `paths.turn_signal()` on every completed turn (see `worker::build_loop_command`).
         let turn_signal = self.paths.turn_signal();
-        let hook_on = worker::turn_hook_enabled_for(self.engine);
+        let hook_signal = worker::turn_hook_runnable_for(self.engine, self.pmtui_bin.as_deref())
+            .then_some(turn_signal.as_path());
         // Directory trust remains the engine's own prompt. pmd never injects a
         // profile or modifies the user's Codex configuration.
         let argv = worker::build_loop_command(
             self.engine,
             &resume,
             std::slice::from_ref(&self.work_dir),
-            hook_on.then_some(turn_signal.as_path()),
+            hook_signal,
             self.worker_model.as_deref(),
         );
         // The old pane's decision is stale before a replacement worker is started. Termination

@@ -7,7 +7,7 @@ use agent_manager::lease;
 use agent_manager::registry::Engine;
 use agent_manager::state::{ProjectPaths, codex_identity};
 use agent_manager::tmux::{
-    Driver, ManagedEnv, PaneActivity, TmuxDriver, classify_dialog, classify_pane,
+    Driver, ManagedEnv, PaneActivity, TmuxDriver, classify_dialog, classify_pane_for_engine,
 };
 use agent_manager::worker::{Resume, build_fork_command, build_standard_command};
 
@@ -69,9 +69,9 @@ fn trae_identity_real_fork_reports_a_new_thread_without_a_completed_turn() {
         .unwrap();
     wait_for(&driver, "source", "source startup", || {
         codex_identity::read(&source).is_some()
-            && driver
-                .capture_tail("source", 60)
-                .is_ok_and(|pane| classify_pane(&pane) == PaneActivity::Idle)
+            && driver.capture_tail("source", 60).is_ok_and(|pane| {
+                classify_pane_for_engine(&pane, Engine::Trae) == PaneActivity::Idle
+            })
     });
     assert!(!source.turn_signal().exists());
     {

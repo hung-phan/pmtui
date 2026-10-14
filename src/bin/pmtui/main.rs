@@ -222,6 +222,10 @@ fn parse_action(argv: &[String]) -> std::result::Result<Action, spawn_cli::Usage
         return match argv.get(1).map(String::as_str) {
             Some("turn-complete") if argv.len() == 2 => Ok(Action::HookTurnComplete),
             Some("session-start") if argv.len() == 2 => Ok(Action::HookSessionStart),
+            Some("turn-complete" | "session-start") => Err(spawn_cli::UsageError {
+                message: format!("hook: unexpected argument {:?}", argv[2]),
+                json: spawn_cli::wants_json(argv),
+            }),
             Some(other) => Err(spawn_cli::UsageError {
                 message: format!("hook: unknown hook {other:?}"),
                 json: spawn_cli::wants_json(argv),

@@ -102,28 +102,53 @@ fn trae_result_event_reports_success_or_failure_and_last_result_wins() {
 }
 
 #[test]
-fn trae_exec_result_uses_turn_terminator_and_output_file() {
-    let result = read_job_result(
+fn trae_result_parser_accepts_its_exec_result_file_without_using_codex_fallbacks() {
+    let got = read_job_result(
         Engine::Trae,
         r#"{"type":"turn.completed"}"#,
         Some(r#"{"outcome":"needs_human","summary":"credentials are required"}"#),
     )
-    .expect("a result");
-    assert_eq!(result.outcome, JobOutcome::NeedsHuman);
-    assert_eq!(result.summary, "credentials are required");
+    .expect("TraeX exec result");
+    assert_eq!(got.outcome, JobOutcome::NeedsHuman);
+    assert_eq!(got.summary, "credentials are required");
+
+    let plain = read_job_result(
+        Engine::Trae,
+        r#"{"type":"turn.completed"}"#,
+        Some("plain final text"),
+    )
+    .expect("plain TraeX final message");
+    assert_eq!(plain.outcome, JobOutcome::Done);
+    assert_eq!(plain.summary, "plain final text");
+}
+
+#[test]
+fn trae_turn_terminators_report_done_or_failed_without_schema_json() {
+    let done = read_job_result(
+        Engine::Trae,
+        concat!(
+            r#"{"type":"item.completed","item":{"type":"agent_message","text":"finished the task"}}"#,
+            "\n",
+            r#"{"type":"turn.completed"}"#
+        ),
+        None,
+    )
+    .expect("completed TraeX turn");
+    assert_eq!(done.outcome, JobOutcome::Done);
+    assert_eq!(done.summary, "finished the task");
 
     let failed = read_job_result(
         Engine::Trae,
-        r#"{"type":"turn.failed"}"#,
-        Some(r#"{"outcome":"done","summary":"file was written"}"#),
+        concat!(
+            r#"{"type":"item.completed","item":{"type":"agent_message","text":"permission denied"}}"#,
+            "\n",
+            r#"{"type":"turn.failed"}"#
+        ),
+        None,
     )
-    .expect("a result");
-    assert_eq!(
-        failed.outcome,
-        JobOutcome::Failed,
-        "the CLI terminator, not the file, states run failure"
-    );
-    assert_eq!(failed.summary, "file was written");
+    .expect("failed TraeX turn");
+    assert_eq!(failed.outcome, JobOutcome::Failed);
+    assert_eq!(failed.summary, "permission denied");
 }
 
 /// A MALFORMED PAYLOAD IS REJECTED, NOT GUESSED AT (the other half of agent-deck's parse rule): a
@@ -267,8 +292,11 @@ fn a_codex_stream_names_the_thread_it_started() {
     );
     // The nested shape codex also emits, and every way a stream can fail to name one.
     assert_eq!(
-        codex_thread_id(r#"{"type":"thread.started","thread":{"id":"t-1"}}"#).as_deref(),
-        Some("t-1")
+        codex_thread_id(
+            r#"{"type":"thread.started","thread":{"id":"01a133c3-b12f-7033-ae77-38f3294fb68e"}}"#
+        )
+        .as_deref(),
+        Some("01a133c3-b12f-7033-ae77-38f3294fb68e")
     );
     for silent in [
         "",
@@ -276,6 +304,7 @@ fn a_codex_stream_names_the_thread_it_started() {
         r#"{"type":"turn.completed"}"#,
         r#"{"type":"thread.started"}"#,
         r#"{"type":"thread.started","thread_id":""}"#,
+        r#"{"type":"thread.started","thread_id":"not-a-uuid"}"#,
         r#"{"type":"thread.started","thread_id":7}"#,
     ] {
         assert!(
@@ -283,6 +312,23 @@ fn a_codex_stream_names_the_thread_it_started() {
             "nothing to pin: {silent:?}"
         );
     }
+}
+
+#[test]
+fn thread_id_scan_skips_empty_or_invalid_events_before_a_valid_uuid() {
+    let log = concat!(
+        r#"{"type":"thread.started","thread_id":""}"#,
+        "\n",
+        r#"{"type":"result","subtype":"success","session_id":"not-a-uuid","result":"old"}"#,
+        "\n",
+        r#"{"type":"thread.started","thread":{"id":"01a133c3-b12f-7033-ae77-38f3294fb68e"}}"#,
+        "\n",
+    );
+
+    assert_eq!(
+        codex_thread_id(log).as_deref(),
+        Some("01a133c3-b12f-7033-ae77-38f3294fb68e")
+    );
 }
 
 #[test]

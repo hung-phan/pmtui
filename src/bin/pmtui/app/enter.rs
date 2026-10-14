@@ -171,13 +171,25 @@ impl App {
                             &cid,
                         ) == Some(false);
                     let turn_signal = session_paths.turn_signal();
+                    let env = self.managed_env(&id, &root);
                     let argv = if create_ghost {
-                        build_chat_create(engine, &cid, worker_model.as_deref(), &turn_signal)
+                        build_chat_create_with_pmtui_bin(
+                            engine,
+                            &cid,
+                            worker_model.as_deref(),
+                            &turn_signal,
+                            env.pmtui_bin.as_deref(),
+                        )
                     } else {
-                        build_chat(engine, &cid, worker_model.as_deref(), &turn_signal)
+                        build_chat_with_pmtui_bin(
+                            engine,
+                            &cid,
+                            worker_model.as_deref(),
+                            &turn_signal,
+                            env.pmtui_bin.as_deref(),
+                        )
                     };
                     let argv = with_initial_prompt(argv, initial_prompt.as_deref());
-                    let env = self.managed_env(&id, &root);
                     self.pending_chat = Some(ChatReq {
                         argv,
                         session_paths,
@@ -270,11 +282,12 @@ impl App {
                                                 // keeps build_chat_create's codex
                                                 // `unreachable!` guard live.
                                                 argv: with_initial_prompt(
-                                                    build_chat_create(
+                                                    build_chat_create_with_pmtui_bin(
                                                         engine,
                                                         &u,
                                                         worker_model.as_deref(),
                                                         &turn_signal,
+                                                        env.pmtui_bin.as_deref(),
                                                     ),
                                                     initial_prompt.as_deref(),
                                                 ),

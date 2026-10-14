@@ -70,6 +70,7 @@ fn parking_an_empty_task_message_returns_to_tasks_without_a_draft() {
     app.mode = UiMode::Sending {
         target: SendTarget {
             id: "bot".into(),
+            engine: None,
             root: PathBuf::from("/tmp"),
             session: "pm-bot".into(),
             agent_loop: true,
@@ -123,6 +124,32 @@ fn s_refuses_a_codex_approval_dialog() {
     let (mut app, pane, _, _) = send_app(dir.path(), CODEX_DIALOG_PANE);
     send_via_keys(&mut app, "yes, but rebase first");
     assert!(pane.sends().is_empty(), "bytes reached a codex dialog");
+}
+
+#[test]
+fn s_refuses_a_claude_dialog_even_when_a_stray_prompt_is_visible() {
+    let pane = concat!(
+        "● Write(hello.txt)\n",
+        "Do you want to create hello.txt?\n",
+        "❯  \n",
+        "❯ 1. Yes\n",
+        "  2. No\n",
+        "Esc to cancel · Tab to amend\n",
+    );
+    assert!(tmux::classify_dialog(pane).is_some(), "{pane}");
+    assert!(tmux::has_composer(pane), "{pane}");
+
+    assert_eq!(
+        send_decision(
+            &send_target(true),
+            &SendProbe {
+                alive: Some(true),
+                capture: Some(pane.into()),
+                ..Default::default()
+            }
+        ),
+        SendPlan::Refuse("dialog up — press Enter and answer it there".into())
+    );
 }
 
 #[test]
@@ -199,6 +226,7 @@ fn stop_guard_is_keyed_to_the_composer_target_not_the_current_selection() {
     let dir = tempfile::tempdir().unwrap();
     let target = SendTarget {
         id: "bot".into(),
+        engine: None,
         root: dir.path().to_path_buf(),
         session: "pm-bot".into(),
         agent_loop: true,
@@ -452,6 +480,7 @@ fn send_refuses_during_the_chat_attach_intent_window() {
     chat_lock::mark(&paths, std::process::id(), "pm-bot", "pm-test", now).unwrap();
     let target = SendTarget {
         id: "bot".into(),
+        engine: None,
         root,
         session: "pm-bot".into(),
         agent_loop: true,
@@ -472,6 +501,7 @@ fn send_refuses_during_the_chat_attach_intent_window() {
 fn final_send_recheck_rejects_control_only_dead_attached_and_changed_panes() {
     let make_target = |root: &Path| SendTarget {
         id: "bot".into(),
+        engine: None,
         root: root.to_path_buf(),
         session: "pm-bot".into(),
         agent_loop: true,
@@ -509,6 +539,27 @@ fn final_send_recheck_rejects_control_only_dead_attached_and_changed_panes() {
         .unwrap_err();
     assert!(error.to_string().contains("pane changed"));
     assert!(changed_pane.sends().is_empty());
+
+    let dir = tempfile::tempdir().unwrap();
+    let target = SendTarget {
+        engine: Some(Engine::Trae),
+        ..make_target(dir.path())
+    };
+    let dialog_with_prompt = concat!(
+        "Approve hooks?\n",
+        "❯  \n",
+        "❯ 1. Yes\n",
+        "  2. No\n",
+        "Esc to cancel\n",
+    );
+    let dialog = FakePane::sendable("pm-bot", dialog_with_prompt);
+    let mut gone = app_with_driver(vec![], UiMode::Normal, Box::new(dialog.clone()));
+    let error = gone.deliver(&target, "hello").unwrap_err();
+    assert!(error.to_string().contains("pane changed"));
+    assert!(
+        dialog.sends().is_empty(),
+        "the final recheck lost the target engine and typed into a dialog"
+    );
 }
 
 #[test]
@@ -554,6 +605,8 @@ fn every_send_refusal_leads_with_its_verdict() {
     // the TAIL, so at 80 columns only the first ~26 characters are guaranteed to be
     // read. The verdict has to be inside them.
     let t = send_target(true);
+    let mut trae = t.clone();
+    trae.engine = Some(Engine::Trae);
     let cases: Vec<(SendPlan, &str)> = vec![
         (send_precheck("").unwrap(), "nothing typed"),
         (
@@ -614,7 +667,7 @@ fn every_send_refusal_leads_with_its_verdict() {
         ),
         (
             send_decision(
-                &t,
+                &trae,
                 &SendProbe {
                     alive: Some(true),
                     capture: Some(CLAUDE_DIALOG_PANE.into()),
@@ -646,6 +699,32 @@ fn every_send_refusal_leads_with_its_verdict() {
         );
         assert!(msg.chars().count() <= 60, "status too long: {msg:?}");
     }
+}
+
+#[test]
+fn numbered_transcript_above_idle_prompt_does_not_block_generic_send() {
+    let pane = concat!(
+        "Pick one if you agree:\n",
+        " ❯ 1. Yes\n",
+        "   2. No\n",
+        "\n",
+        "done\n",
+        "────────────────────────────────\n",
+        "❯  \n",
+        "────────────────────────────────\n",
+    );
+
+    assert_eq!(
+        send_decision(
+            &send_target(true),
+            &SendProbe {
+                alive: Some(true),
+                capture: Some(pane.into()),
+                ..Default::default()
+            }
+        ),
+        SendPlan::Send("sent \u{2192} bot".into())
+    );
 }
 
 #[test]

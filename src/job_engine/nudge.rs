@@ -175,7 +175,8 @@ impl JobScheduler {
         }
         match driver.capture_tail(&session, 40) {
             Ok(capture)
-                if crate::tmux::classify_pane(&capture) == crate::tmux::PaneActivity::Idle => {}
+                if crate::tmux::classify_pane_for_engine(&capture, self.engine)
+                    == crate::tmux::PaneActivity::Idle => {}
             Ok(capture) => return self.busy_pane_recheck(now, base, &capture),
             Err(_) => return self.busy_recheck(now, base, HoldReason::Transient),
         }

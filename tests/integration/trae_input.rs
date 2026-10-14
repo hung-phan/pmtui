@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use agent_manager::registry::{Engine, Registry};
 use agent_manager::tmux::{
-    Driver, ManagedEnv, PaneActivity, TmuxDriver, classify_dialog, classify_pane, has_composer,
-    session_name,
+    Driver, ManagedEnv, PaneActivity, TmuxDriver, classify_dialog, classify_pane_for_engine,
+    has_composer_for_engine, session_name,
 };
 
 use crate::keystrokes::{send_key, send_literal};
@@ -139,8 +139,8 @@ fn trae_input_dashboard_submits_once_at_idle_and_busy_composers() {
         let fx = Fixture::new(&format!("{prefix}{COMPOSER}"));
         let before = fx.agent.capture_tail(&fx.session, 60).unwrap();
         eprintln!("agent before:\n{before}");
-        assert!(has_composer(&before));
-        assert_eq!(classify_pane(&before), expected);
+        assert!(has_composer_for_engine(&before, Engine::Trae));
+        assert_eq!(classify_pane_for_engine(&before, Engine::Trae), expected);
         fx.submit("TRAE_MESSAGE_ACCEPTED");
         assert!(wait_for_newest_status(&fx.registry, "sent"));
         let receipt = wait_for_file_contents(
@@ -171,8 +171,11 @@ fn trae_input_dashboard_refuses_dialogs_even_with_a_visible_composer() {
         let before = fx.agent.capture_tail(&fx.session, 60).unwrap();
         eprintln!("blocked agent:\n{before}");
         assert!(classify_dialog(&before).is_some());
-        assert!(!has_composer(&before));
-        assert_eq!(classify_pane(&before), PaneActivity::Busy);
+        assert!(!has_composer_for_engine(&before, Engine::Trae));
+        assert_eq!(
+            classify_pane_for_engine(&before, Engine::Trae),
+            PaneActivity::Busy
+        );
         fx.submit("MUST_NOT_REACH_DIALOG");
         assert!(wait_for_newest_status(&fx.registry, "dialog up"));
         std::thread::sleep(Duration::from_millis(500));

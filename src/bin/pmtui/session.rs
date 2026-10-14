@@ -163,16 +163,33 @@ pub(crate) fn install_prelaunch_skills(root: &Path, engine: Engine, env: &tmux::
 /// - `Engine::Codex` → `codex resume <id>` (NO `exec`; that is the headless path).
 /// - `Engine::Trae` → `traex resume <id>` (NO `-p`; in TRAE 2.0 that selects a profile). `<id>` is
 ///   the thread id TraeX's hook reported, never a `--session-id` name: TraeX cannot resume a name.
+#[cfg(test)]
 pub(crate) fn build_chat(
     engine: Engine,
     conversation_id: &str,
     model: Option<&str>,
     turn_signal: &Path,
 ) -> Vec<String> {
+    build_chat_with_pmtui_bin(
+        engine,
+        conversation_id,
+        model,
+        turn_signal,
+        Some(Path::new("pmtui")),
+    )
+}
+
+pub(crate) fn build_chat_with_pmtui_bin(
+    engine: Engine,
+    conversation_id: &str,
+    model: Option<&str>,
+    turn_signal: &Path,
+    pmtui_bin: Option<&Path>,
+) -> Vec<String> {
     agent_manager::worker::build_standard_command(
         engine,
         &agent_manager::worker::Resume::Continue(conversation_id.to_string()),
-        agent_manager::worker::turn_hook_enabled_for(engine).then_some(turn_signal),
+        hook_signal_for_launch(engine, turn_signal, pmtui_bin),
         model,
     )
 }
@@ -187,11 +204,28 @@ pub(crate) fn build_chat(
 /// interactive session, so it is never created by pmtui in v1 (it uses the armed
 /// auto-open fallback). The `request_attach` router never routes codex to a create,
 /// so this arm cannot be hit; it panics to make that invariant explicit.
+#[cfg(test)]
 pub(crate) fn build_chat_create(
     engine: Engine,
     conversation_id: &str,
     model: Option<&str>,
     turn_signal: &Path,
+) -> Vec<String> {
+    build_chat_create_with_pmtui_bin(
+        engine,
+        conversation_id,
+        model,
+        turn_signal,
+        Some(Path::new("pmtui")),
+    )
+}
+
+pub(crate) fn build_chat_create_with_pmtui_bin(
+    engine: Engine,
+    conversation_id: &str,
+    model: Option<&str>,
+    turn_signal: &Path,
+    pmtui_bin: Option<&Path>,
 ) -> Vec<String> {
     match engine {
         Engine::Claude | Engine::Trae => agent_manager::worker::build_standard_command(
@@ -199,7 +233,7 @@ pub(crate) fn build_chat_create(
             &agent_manager::worker::Resume::Fresh {
                 session_id: Some(conversation_id.to_string()),
             },
-            agent_manager::worker::turn_hook_enabled_for(engine).then_some(turn_signal),
+            hook_signal_for_launch(engine, turn_signal, pmtui_bin),
             model,
         ),
         Engine::Codex => {
@@ -222,6 +256,17 @@ pub(crate) fn build_codex_fresh_chat(model: Option<&str>, turn_signal: &Path) ->
         agent_manager::worker::turn_hook_enabled_for(Engine::Codex).then_some(turn_signal),
         model,
     )
+}
+
+fn hook_signal_for_launch<'a>(
+    engine: Engine,
+    turn_signal: &'a Path,
+    pmtui_bin: Option<&Path>,
+) -> Option<&'a Path> {
+    if !agent_manager::worker::turn_hook_runnable_for(engine, pmtui_bin) {
+        return None;
+    }
+    Some(turn_signal)
 }
 
 /// Attach to an already-running unified project terminal. Ctrl+q detaches and

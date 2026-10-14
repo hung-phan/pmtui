@@ -304,6 +304,34 @@ fn build_chat_create_trae_uses_session_id_not_resume_or_headless() {
 }
 
 #[test]
+fn build_chat_create_trae_omits_hooks_without_pmtui_bin() {
+    let argv = build_chat_create_with_pmtui_bin(
+        Engine::Trae,
+        "new-trae-id",
+        None,
+        test_turn_signal(),
+        None,
+    );
+
+    assert!(
+        !argv.iter().any(|arg| arg.contains("hooks.Stop")
+            || arg.contains("hooks.SessionStart")
+            || arg.contains("PMTUI_BIN")),
+        "{argv:?}"
+    );
+
+    let hooked = build_chat_create_with_pmtui_bin(
+        Engine::Trae,
+        "new-trae-id",
+        None,
+        test_turn_signal(),
+        Some(Path::new("/opt/am/pmtui")),
+    );
+    assert!(hooked.iter().any(|arg| arg.contains("hooks.Stop")));
+    assert!(hooked.iter().any(|arg| arg.contains("hooks.SessionStart")));
+}
+
+#[test]
 fn build_codex_fresh_chat_is_a_plain_interactive_codex_with_optional_flags() {
     // Bare: no id (`resume`/`--session-id`), no unattended approval flags — codex mints
     // the conversation and a human answers approvals (mirrors build_chat's codex posture).
@@ -870,6 +898,7 @@ fn terminal_request_drain_handles_every_request_type() {
     app.pending_send = Some(SendReq {
         target: SendTarget {
             id: "bot".into(),
+            engine: None,
             root,
             session: "pm-chat".into(),
             agent_loop: true,

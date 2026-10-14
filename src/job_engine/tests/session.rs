@@ -98,6 +98,114 @@ fn the_persistent_terminal_carries_its_session_identity_and_pmds_pmtui() {
 }
 
 #[test]
+fn pmd_omits_trae_hooks_until_it_can_name_pmtui() {
+    let mut fx = setup(Tier::Standard, Engine::Trae, Some(300));
+    let sess = loop_session(&fx);
+
+    fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+    let argv = launched_argv(&fx, &sess).unwrap();
+    assert!(
+        !argv.iter().any(|arg| arg.contains("hooks.Stop")
+            || arg.contains("hooks.SessionStart")
+            || arg.contains("PMTUI_BIN")),
+        "{argv:?}"
+    );
+
+    fx.sched.set_pmtui_bin(Some(PathBuf::from("/opt/am/pmtui")));
+    fx.driver.set_alive(&sess, false);
+    fx.clock.set(START + LAUNCH_GRACE_S);
+    fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+    let argv = launched_argv(&fx, &sess).unwrap();
+    assert!(argv.iter().any(|arg| arg.contains("hooks.Stop")));
+    assert!(argv.iter().any(|arg| arg.contains("hooks.SessionStart")));
+}
+
+#[test]
+fn codex_identity_file_rewrites_do_not_replace_the_in_memory_run() {
+    const CODEX_ID: &str = "019bf0a2-7c3d-4e5f-8a9b-0c1d2e3f4a5b";
+    let mut fx = setup_with(Tier::Standard, Engine::Codex, Some(300), |ledger| {
+        ledger.conversation_id = Some(CODEX_ID.into());
+    });
+    fx.sched.run = JobRun::Monitoring { until: START + 999 };
+    state::write_text_atomic(&fx.paths.codex_conversation_id(), CODEX_ID).unwrap();
+
+    let out = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+
+    assert_eq!(
+        out,
+        JobTick::Monitoring { until: START + 999 },
+        "Codex notify rewrites are turn signals, not scheduler state changes"
+    );
+    assert!(
+        fx.driver.launched().is_empty(),
+        "a rewritten Codex identity file must not revive the saved Idle run"
+    );
+    assert_eq!(
+        ledger(&fx).conversation_id.as_deref(),
+        Some(CODEX_ID),
+        "Codex identity remains unchanged on same-id hook rewrites"
+    );
+}
+
+#[test]
+fn codex_identity_adoption_does_not_clear_resume_fallback_state() {
+    const CODEX_ID: &str = "019bf0a2-7c3d-4e5f-8a9b-0c1d2e3f4a5b";
+    let prior_revision = job::MarkerRevision {
+        modified_ns: 1,
+        len: 2,
+        inode: 3,
+        fingerprint: "prior".into(),
+    };
+    let mut fx = setup_with(Tier::Standard, Engine::Codex, Some(300), |ledger| {
+        ledger.resume_unconfirmed = true;
+        ledger.conversation_id_revision = Some(prior_revision.clone());
+        ledger.run = JobRun::Monitoring { until: START + 999 };
+    });
+    fx.sched.run = JobRun::Monitoring { until: START + 999 };
+    state::write_text_atomic(&fx.paths.codex_conversation_id(), CODEX_ID).unwrap();
+
+    fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+
+    let persisted = ledger(&fx);
+    assert_eq!(persisted.conversation_id.as_deref(), Some(CODEX_ID));
+    assert!(
+        persisted.resume_unconfirmed,
+        "Codex id adoption must not clear the resume fallback gate"
+    );
+    assert_eq!(
+        persisted.conversation_id_revision.as_ref(),
+        Some(&prior_revision),
+        "Codex must not mutate TraeX's revision bookkeeping"
+    );
+}
+
+#[test]
+fn trae_same_thread_rewrites_do_not_replace_the_in_memory_run_after_resume_is_confirmed() {
+    let mut fx = setup(Tier::Standard, Engine::Trae, Some(300));
+    trae_hook_reported(&fx, TRAE_THREAD);
+    let revision = trae_reported_revision(&fx);
+    let mut saved = ledger(&fx);
+    saved.conversation_id = Some(TRAE_THREAD.into());
+    saved.conversation_id_revision = Some(revision);
+    saved.resume_unconfirmed = false;
+    job::save(&fx.paths, &saved).unwrap();
+    fx.sched.run = JobRun::Monitoring { until: START + 999 };
+
+    trae_hook_reported(&fx, TRAE_THREAD);
+    let out = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+
+    assert_eq!(
+        out,
+        JobTick::Monitoring { until: START + 999 },
+        "same-id TraeX Stop rewrites are turn signals after resume has been confirmed"
+    );
+    assert!(
+        fx.driver.launched().is_empty(),
+        "a same-id TraeX rewrite must not revive the saved Idle run"
+    );
+}
+
+#[test]
 fn a_typed_launch_failure_keeps_its_text_under_the_session_context() {
     let mut fx = setup(Tier::Standard, Engine::Claude, Some(300));
     let sess = loop_session(&fx);
@@ -210,6 +318,7 @@ fn codex_launches_fresh_interactive_without_a_pinned_id() {
 #[test]
 fn trae_autopilot_launches_a_persistent_loop_session() {
     let mut fx = setup(Tier::Autopilot, Engine::Trae, Some(300));
+    fx.sched.set_pmtui_bin(Some(PathBuf::from("/opt/am/pmtui")));
     let sess = loop_session(&fx);
 
     let out = fx.sched.tick(&fx.driver, &fx.clock).unwrap();

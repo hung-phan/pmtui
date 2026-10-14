@@ -5,6 +5,7 @@
 //! working agent — so no predicate here can be changed without the others in view.
 
 use super::dialog::{classify_dialog, dialog_option_text};
+use crate::registry::Engine;
 
 /// Whether an interactive claude pane is mid-response or idle at its prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,10 +57,20 @@ pub(super) const PANE_TAIL_LINES: usize = 16;
 ///      which is NEVER bare — it carries a rotating placeholder).
 ///   3. Else Busy (conservative default — unknown ⇒ don't nudge).
 pub fn classify_pane(capture: &str) -> PaneActivity {
-    // TraeX can leave its input box visible behind a blocking chooser.
-    if classify_dialog(capture).is_some() {
+    classify_pane_with(capture, Engine::Claude)
+}
+
+/// Engine-aware pane activity. TraeX has two extra UI shapes the Claude/Codex
+/// classifier must not inherit: blocking dialogs can sit above a visible input box,
+/// and the input box can hold non-placeholder draft text.
+pub fn classify_pane_for_engine(capture: &str, engine: Engine) -> PaneActivity {
+    if engine == Engine::Trae && classify_dialog(capture).is_some() {
         return PaneActivity::Busy;
     }
+    classify_pane_with(capture, engine)
+}
+
+fn classify_pane_with(capture: &str, engine: Engine) -> PaneActivity {
     let non_empty: Vec<&str> = capture.lines().filter(|l| !l.trim().is_empty()).collect();
     // No content at all ⇒ we cannot confirm an idle prompt ⇒ stay conservative.
     if non_empty.is_empty() {
@@ -90,7 +101,7 @@ pub fn classify_pane(capture: &str) -> PaneActivity {
     if window
         .iter()
         .enumerate()
-        .any(|(at, _)| is_composer_at(window, at))
+        .any(|(at, _)| is_composer_at_for_engine(window, at, engine))
     {
         PaneActivity::Idle
     } else {
@@ -166,10 +177,19 @@ pub(super) fn is_busy_spinner_line(line: &str) -> bool {
 /// Deliberately independent of Busy/Idle: claude and codex both keep their composer on
 /// screen while generating, so a mid-response pane still has one.
 pub fn has_composer(capture: &str) -> bool {
-    // A visible input box does not own Enter while a dialog owns the keyboard.
-    if classify_dialog(capture).is_some() {
+    has_composer_with(capture, Engine::Claude)
+}
+
+/// Engine-aware composer detection. TraeX is the only engine where a recognized
+/// blocking dialog must veto a visible input box.
+pub fn has_composer_for_engine(capture: &str, engine: Engine) -> bool {
+    if engine == Engine::Trae && classify_dialog(capture).is_some() {
         return false;
     }
+    has_composer_with(capture, engine)
+}
+
+fn has_composer_with(capture: &str, engine: Engine) -> bool {
     let non_empty: Vec<&str> = capture.lines().filter(|l| !l.trim().is_empty()).collect();
     if non_empty.is_empty() {
         return false;
@@ -178,7 +198,7 @@ pub fn has_composer(capture: &str) -> bool {
     non_empty[start..]
         .iter()
         .enumerate()
-        .any(|(at, _)| is_composer_at(&non_empty[start..], at))
+        .any(|(at, _)| is_composer_at_for_engine(&non_empty[start..], at, engine))
 }
 
 /// A content fingerprint of the TRANSCRIPT REGION of an Idle-classified capture — the
@@ -211,12 +231,18 @@ pub fn has_composer(capture: &str) -> bool {
 /// the content does. Trailing whitespace is trimmed per line because tmux pads/strips row
 /// tails inconsistently; leading indentation is kept (it is stable on a waiting pane).
 pub fn idle_fingerprint(capture: &str) -> u64 {
+    idle_fingerprint_for_engine(capture, Engine::Claude)
+}
+
+/// Stable transcript fingerprint using the same engine-specific composer boundary
+/// as [`classify_pane_for_engine`].
+pub fn idle_fingerprint_for_engine(capture: &str, engine: Engine) -> u64 {
     use std::hash::{Hash, Hasher};
     let lines: Vec<&str> = capture.lines().collect();
     let boundary = lines
         .iter()
         .enumerate()
-        .rposition(|(at, _)| is_composer_at(&lines, at))
+        .rposition(|(at, _)| is_composer_at_for_engine(&lines, at, engine))
         .unwrap_or(lines.len());
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for line in &lines[..boundary] {
@@ -232,6 +258,12 @@ pub fn idle_fingerprint(capture: &str) -> u64 {
 /// animated glyphs change while the underlying work may be completely stuck. New command output,
 /// tool results, or response text remains in the hash and therefore restarts the inactivity window.
 pub fn progress_fingerprint(capture: &str) -> u64 {
+    progress_fingerprint_for_engine(capture, Engine::Claude)
+}
+
+/// Stable busy-progress fingerprint using the same engine-specific composer boundary
+/// as [`classify_pane_for_engine`].
+pub fn progress_fingerprint_for_engine(capture: &str, engine: Engine) -> u64 {
     const FNV_OFFSET: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x100000001b3;
 
@@ -239,7 +271,7 @@ pub fn progress_fingerprint(capture: &str) -> u64 {
     let boundary = lines
         .iter()
         .enumerate()
-        .rposition(|(at, _)| is_composer_at(&lines, at))
+        .rposition(|(at, _)| is_composer_at_for_engine(&lines, at, engine))
         .unwrap_or(lines.len());
     let mut hash = FNV_OFFSET;
     for line in &lines[..boundary] {
@@ -268,26 +300,35 @@ fn is_volatile_busy_line(line: &str) -> bool {
         || is_busy_spinner_line(line)
 }
 
-fn is_composer_at(lines: &[&str], at: usize) -> bool {
+fn is_composer_at_for_engine(lines: &[&str], at: usize, engine: Engine) -> bool {
     let line = lines[at];
     if is_bare_prompt(line) || is_codex_composer(line) {
         return true;
     }
     // TraeX shares Claude's transcript lead, so prose alone cannot establish Idle.
-    // Only captured empty-field hints inside the ruled input box qualify; keeping
-    // this separate also prevents TraeX from enabling Codex-only Enter retries.
-    let hint = line.trim().strip_prefix('❯').map(str::trim);
-    matches!(
-        hint,
-        Some("Explain this codebase" | "Ask TRAE CLI to do anything")
-    ) && at
-        .checked_sub(1)
-        .and_then(|before| lines.get(before))
-        .is_some_and(|top| top.trim().starts_with("────"))
+    // Only measured empty-field placeholders inside the ruled input box qualify. Other text in
+    // that box can be a human draft, and appending a nudge to it would submit a merged prompt.
+    engine == Engine::Trae
+        && line
+            .trim()
+            .strip_prefix('❯')
+            .map(str::trim)
+            .is_some_and(is_trae_placeholder)
+        && at
+            .checked_sub(1)
+            .and_then(|before| lines.get(before))
+            .is_some_and(|top| top.trim().starts_with("────"))
         && lines.get(at + 1).is_some_and(|bottom| {
             let bottom = bottom.trim();
             bottom.starts_with("────") && bottom.chars().all(|ch| ch == '─')
         })
+}
+
+fn is_trae_placeholder(text: &str) -> bool {
+    matches!(
+        text,
+        "Explain this codebase" | "Ask TRAE CLI to do anything"
+    )
 }
 
 /// A bare claude prompt: `>` or `❯` followed only by whitespace. The real UI pads

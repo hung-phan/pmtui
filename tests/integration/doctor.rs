@@ -83,7 +83,9 @@ fn tmux_snapshot(socket: &str) -> (Vec<u8>, Vec<u8>, BTreeMap<String, Vec<u8>>) 
             "list-panes",
             "-a",
             "-F",
-            "#{session_name}\t#{pane_pid}\t#{pane_current_command}\t#{pane_dead}\t#{pane_start_command}",
+            // pane_current_command can change as tmux observes the shell exec into
+            // sleep; doctor only needs to prove that panes were not killed or retargeted.
+            "#{session_name}\t#{pane_pid}\t#{pane_dead}\t#{pane_start_command}",
         ],
     );
     assert!(panes.status.success());

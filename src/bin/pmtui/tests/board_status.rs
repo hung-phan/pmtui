@@ -55,6 +55,7 @@ fn a_detail_composer_refusal_is_visible_while_the_field_stays_open() {
     app.mode = UiMode::Sending {
         target: SendTarget {
             id: "alpha".into(),
+            engine: None,
             root: PathBuf::from("/tmp/alpha"),
             session: "pm-alpha".into(),
             agent_loop: true,

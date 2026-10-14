@@ -316,6 +316,7 @@ fn the_send_overlay_survives_a_tiny_terminal() {
 fn inline_composer_names_its_target() {
     let target = SendTarget {
         id: "bot".into(),
+        engine: None,
         root: PathBuf::from("/nonexistent"),
         session: "pm-bot".into(),
         agent_loop: false,
@@ -341,6 +342,7 @@ fn inline_composer_names_its_target() {
 fn message_composer_wraps_and_scrolls_to_keep_the_caret_visible() {
     let target = SendTarget {
         id: "bot".into(),
+        engine: None,
         root: PathBuf::from("/nonexistent"),
         session: "pm-bot".into(),
         agent_loop: true,
@@ -376,6 +378,7 @@ fn message_composer_wraps_and_scrolls_to_keep_the_caret_visible() {
 fn the_composer_draws_at_every_size_with_its_caret_on_screen() {
     let target = SendTarget {
         id: "bot".into(),
+        engine: None,
         root: PathBuf::from("/nonexistent"),
         session: "pm-bot".into(),
         agent_loop: true,

@@ -144,7 +144,7 @@ pub fn read_job_result(engine: Engine, log: &str, result_file: Option<&str>) -> 
     match engine {
         Engine::Claude => claude_result(log),
         Engine::Codex => codex_result(log, result_file),
-        Engine::Trae => codex_result(log, result_file).or_else(|| trae_result(log)),
+        Engine::Trae => trae_result(log, result_file),
     }
 }
 
@@ -176,8 +176,40 @@ fn claude_result(log: &str) -> Option<JobResult> {
     }
 }
 
-/// Compatibility for TRAE v1-style logs: the LAST `type=result` event states the run outcome.
-fn trae_result(log: &str) -> Option<JobResult> {
+/// TraeX: current exec streams end with a turn terminator and the harness writes the model's
+/// schema to `job_last_message`; older v1-style logs carried the outcome in the LAST `type=result`.
+fn trae_result(log: &str, result_file: Option<&str>) -> Option<JobResult> {
+    let file_text = result_file.map(str::trim).filter(|text| !text.is_empty());
+    let from_file = file_text
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+        .and_then(|value| payload(&value));
+    let terminator = json_lines(log)
+        .filter_map(|v| {
+            v.get("type")
+                .and_then(|t| t.as_str())
+                .filter(|t| matches!(*t, "turn.completed" | "turn.failed"))
+                .map(str::to_string)
+        })
+        .last();
+    if let Some(terminator) = terminator {
+        if terminator == "turn.completed"
+            && let Some(result) = from_file
+        {
+            return Some(result);
+        }
+        let text = from_file
+            .map(|result| result.summary)
+            .or_else(|| file_text.map(str::to_string))
+            .or_else(|| last_agent_message(log))
+            .unwrap_or_default();
+        let outcome = if terminator == "turn.completed" {
+            JobOutcome::Done
+        } else {
+            JobOutcome::Failed
+        };
+        return Some(JobResult::clamped(outcome, &text, None));
+    }
+
     let last = json_lines(log)
         .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("result"))
         .last()?;
@@ -244,22 +276,24 @@ fn codex_result(log: &str, result_file: Option<&str>) -> Option<JobResult> {
 /// that failed or asked for them, instead of losing it with the process.
 pub fn codex_thread_id(log: &str) -> Option<String> {
     json_lines(log)
-        .find_map(|v| {
+        .filter_map(|v| {
             let ty = v.get("type").and_then(|t| t.as_str())?;
             match ty {
                 "thread.started" => v
                     .get("thread_id")
                     .or_else(|| v.get("thread").and_then(|t| t.get("id")))?
                     .as_str()
+                    .and_then(|id| crate::state::codex_identity::parse(id))
                     .map(str::to_string),
                 "result" => v
                     .get("session_id")
                     .and_then(|id| id.as_str())
+                    .and_then(|id| crate::state::codex_identity::parse(id))
                     .map(str::to_string),
                 _ => None,
             }
         })
-        .filter(|id| !id.is_empty())
+        .next()
 }
 
 /// The text of the last completed `agent_message` item in a codex stream.

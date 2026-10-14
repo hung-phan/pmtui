@@ -35,6 +35,7 @@ fn codex_fork_uses_the_native_subcommand_and_captures_the_exact_child() {
 #[test]
 fn trae_fork_uses_native_fork_and_waits_for_the_reported_child_identity() {
     let mut fixture = fork_fixture(Engine::Trae);
+    fixture.app.pmtui_bin = Some(PathBuf::from("/opt/am/pmtui"));
     fixture.app.fork_selected();
     assert!(
         fixture.app.status.contains("ready for Enter"),
@@ -53,6 +54,7 @@ fn trae_fork_uses_native_fork_and_waits_for_the_reported_child_identity() {
 #[test]
 fn trae_fork_uses_the_hook_identity_when_no_daemon_has_adopted_it() {
     let mut fixture = fork_fixture(Engine::Trae);
+    fixture.app.pmtui_bin = Some(PathBuf::from("/opt/am/pmtui"));
     let paths = ProjectPaths::for_session(&fixture.root, "bot");
     let mut ledger = job::load(&paths).unwrap().unwrap();
     ledger.conversation_id = None;
@@ -81,6 +83,7 @@ fn trae_fork_uses_the_hook_identity_when_no_daemon_has_adopted_it() {
 fn trae_fork_discards_a_child_with_missing_or_source_identity() {
     for identity in ["", SOURCE_ID] {
         let mut fixture = fork_fixture_with_identity(Engine::Trae, identity);
+        fixture.app.pmtui_bin = Some(PathBuf::from("/opt/am/pmtui"));
         fixture.app.fork_selected();
         assert_fork_discarded(&fixture);
         assert_eq!(fixture.pane.terminated().len(), 1);

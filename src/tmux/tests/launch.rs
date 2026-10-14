@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use tempfile::tempdir;
 
-use crate::tmux::launch::{pmtui_bin_for_exe, pmtui_bin_for_exe_with_path};
+use crate::tmux::launch::pmtui_bin_for_exe;
 use crate::tmux::{
     ENV_BIN, ENV_SESSION, ENV_STATE_DIR, LAUNCH_COMMAND_MAX_BYTES, LaunchError, LaunchOutcome,
     ManagedEnv, pmtui_bin_for_current_process,
@@ -168,9 +168,8 @@ fn pmd_does_not_pick_a_pmtui_from_path_when_no_sibling_exists() {
     std::fs::write(&pmtui, "").unwrap();
     std::fs::set_permissions(&pmtui, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-    let path = std::env::join_paths([path_dir.path()]).unwrap();
     assert_eq!(
-        pmtui_bin_for_exe_with_path(&pmd, Some(path.as_os_str())),
+        pmtui_bin_for_exe(&pmd),
         None,
         "a PATH hit may be an older pmtui without the hook subcommand"
     );

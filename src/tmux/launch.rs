@@ -8,8 +8,6 @@
 //! failure may have left an agent that read its initial Message, so a caller must never
 //! launch that Message again.
 
-#[cfg(test)]
-use std::ffi::OsStr;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -112,8 +110,7 @@ impl fmt::Display for LaunchError {
 
 impl std::error::Error for LaunchError {}
 
-/// Canonical pmtui path for this process: itself for `pmtui`, a sibling for `pmd`,
-/// or the `pmtui` this process could run from PATH.
+/// Canonical pmtui path for this process: itself for `pmtui`, or a sibling for `pmd`.
 pub fn pmtui_bin_for_current_process() -> Option<PathBuf> {
     pmtui_bin_for_exe(&std::env::current_exe().ok()?)
 }
@@ -127,14 +124,6 @@ pub(crate) fn pmtui_bin_for_exe(exe: &Path) -> Option<PathBuf> {
         exe.with_file_name("pmtui")
     };
     executable_file(&candidate)
-}
-
-/// Back-compatible test seam for callers that still pass a PATH. The value is ignored because a
-/// PATH hit can be an older `pmtui` without the hook subcommand.
-#[cfg(test)]
-pub(crate) fn pmtui_bin_for_exe_with_path(exe: &Path, path: Option<&OsStr>) -> Option<PathBuf> {
-    let _ = path;
-    pmtui_bin_for_exe(exe)
 }
 
 fn executable_file(candidate: &Path) -> Option<PathBuf> {

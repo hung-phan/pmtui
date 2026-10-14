@@ -239,7 +239,12 @@ impl App {
                                 hook_working,
                                 ActivityObservation::Unreadable,
                             ),
-                            Ok(cap) if tmux::classify_pane(&cap) == tmux::PaneActivity::Busy => {
+                            Ok(cap)
+                                if v.engine.map_or_else(
+                                    || tmux::classify_pane(&cap),
+                                    |engine| tmux::classify_pane_for_engine(&cap, engine),
+                                ) == tmux::PaneActivity::Busy =>
+                            {
                                 merge_activity(
                                     hook_authoritative,
                                     v.engine,
@@ -250,7 +255,10 @@ impl App {
                             Ok(cap) => {
                                 let (fp, count) = idle_gate_step(
                                     prev_gate.get(&p.id).copied(),
-                                    tmux::idle_fingerprint(&cap),
+                                    v.engine.map_or_else(
+                                        || tmux::idle_fingerprint(&cap),
+                                        |engine| tmux::idle_fingerprint_for_engine(&cap, engine),
+                                    ),
                                 );
                                 new_gate.insert(p.id.clone(), (fp, count));
                                 merge_activity(
@@ -410,7 +418,13 @@ impl App {
                 let turn_signal = session_paths.turn_signal();
                 let env = self.managed_env(&id, &e.root);
                 self.pending_chat = Some(ChatReq {
-                    argv: build_chat(engine, &cid, worker_model.as_deref(), &turn_signal),
+                    argv: build_chat_with_pmtui_bin(
+                        engine,
+                        &cid,
+                        worker_model.as_deref(),
+                        &turn_signal,
+                        env.pmtui_bin.as_deref(),
+                    ),
                     session_paths,
                     // The REPL's cwd is the PROJECT ROOT (`e.root`), never the
                     // per-session state dir in `session_paths`.

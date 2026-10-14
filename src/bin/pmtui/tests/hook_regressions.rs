@@ -25,12 +25,17 @@ fn hook_syntax_rejects_missing_unknown_and_extra_arguments() {
         ),
         (
             vec!["hook", "session-start", "--json"],
-            "hook: unknown hook \"session-start\"",
+            "hook: unexpected argument \"--json\"",
             true,
         ),
         (
+            vec!["hook", "session-start", "extra"],
+            "hook: unexpected argument \"extra\"",
+            false,
+        ),
+        (
             vec!["hook", "turn-complete", "extra"],
-            "hook: unknown hook \"turn-complete\"",
+            "hook: unexpected argument \"extra\"",
             false,
         ),
     ] {

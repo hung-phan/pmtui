@@ -155,6 +155,15 @@ impl App {
             (Some(engine), _) | (None, Some(engine)) => engine,
             (None, None) => Engine::Claude,
         };
+        if engine == Engine::Trae
+            && !agent_manager::worker::turn_hook_runnable_for(engine, self.pmtui_bin.as_deref())
+        {
+            self.status = format!(
+                "{}: cannot fork TraeX without working pmtui hooks (PMTUI_BIN unavailable or hooks disabled)",
+                source.id
+            );
+            return;
+        }
         let ledger_id = ledger
             .as_ref()
             .and_then(|state| state.conversation_id.as_deref());
@@ -300,7 +309,7 @@ impl App {
         let argv = agent_manager::worker::build_fork_command(
             engine,
             &source_conversation,
-            agent_manager::worker::turn_hook_enabled_for(engine)
+            agent_manager::worker::turn_hook_runnable_for(engine, self.pmtui_bin.as_deref())
                 .then_some(&fork.paths.turn_signal()),
             (engine == Engine::Claude).then_some(identity_file.as_path()),
             source.worker_model.as_deref(),
@@ -485,11 +494,11 @@ impl App {
         engine: Engine,
         session: &str,
     ) -> bool {
-        let Some(first) = self.idle_source_fingerprint(source, session) else {
+        let Some(first) = self.idle_source_fingerprint(source, engine, session) else {
             return false;
         };
         std::thread::sleep(FORK_IDLE_RECHECK);
-        let Some(second) = self.idle_source_fingerprint(source, session) else {
+        let Some(second) = self.idle_source_fingerprint(source, engine, session) else {
             return false;
         };
         let source_view =
@@ -511,10 +520,17 @@ impl App {
     }
 
     /// The transcript fingerprint of one Idle capture of the source; `None` records a refusal.
-    fn idle_source_fingerprint(&mut self, source: &ProjectEntry, session: &str) -> Option<u64> {
+    fn idle_source_fingerprint(
+        &mut self,
+        source: &ProjectEntry,
+        engine: Engine,
+        session: &str,
+    ) -> Option<u64> {
         match self.agent_tmux.capture_tail(session, 40) {
-            Ok(capture) if tmux::classify_pane(&capture) == tmux::PaneActivity::Idle => {
-                Some(tmux::idle_fingerprint(&capture))
+            Ok(capture)
+                if tmux::classify_pane_for_engine(&capture, engine) == tmux::PaneActivity::Idle =>
+            {
+                Some(tmux::idle_fingerprint_for_engine(&capture, engine))
             }
             Ok(_) => {
                 self.status = format!("{}: still working; fork once it is idle", source.id);

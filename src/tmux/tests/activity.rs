@@ -7,6 +7,7 @@ use crate::tmux::activity::{
     PANE_TAIL_LINES, PaneActivity, classify_pane, has_composer, idle_fingerprint, is_bare_prompt,
     is_busy_spinner_line, is_codex_composer, is_spinner_glyph, progress_fingerprint,
 };
+use crate::tmux::classify_dialog;
 
 #[test]
 fn has_composer_sees_both_engines_prompts_and_no_dialog() {
@@ -28,6 +29,28 @@ fn has_composer_sees_both_engines_prompts_and_no_dialog() {
     let busy = "\u{273b} Quantumizing\u{2026} (3s \u{b7} \u{2193} 5 tokens)\n\u{276f}  \n";
     assert!(has_composer(busy));
     assert_eq!(classify_pane(busy), PaneActivity::Busy);
+}
+
+#[test]
+fn numbered_transcript_above_a_prompt_does_not_veto_the_generic_composer() {
+    let pane = concat!(
+        "Pick one if you agree?\n",
+        " ❯ 1. Yes\n",
+        "   2. No\n",
+        "Enter to select · Esc to cancel\n",
+        "\n",
+        "done\n",
+        "────────────────────────────────\n",
+        "❯  \n",
+        "────────────────────────────────\n",
+    );
+
+    assert!(
+        classify_dialog(pane).is_some(),
+        "fixture must look dialog-shaped"
+    );
+    assert!(has_composer(pane));
+    assert_eq!(classify_pane(pane), PaneActivity::Idle);
 }
 
 #[test]

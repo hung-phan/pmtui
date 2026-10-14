@@ -62,12 +62,18 @@ pub fn turn_hook_enabled_for(engine: Engine) -> bool {
     turn_hook_value_enabled_for(engine, std::env::var("PM_TURN_HOOK").ok().as_deref())
 }
 
+pub fn turn_hook_runnable_for(engine: Engine, pmtui_bin: Option<&Path>) -> bool {
+    turn_hook_enabled_for(engine) && (engine != Engine::Trae || pmtui_bin.is_some())
+}
+
 pub(super) fn turn_hook_value_enabled(value: Option<&str>) -> bool {
     !matches!(value.map(str::trim), Some("off" | "0" | "false"))
 }
 
-pub(super) fn turn_hook_value_enabled_for(_engine: Engine, value: Option<&str>) -> bool {
-    turn_hook_value_enabled(value)
+pub(super) fn turn_hook_value_enabled_for(engine: Engine, value: Option<&str>) -> bool {
+    match engine {
+        Engine::Claude | Engine::Codex | Engine::Trae => turn_hook_value_enabled(value),
+    }
 }
 
 /// Build the argv to launch a phase worker for `engine`. The worker is told (in
