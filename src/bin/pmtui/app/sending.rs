@@ -234,11 +234,9 @@ impl App {
             .agent_tmux
             .capture_tail(&t.session, SEND_GATE_LINES)
             .context("re-read pane before send")?;
-        let has_composer = t.engine.map_or_else(
-            || tmux::has_composer(&capture),
-            |engine| tmux::has_composer_for_engine(&capture, engine),
-        );
-        if tmux::classify_dialog(&capture).is_some() || !has_composer {
+        if tmux::classify_dialog_for_engine(&capture, t.engine).is_some()
+            || !tmux::has_composer_for_engine(&capture, t.engine)
+        {
             anyhow::bail!("the pane changed while the message was waiting");
         }
         self.agent_tmux

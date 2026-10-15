@@ -4,7 +4,7 @@
 //! because a false Idle is the dangerous direction — it types a nudge into a
 //! working agent — so no predicate here can be changed without the others in view.
 
-use super::dialog::{classify_dialog, dialog_option_text};
+use super::dialog::{classify_dialog_for_engine, dialog_option_text};
 use crate::registry::Engine;
 
 /// Whether an interactive claude pane is mid-response or idle at its prompt.
@@ -63,8 +63,9 @@ pub fn classify_pane(capture: &str) -> PaneActivity {
 /// Engine-aware pane activity. TraeX has two extra UI shapes the Claude/Codex
 /// classifier must not inherit: blocking dialogs can sit above a visible input box,
 /// and the input box can hold non-placeholder draft text.
-pub fn classify_pane_for_engine(capture: &str, engine: Engine) -> PaneActivity {
-    if engine == Engine::Trae && classify_dialog(capture).is_some() {
+pub fn classify_pane_for_engine(capture: &str, engine: impl Into<Option<Engine>>) -> PaneActivity {
+    let engine = engine.into().unwrap_or(Engine::Claude);
+    if engine == Engine::Trae && classify_dialog_for_engine(capture, engine).is_some() {
         return PaneActivity::Busy;
     }
     classify_pane_with(capture, engine)
@@ -182,8 +183,9 @@ pub fn has_composer(capture: &str) -> bool {
 
 /// Engine-aware composer detection. TraeX is the only engine where a recognized
 /// blocking dialog must veto a visible input box.
-pub fn has_composer_for_engine(capture: &str, engine: Engine) -> bool {
-    if engine == Engine::Trae && classify_dialog(capture).is_some() {
+pub fn has_composer_for_engine(capture: &str, engine: impl Into<Option<Engine>>) -> bool {
+    let engine = engine.into().unwrap_or(Engine::Claude);
+    if engine == Engine::Trae && classify_dialog_for_engine(capture, engine).is_some() {
         return false;
     }
     has_composer_with(capture, engine)
@@ -236,7 +238,8 @@ pub fn idle_fingerprint(capture: &str) -> u64 {
 
 /// Stable transcript fingerprint using the same engine-specific composer boundary
 /// as [`classify_pane_for_engine`].
-pub fn idle_fingerprint_for_engine(capture: &str, engine: Engine) -> u64 {
+pub fn idle_fingerprint_for_engine(capture: &str, engine: impl Into<Option<Engine>>) -> u64 {
+    let engine = engine.into().unwrap_or(Engine::Claude);
     use std::hash::{Hash, Hasher};
     let lines: Vec<&str> = capture.lines().collect();
     let boundary = lines
@@ -308,26 +311,39 @@ fn is_composer_at_for_engine(lines: &[&str], at: usize, engine: Engine) -> bool 
     // TraeX shares Claude's transcript lead, so prose alone cannot establish Idle.
     // Only measured empty-field placeholders inside the ruled input box qualify. Other text in
     // that box can be a human draft, and appending a nudge to it would submit a merged prompt.
+    // Skip padding when finding the rules so raw fingerprints and blank-filtered activity
+    // captures agree on the boundary, without changing the transcript bytes that get hashed.
     engine == Engine::Trae
         && line
             .trim()
             .strip_prefix('❯')
             .map(str::trim)
             .is_some_and(is_trae_placeholder)
-        && at
-            .checked_sub(1)
-            .and_then(|before| lines.get(before))
+        && lines[..at]
+            .iter()
+            .rfind(|line| !line.trim().is_empty())
             .is_some_and(|top| top.trim().starts_with("────"))
-        && lines.get(at + 1).is_some_and(|bottom| {
-            let bottom = bottom.trim();
-            bottom.starts_with("────") && bottom.chars().all(|ch| ch == '─')
-        })
+        && lines[at + 1..]
+            .iter()
+            .find(|line| !line.trim().is_empty())
+            .is_some_and(|bottom| {
+                let bottom = bottom.trim();
+                bottom.starts_with("────") && bottom.chars().all(|ch| ch == '─')
+            })
 }
 
 fn is_trae_placeholder(text: &str) -> bool {
     matches!(
         text,
-        "Explain this codebase" | "Ask TRAE CLI to do anything"
+        // TraeX rotates these hints in an empty composer. Keep exact strings: a non-placeholder
+        // draft must stay Busy so pmd and `s` do not append to a human's unsent text.
+        "Explain this codebase"
+            | "Ask TRAE CLI to do anything"
+            | "Use /skills to list available skills"
+            | "Run /review on my current changes"
+            | "Write tests for @filename"
+            | "Find and fix a bug in @filename"
+            | "Implement {feature}"
     )
 }
 

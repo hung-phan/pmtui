@@ -146,9 +146,7 @@ pub(crate) fn install_prelaunch_skills(root: &Path, engine: Engine, env: &tmux::
     if engine == Engine::Trae {
         let _ = agent_manager::skills::install_worker_skill(&paths, engine);
     }
-    if env.pmtui_bin.is_some() {
-        let _ = agent_manager::skills::install_spawn_skill(&paths, engine);
-    }
+    let _ = agent_manager::skills::install_spawn_skill_for_launch(root, engine, env);
 }
 
 /// Build the argv for a **real interactive** engine REPL resuming a session's
@@ -189,7 +187,7 @@ pub(crate) fn build_chat_with_pmtui_bin(
     agent_manager::worker::build_standard_command(
         engine,
         &agent_manager::worker::Resume::Continue(conversation_id.to_string()),
-        hook_signal_for_launch(engine, turn_signal, pmtui_bin),
+        agent_manager::worker::turn_hook_runnable_for(engine, pmtui_bin).then_some(turn_signal),
         model,
     )
 }
@@ -233,7 +231,7 @@ pub(crate) fn build_chat_create_with_pmtui_bin(
             &agent_manager::worker::Resume::Fresh {
                 session_id: Some(conversation_id.to_string()),
             },
-            hook_signal_for_launch(engine, turn_signal, pmtui_bin),
+            agent_manager::worker::turn_hook_runnable_for(engine, pmtui_bin).then_some(turn_signal),
             model,
         ),
         Engine::Codex => {
@@ -253,20 +251,9 @@ pub(crate) fn build_codex_fresh_chat(model: Option<&str>, turn_signal: &Path) ->
     agent_manager::worker::build_standard_command(
         Engine::Codex,
         &agent_manager::worker::Resume::Fresh { session_id: None },
-        agent_manager::worker::turn_hook_enabled_for(Engine::Codex).then_some(turn_signal),
+        agent_manager::worker::turn_hook_enabled().then_some(turn_signal),
         model,
     )
-}
-
-fn hook_signal_for_launch<'a>(
-    engine: Engine,
-    turn_signal: &'a Path,
-    pmtui_bin: Option<&Path>,
-) -> Option<&'a Path> {
-    if !agent_manager::worker::turn_hook_runnable_for(engine, pmtui_bin) {
-        return None;
-    }
-    Some(turn_signal)
 }
 
 /// Attach to an already-running unified project terminal. Ctrl+q detaches and
@@ -341,9 +328,7 @@ pub(crate) fn chat_with_handoff(
         anyhow::bail!("a wake just started — try again in a moment");
     }
     // Idempotent by unified session name: an existing process is attached, not relaunched.
-    if !driver.is_alive(&req.session).unwrap_or(false) {
-        install_prelaunch_skills(&req.root, req.engine, &req.env);
-    }
+    install_prelaunch_skills(&req.root, req.engine, &req.env);
     driver.launch_interactive(&req.session, &req.root, &req.argv, &req.env)?;
     on_started();
 
@@ -395,9 +380,7 @@ pub(crate) fn create_chat_with_handoff(
     let session = req.session;
 
     // Idempotent by unified session name: an existing process is attached, not relaunched.
-    if !driver.is_alive(&session).unwrap_or(false) {
-        install_prelaunch_skills(&root, req.engine, &req.env);
-    }
+    install_prelaunch_skills(&root, req.engine, &req.env);
     driver.launch_interactive(&session, &root, &argv, &req.env)?;
     on_started();
 

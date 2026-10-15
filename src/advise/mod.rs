@@ -77,19 +77,28 @@ mod reply;
 #[cfg(test)]
 mod tests;
 
+use crate::registry::Engine;
+
 pub use consult::{Consult, Grant, clamp_directive, clamp_goal, clamp_situation};
 pub use pane_text::{apply_text, has_forbidden_control_bytes, sanitize_control_bytes, text_hash};
 pub use preflight::{hard_floor_hit, hard_floor_hit_in, supervisor_enabled};
-pub use prompt::{OUTPUT_SCHEMA, SUPERVISOR_SYSTEM_PROMPT, build_consult_prompt};
+pub use prompt::{
+    OUTPUT_SCHEMA, SUPERVISOR_SYSTEM_PROMPT, TRAE_SUPERVISOR_POLICY_EXTRA, build_consult_prompt,
+};
 pub use reply::{Refusal, Verdict, validate};
 
 /// Keep live consults and their benchmark on the same instructions. Milestone E moved the
 /// decider protocol into a skill, but headless consults cannot depend on engine skill discovery:
 /// Claude runs `--bare`, and exec-style engines may not load project skills before the prompt.
 /// The skill body is therefore appended to the prompt bytes every decider engine receives.
-pub fn supervisor_system_prompt() -> String {
+pub fn supervisor_system_prompt_for_engine(engine: Engine) -> String {
+    let policy_extra = if engine == Engine::Trae {
+        format!("\n\n{TRAE_SUPERVISOR_POLICY_EXTRA}")
+    } else {
+        String::new()
+    };
     format!(
-        "{SUPERVISOR_SYSTEM_PROMPT}\n\n{}",
+        "{SUPERVISOR_SYSTEM_PROMPT}{policy_extra}\n\n{}",
         crate::skills::DECIDER_SKILL_MD
     )
 }

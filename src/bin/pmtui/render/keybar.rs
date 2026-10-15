@@ -157,7 +157,12 @@ pub(crate) fn normal_chips(app: &App) -> Vec<Chip> {
         .filter(|b| b.scope == Scope::Normal)
         .filter(|b| binding_applies(app, b))
         .filter(|b| !(unstartable && starts_the_row(b.key)))
-        .filter(|b| b.key != "f" || sel.is_some_and(|view| fork_refusal(view).is_none()))
+        .filter(|b| {
+            b.key != "f"
+                || sel.is_some_and(|view| {
+                    view.engine != Some(Engine::Trae) || fork_refusal(view).is_none()
+                })
+        })
         .map(|b| Chip {
             key: b.key,
             label: chip_label(b, sel),

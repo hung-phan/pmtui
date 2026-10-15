@@ -579,13 +579,14 @@ look stalled. A live busy terminal is newer evidence, and the product continues 
 **On a session that the supervisor does not drive, live activity wins over recorded state.** Nothing
 advances the record of that session, so the record stays as it was when the mode last changed. A working
 terminal therefore sets the state that the dashboard shows. The open decision stays in the record and
-stays visible. Only the claim that the product waits for a person goes away. A hook or turn signal from
-the last driven state is not authority after the session leaves Autopilot; the live terminal is the newer
-source.
+stays visible. Only the claim that the product waits for a person goes away. For TRAE CLI, a hook or
+turn signal from the last driven state is not authority after the session leaves Autopilot; the live
+terminal is the newer source.
 
 For TRAE CLI, a resumed thread remains unconfirmed until the worker writes a marker or the hook writes
-the same thread id again after the resume launch. A stale prior hook write MUST NOT by itself confirm the
-resume.
+a thread id after the resume launch. With a recorded launch baseline, a different id MUST also come
+from a new hook write before the supervisor adopts it. An old hook file is not proof that the new
+launch reached the engine, even if its id differs from the recorded conversation.
 
 A session that is idle at its prompt with an open decision still needs a person. A decision on a session
 that the supervisor does drive keeps its place.
@@ -617,6 +618,10 @@ failure.
 
 The inactivity window of a busy worker restarts only if the content of the terminal changes in a way that
 has meaning. A spinner, a counter, a token count, a placeholder and a clock are not progress.
+
+Blank padding inside the TRAE input box MUST NOT cause its rotating placeholder or footer to count
+as transcript changes. Activity detection and progress detection MUST use the same input boundary,
+so an idle row can settle and a stalled worker can reach the inactivity bound.
 
 Progress on the terminal never pays a report debt, never gives permission, and never allows input. It only
 stops the product from reading active work as a silent stall.
@@ -826,8 +831,10 @@ failure or a refusal on one decision MUST NOT authorize a sibling, and MUST NOT 
 If the decider is not available, the decisions that wait stay visible and go to a person.
 
 The person MAY select Claude, Codex or TRAE as the decider, independently of the worker.
-Changing the selected engine or model MUST let the supervisor try that selection again after
-a transport failure. An unchanged selection MUST keep its failure state across a restart.
+Changing to or from TRAE, or changing its selected model, MUST let the supervisor try the new selection
+after a transport failure. A TRAE failure MUST NOT disable a working Claude or Codex selection.
+Claude and Codex otherwise retain their existing failure recovery behavior.
+An unchanged selection MUST keep its failure state across a restart.
 A consult already in progress MUST keep its original answer source until it ends.
 
 ### The Directive

@@ -2,14 +2,11 @@ use super::*;
 use std::path::Path;
 
 #[test]
-fn public_hook_switch_reads_the_same_policy_as_the_engine_specific_entry() {
+fn public_hook_switch_reads_the_environment_policy() {
     // Read the inherited value; mutating process-wide env would race other tests.
     let value = std::env::var("PM_TURN_HOOK").ok();
     let expected = !matches!(value.as_deref().map(str::trim), Some("off" | "0" | "false"));
     assert_eq!(turn_hook_enabled(), expected);
-    assert_eq!(turn_hook_enabled_for(Engine::Claude), expected);
-    assert_eq!(turn_hook_enabled_for(Engine::Codex), expected);
-    assert_eq!(turn_hook_enabled_for(Engine::Trae), expected);
 }
 
 #[test]

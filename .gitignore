@@ -1,3 +1,4 @@
+.DS_Store
 /target
 /.serena/
 # The coordinator's own project ledger: runtime state, not source. It holds a live

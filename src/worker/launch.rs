@@ -58,22 +58,12 @@ pub fn turn_hook_enabled() -> bool {
     turn_hook_value_enabled(std::env::var("PM_TURN_HOOK").ok().as_deref())
 }
 
-pub fn turn_hook_enabled_for(engine: Engine) -> bool {
-    turn_hook_value_enabled_for(engine, std::env::var("PM_TURN_HOOK").ok().as_deref())
-}
-
 pub fn turn_hook_runnable_for(engine: Engine, pmtui_bin: Option<&Path>) -> bool {
-    turn_hook_enabled_for(engine) && (engine != Engine::Trae || pmtui_bin.is_some())
+    turn_hook_enabled() && (engine != Engine::Trae || pmtui_bin.is_some())
 }
 
 pub(super) fn turn_hook_value_enabled(value: Option<&str>) -> bool {
     !matches!(value.map(str::trim), Some("off" | "0" | "false"))
-}
-
-pub(super) fn turn_hook_value_enabled_for(engine: Engine, value: Option<&str>) -> bool {
-    match engine {
-        Engine::Claude | Engine::Codex | Engine::Trae => turn_hook_value_enabled(value),
-    }
 }
 
 /// Build the argv to launch a phase worker for `engine`. The worker is told (in
@@ -172,15 +162,15 @@ pub fn build_command(
             argv.push(Engine::Trae.bin().into());
             argv.push("exec".into());
             match &resume {
-                Resume::Fresh {
-                    session_id: Some(id),
-                } => {
+                Resume::Fresh { session_id } => {
                     argv.push("--sandbox".into());
                     argv.push("workspace-write".into());
                     argv.push("--skip-git-repo-check".into());
                     argv.push("--json".into());
-                    argv.push("--session-id".into());
-                    argv.push(id.clone());
+                    if let Some(id) = session_id {
+                        argv.push("--session-id".into());
+                        argv.push(id.clone());
+                    }
                     for d in add_dirs {
                         argv.push("--add-dir".into());
                         argv.push(d.to_string_lossy().into_owned());
@@ -191,16 +181,6 @@ pub fn build_command(
                     argv.push(id.clone());
                     argv.push("--skip-git-repo-check".into());
                     argv.push("--json".into());
-                }
-                Resume::Fresh { session_id: None } => {
-                    argv.push("--sandbox".into());
-                    argv.push("workspace-write".into());
-                    argv.push("--skip-git-repo-check".into());
-                    argv.push("--json".into());
-                    for d in add_dirs {
-                        argv.push("--add-dir".into());
-                        argv.push(d.to_string_lossy().into_owned());
-                    }
                 }
             }
         }
@@ -326,6 +306,43 @@ fn strip_managed_env(argv: &mut Vec<String>) {
         argv.splice(1..1, unsets);
     } else {
         argv.splice(0..0, std::iter::once("env".to_string()).chain(unsets));
+    }
+}
+
+fn push_trae_interactive_args(
+    argv: &mut Vec<String>,
+    resume: &Resume,
+    turn_signal: Option<&Path>,
+    model: Option<&str>,
+    auto_permission: bool,
+) {
+    argv.push(Engine::Trae.bin().into());
+    if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
+        argv.push("-m".into());
+        argv.push(m.to_string());
+    }
+    if turn_signal.is_some() {
+        argv.push("-c".into());
+        argv.push(trae_turn_hook_config());
+        argv.push("-c".into());
+        argv.push(trae_session_start_hook_config());
+    }
+    match resume {
+        Resume::Fresh {
+            session_id: Some(id),
+        } => {
+            argv.push("--session-id".into());
+            argv.push(id.clone());
+        }
+        Resume::Continue(id) => {
+            argv.push("resume".into());
+            argv.push(id.clone());
+        }
+        Resume::Fresh { session_id: None } => {}
+    }
+    if auto_permission {
+        argv.push("--permission-mode".into());
+        argv.push("auto".into());
     }
 }
 
@@ -495,32 +512,7 @@ pub fn build_loop_command(
             // already codex's primary writable workspace under `workspace-write`.
         }
         Engine::Trae => {
-            argv.push(Engine::Trae.bin().into());
-            if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
-                argv.push("-m".into());
-                argv.push(m.to_string());
-            }
-            if turn_signal.is_some() {
-                argv.push("-c".into());
-                argv.push(trae_turn_hook_config());
-                argv.push("-c".into());
-                argv.push(trae_session_start_hook_config());
-            }
-            match resume {
-                Resume::Fresh {
-                    session_id: Some(id),
-                } => {
-                    argv.push("--session-id".into());
-                    argv.push(id.clone());
-                }
-                Resume::Continue(id) => {
-                    argv.push("resume".into());
-                    argv.push(id.clone());
-                }
-                Resume::Fresh { session_id: None } => {}
-            }
-            argv.push("--permission-mode".into());
-            argv.push("auto".into());
+            push_trae_interactive_args(&mut argv, resume, turn_signal, model, true);
         }
     }
     argv
@@ -579,30 +571,7 @@ pub fn build_standard_command(
             }
         }
         Engine::Trae => {
-            argv.push(Engine::Trae.bin().into());
-            if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
-                argv.push("-m".into());
-                argv.push(m.to_string());
-            }
-            if turn_signal.is_some() {
-                argv.push("-c".into());
-                argv.push(trae_turn_hook_config());
-                argv.push("-c".into());
-                argv.push(trae_session_start_hook_config());
-            }
-            match resume {
-                Resume::Fresh {
-                    session_id: Some(id),
-                } => {
-                    argv.push("--session-id".into());
-                    argv.push(id.clone());
-                }
-                Resume::Continue(id) => {
-                    argv.push("resume".into());
-                    argv.push(id.clone());
-                }
-                Resume::Fresh { session_id: None } => {}
-            }
+            push_trae_interactive_args(&mut argv, resume, turn_signal, model, false);
         }
     }
     argv
@@ -642,9 +611,20 @@ pub fn build_fork_command(
             argv.push("--fork-session".into());
             argv
         }
-        Engine::Codex | Engine::Trae => {
+        Engine::Codex => {
             let mut argv = build_standard_command(
-                engine,
+                Engine::Codex,
+                &Resume::Fresh { session_id: None },
+                turn_signal,
+                model,
+            );
+            argv.push("fork".into());
+            argv.push(source_id.to_string());
+            argv
+        }
+        Engine::Trae => {
+            let mut argv = build_standard_command(
+                Engine::Trae,
                 &Resume::Fresh { session_id: None },
                 turn_signal,
                 model,

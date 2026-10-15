@@ -150,6 +150,7 @@ mod spawn_broker;
 mod spawn_cli;
 mod spawn_jobs;
 mod spawn_rows;
+mod standard_turn_hook;
 mod status;
 mod status_log;
 mod stops;

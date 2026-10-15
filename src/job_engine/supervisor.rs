@@ -198,17 +198,27 @@ impl JobScheduler {
         if self.advise.is_some() || self.advise_orphaned.is_some() {
             return;
         }
-        let model = resolved_decider_model(engine, model);
-        if let Some(previous) = &self.advise_selection {
-            if previous.engine == engine && previous.model == model {
-                return;
-            }
-            self.advise_health = super::fallback::AdviseHealth::default();
-            self.advise_binary = None;
+        // Only TraeX tracks a selection baseline; other engines need no model lookup here.
+        if engine != Engine::Trae
+            && !self
+                .advise_selection
+                .as_ref()
+                .is_some_and(|prior| prior.engine == Engine::Trae)
+        {
+            return;
         }
-        // An older ledger cannot prove a selection changed. Record a baseline without clearing
-        // its latch, so merely restarting pmd never re-enables a known broken transport.
-        self.advise_selection = Some(job::DeciderHealthSelection { engine, model });
+        let selection = (engine == Engine::Trae).then(|| job::DeciderHealthSelection {
+            engine,
+            model: resolved_decider_model(engine, model),
+        });
+        if self.advise_selection == selection {
+            return;
+        }
+        self.advise_health = super::fallback::AdviseHealth::default();
+        self.advise_binary = None;
+        // TraeX failures must not follow a switch back to another engine. Claude/Codex still
+        // keep their own latch across model edits, so old ledgers need no selection baseline.
+        self.advise_selection = selection;
     }
 
     pub(super) fn cleanup_completed_advice_artifacts(&self, state: &AgentLoopState) {
@@ -478,7 +488,7 @@ impl JobScheduler {
         // exec-style engines may not load project skills before they read the prompt. The
         // fixed supervisor prompt still owns the non-worker-influenced policy; the skill body
         // is purely additive protocol text after it.
-        let system_prompt = advise::supervisor_system_prompt();
+        let system_prompt = advise::supervisor_system_prompt_for_engine(decider_engine);
         // Dispatch on the SELECTED engine. Each arm owns its launch and verdict source so a
         // provider's CLI or lifecycle change cannot silently alter another provider's contract.
         // `advise::validate` re-derives every guarantee from whatever the engine emits, so a
@@ -506,29 +516,32 @@ impl JobScheduler {
                 );
                 (argv, None)
             }
-            engine @ (Engine::Codex | Engine::Trae) => {
+            Engine::Codex => {
                 let last = self.paths.advice_last_message(seq);
                 let prompt = advise::build_consult_prompt(&consult);
                 let last_text = last.to_string_lossy();
-                let argv = match engine {
-                    Engine::Codex => worker::build_supervisor_command_codex(
-                        resolved_model.as_deref(),
-                        &system_prompt,
-                        &prompt,
-                        &last_text,
-                        SUPERVISOR_SHELL_TIMEOUT_S,
-                        SUPERVISOR_KILL_GRACE_S,
-                    ),
-                    Engine::Trae => worker::build_supervisor_command_trae(
-                        resolved_model.as_deref(),
-                        &system_prompt,
-                        &prompt,
-                        &last_text,
-                        SUPERVISOR_SHELL_TIMEOUT_S,
-                        SUPERVISOR_KILL_GRACE_S,
-                    ),
-                    Engine::Claude => unreachable!("matched above"),
-                };
+                let argv = worker::build_supervisor_command_codex(
+                    resolved_model.as_deref(),
+                    &system_prompt,
+                    &prompt,
+                    &last_text,
+                    SUPERVISOR_SHELL_TIMEOUT_S,
+                    SUPERVISOR_KILL_GRACE_S,
+                );
+                (argv, Some(last))
+            }
+            Engine::Trae => {
+                let last = self.paths.advice_last_message(seq);
+                let prompt = advise::build_consult_prompt(&consult);
+                let last_text = last.to_string_lossy();
+                let argv = worker::build_supervisor_command_trae(
+                    resolved_model.as_deref(),
+                    &system_prompt,
+                    &prompt,
+                    &last_text,
+                    SUPERVISOR_SHELL_TIMEOUT_S,
+                    SUPERVISOR_KILL_GRACE_S,
+                );
                 (argv, Some(last))
             }
         };

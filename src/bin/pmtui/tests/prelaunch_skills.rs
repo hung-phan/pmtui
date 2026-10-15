@@ -1,6 +1,7 @@
 //! Dashboard launches ship only the skills that are useful before that terminal starts:
 //! `agent-manager-worker` for TraeX, plus `pmtui-spawn` when `PMTUI_BIN` is present. A failed
-//! install never blocks the launch, and an attach to an existing terminal does not rewrite skills.
+//! install never blocks the launch. They are also refreshed before attach, so a live terminal is
+//! not stranded on stale helper files after pmtui upgrades.
 
 use super::*;
 
@@ -299,7 +300,7 @@ fn a_chat_launch_that_names_no_pmtui_ships_only_the_trae_worker_skill() {
 }
 
 #[test]
-fn attaching_to_an_existing_chat_terminal_does_not_rewrite_skills() {
+fn attaching_to_an_existing_chat_terminal_refreshes_skills() {
     let dir = tempfile::tempdir().unwrap();
     let paths = ProjectPaths::for_session(dir.path(), "bot");
     let req = ChatReq {
@@ -320,8 +321,8 @@ fn attaching_to_an_existing_chat_terminal_does_not_rewrite_skills() {
 
     chat_with_handoff(&mut NoHandoff, &pane, &req, || {}).unwrap();
 
-    assert_no_spawn_skill(dir.path());
-    assert_no_worker_skill(dir.path());
+    assert_spawn_skill(dir.path(), Engine::Trae);
+    assert_worker_skill(dir.path(), Engine::Trae);
 }
 
 #[test]

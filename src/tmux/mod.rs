@@ -36,14 +36,15 @@ pub use activity::{
 // read-only in its refresh to tell a working Standard agent from one idle at its prompt.
 pub use activity::{idle_fingerprint, idle_fingerprint_for_engine};
 pub use dialog::{
-    PaneDialog, PaneDialogClass, PaneDialogMode, classify_dialog, dialog_option_is_concrete,
+    PaneDialog, PaneDialogClass, PaneDialogMode, classify_dialog, classify_dialog_for_engine,
+    dialog_option_is_concrete,
 };
 pub use driver::{Driver, Observation, StepHandle, observe};
 pub use launch::{
     ENV_BIN, ENV_SESSION, ENV_STATE_DIR, LaunchError, LaunchOutcome, ManagedEnv,
     pmtui_bin_for_current_process,
 };
-pub use real::{LAUNCH_COMMAND_MAX_BYTES, TmuxDriver, launch_command, shell_command};
+pub use real::{LAUNCH_COMMAND_MAX_BYTES, TmuxDriver, launch_command};
 // POSIX shell escaping, shared with `worker::launch`'s turn-hook builder so a project
 // root with a shell metacharacter can't malform the hook command.
 pub(crate) use real::shq;

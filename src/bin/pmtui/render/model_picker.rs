@@ -37,12 +37,8 @@ pub(crate) fn render_model_picker(
     // WITHOUT the cursor so it never drifts as `▸` moves. `None` ⇒ no row is marked current.
     let (subheader, rows, current_ix): (String, Vec<String>, Option<usize>) = match stage {
         PickStage::Engine => {
-            let engines = match target {
-                PickTarget::Decider => &Engine::DECIDERS[..],
-                PickTarget::Worker => &Engine::ALL[..],
-            };
-            let rows = engines.iter().map(|e| e.label().to_string()).collect();
-            let current = engines.iter().position(|&e| e == engine);
+            let rows = Engine::ALL.iter().map(|e| e.label().to_string()).collect();
+            let current = Engine::ALL.iter().position(|&e| e == engine);
             // Say what Enter does here: this is step 1 of 2 — picking the engine advances to its
             // model list. Without this, the engine screen reads like the whole picker and the model
             // step goes unnoticed. Keeps the word "Engine" (a test anchors on it).

@@ -33,7 +33,7 @@ enum ActivityObservation {
 }
 
 fn merge_activity(
-    hook_authoritative: bool,
+    pmd_driven: bool,
     engine: Option<Engine>,
     hook_working: Option<bool>,
     observation: ActivityObservation,
@@ -46,9 +46,10 @@ fn merge_activity(
         // Claude can leave its bare prompt visible through a silent tool call, so its
         // hook-backed in-flight signal remains authoritative. Codex paints an explicit busy
         // banner while a turn runs; after two byte-stable idle-composer captures, an unchanged
-        // optional notify byte is stale rather than stronger evidence of work.
+        // optional notify byte is stale rather than stronger evidence of work. Only TraeX
+        // drops retained hook authority when pmd no longer drives the row.
         ActivityObservation::IdleConfirmed
-            if hook_authoritative
+            if (engine != Some(Engine::Trae) || pmd_driven)
                 && hook_working == Some(true)
                 && engine != Some(Engine::Codex) =>
         {
@@ -61,12 +62,12 @@ fn merge_activity(
 /// [`merge_activity`] for a caller that ran its own two-capture idle confirmation, so the fork's
 /// source recheck weighs the turn hook exactly as the dashboard row does.
 pub(super) fn confirmed_idle_activity(
-    hook_authoritative: bool,
+    pmd_driven: bool,
     engine: Option<Engine>,
     hook_working: Option<bool>,
 ) -> Option<bool> {
     merge_activity(
-        hook_authoritative,
+        pmd_driven,
         engine,
         hook_working,
         ActivityObservation::IdleConfirmed,
@@ -218,35 +219,33 @@ impl App {
                     // an outstanding turn (`Some(true)`) is never softened by an
                     // Idle-looking frame, because Claude can draw its bare prompt mid-stream.
                     //
-                    // An Idle pane is trusted only after two byte-stable captures. For
-                    // Standard/unknown rows this supplies the whole answer; for Autopilot it
-                    // confirms idle only when the hook did not already prove a turn is active.
+                    // An Idle pane is trusted only after two byte-stable captures. Claude's
+                    // retained hook can still prove a silent turn is active; TraeX requires
+                    // pmd to drive the row before trusting that retained baseline.
                     // A capture error on an otherwise-live pane stays working rather than
                     // preserving a stale completed-turn/idle value.
                     let hook_working = v.agent_working;
-                    let hook_authoritative = agent_manager::daemon::pmd_drives_row(v.mode, v.tier);
+                    let pmd_driven = agent_manager::daemon::pmd_drives_row(v.mode, v.tier);
                     v.agent_working = match &live_pane {
                         None => merge_activity(
-                            hook_authoritative,
+                            pmd_driven,
                             v.engine,
                             hook_working,
                             ActivityObservation::Missing,
                         ),
                         Some(pane) => match driver.capture_tail(pane, ACTIVITY_CAPTURE_LINES) {
                             Err(_) => merge_activity(
-                                hook_authoritative,
+                                pmd_driven,
                                 v.engine,
                                 hook_working,
                                 ActivityObservation::Unreadable,
                             ),
                             Ok(cap)
-                                if v.engine.map_or_else(
-                                    || tmux::classify_pane(&cap),
-                                    |engine| tmux::classify_pane_for_engine(&cap, engine),
-                                ) == tmux::PaneActivity::Busy =>
+                                if tmux::classify_pane_for_engine(&cap, v.engine)
+                                    == tmux::PaneActivity::Busy =>
                             {
                                 merge_activity(
-                                    hook_authoritative,
+                                    pmd_driven,
                                     v.engine,
                                     hook_working,
                                     ActivityObservation::Busy,
@@ -255,14 +254,11 @@ impl App {
                             Ok(cap) => {
                                 let (fp, count) = idle_gate_step(
                                     prev_gate.get(&p.id).copied(),
-                                    v.engine.map_or_else(
-                                        || tmux::idle_fingerprint(&cap),
-                                        |engine| tmux::idle_fingerprint_for_engine(&cap, engine),
-                                    ),
+                                    tmux::idle_fingerprint_for_engine(&cap, v.engine),
                                 );
                                 new_gate.insert(p.id.clone(), (fp, count));
                                 merge_activity(
-                                    hook_authoritative,
+                                    pmd_driven,
                                     v.engine,
                                     hook_working,
                                     if count < ACTIVITY_IDLE_CONFIRMATIONS {
@@ -617,12 +613,12 @@ mod idle_gate_tests {
         assert_eq!(
             merge_activity(
                 false,
-                Some(Engine::Claude),
+                Some(Engine::Trae),
                 Some(true),
                 ActivityObservation::IdleConfirmed
             ),
             Some(false),
-            "an undriven row's stale hook cannot outrank a confirmed idle pane"
+            "an undriven TraeX row's stale hook cannot outrank a confirmed idle pane"
         );
         assert_eq!(
             merge_activity(

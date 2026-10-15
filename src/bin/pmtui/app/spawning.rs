@@ -132,6 +132,7 @@ pub(crate) struct SpawnJob {
 pub(crate) struct SpawnChild {
     pub(crate) id: String,
     pub(crate) root: PathBuf,
+    pub(crate) engine: Engine,
 }
 
 /// Where a request is. [`App::step_spawns`] moves it by at most one phase per frame.
@@ -302,6 +303,7 @@ impl SpawnChild {
         Self {
             id: row.id.clone(),
             root: row.root.clone(),
+            engine: row.engine.unwrap_or(Engine::Claude),
         }
     }
 
@@ -1612,7 +1614,7 @@ impl App {
         deadline_ms: u128,
     ) -> SpawnPhase {
         let now = (self.spawn.now_ms)();
-        let first_ok_ms = match self.observe_child(&child.session()) {
+        let first_ok_ms = match self.observe_child(&child.session(), child.engine) {
             Err(error) => {
                 let message = format!("could not observe {}'s terminal ({error:#})", child.id);
                 return self.finish_unknown(job, &child, message);
@@ -1660,14 +1662,14 @@ impl App {
         }
     }
 
-    fn observe_child(&self, session: &str) -> Result<ChildTerminal> {
+    fn observe_child(&self, session: &str, engine: Engine) -> Result<ChildTerminal> {
         if !self.fork_terminal_running(session)? {
             return Ok(ChildTerminal::NotLive);
         }
         let capture = self
             .agent_tmux
             .capture_tail(session, READINESS_CAPTURE_LINES)?;
-        Ok(match tmux::classify_dialog(&capture) {
+        Ok(match tmux::classify_dialog_for_engine(&capture, engine) {
             Some(_) => ChildTerminal::Dialog,
             None => ChildTerminal::Live,
         })

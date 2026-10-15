@@ -124,21 +124,9 @@ pub(crate) fn shq(s: &str) -> String {
 /// directory repeats it.
 pub const LAUNCH_COMMAND_MAX_BYTES: usize = 12 * 1024;
 
-/// The shell command [`TmuxDriver`] runs for an interactive `argv`: `exec` plus every
-/// argument single-quoted ([`shq`]) and space-joined. `exec` makes tmux's pane process
-/// the engine itself instead of a shell wrapper, which keeps process identity and
-/// signal handling tied to the live agent. [`LAUNCH_COMMAND_MAX_BYTES`] bounds its length.
+/// The shell command [`TmuxDriver`] runs for an interactive `argv`: every argument
+/// single-quoted ([`shq`]) and space-joined. [`LAUNCH_COMMAND_MAX_BYTES`] bounds its length.
 pub fn launch_command(argv: &[String]) -> String {
-    let quoted = shell_command(argv);
-    if quoted.is_empty() {
-        quoted
-    } else {
-        format!("exec {quoted}")
-    }
-}
-
-/// A POSIX shell spelling of `argv` for human-facing command text.
-pub fn shell_command(argv: &[String]) -> String {
     argv.iter().map(|a| shq(a)).collect::<Vec<_>>().join(" ")
 }
 
@@ -887,14 +875,11 @@ impl Driver for TmuxDriver {
         const CODEX_SUBMIT_RECHECK_GUARD: Duration = Duration::from_millis(300);
         const CODEX_SUBMIT_ATTEMPTS: usize = 3;
         let uses_paste_buffer = text.contains('\n') || text.len() > LITERAL_MAX;
-        let retry_observed_draft = match engine {
-            Some(Engine::Codex) => true,
-            Some(_) => false,
-            // Legacy direct callers have no row engine. Restrict the fallback to tmux's process
-            // identity; pane content can include quoted Codex output from another agent.
-            None => self.pane_current_command(session)?.as_deref() == Some("codex"),
-        };
-        let codex_paste = uses_paste_buffer && retry_observed_draft;
+        let pane_command = self.pane_current_command(session)?;
+        // TraeX can quote Codex output; its row never inherits Codex retry keys. Other callers
+        // retain the existing live-process check, including probe errors before any input.
+        let codex = engine != Some(Engine::Trae) && pane_command.as_deref() == Some("codex");
+        let codex_paste = uses_paste_buffer && codex;
         if !uses_paste_buffer {
             // `-l` sends the text literally (no key-name interpretation); `--` guards a leading dash.
             let status = self
@@ -989,31 +974,19 @@ impl Driver for TmuxDriver {
                 .status()
                 .context("run tmux send-keys (Enter)")
         };
-        let attempts = if retry_observed_draft {
-            CODEX_SUBMIT_ATTEMPTS
-        } else {
-            1
-        };
+        let attempts = if codex { CODEX_SUBMIT_ATTEMPTS } else { 1 };
         for attempt in 0..attempts {
             let status = send_enter()?;
             if !status.success() {
                 bail!("tmux send-keys (Enter) failed for session {session}");
             }
-            if !retry_observed_draft {
+            if !codex {
                 return Ok(());
             }
             std::thread::sleep(CODEX_SUBMIT_RECHECK_GUARD);
-            // A retry `Enter` lands on whatever is on screen now. If the message has just raised
-            // a dialog — a Codex command approval, say — another `Enter` would CONFIRM its
-            // highlighted option on the person's behalf. A dialog therefore ends the retries.
-            let plain = self.capture_tail(session, 40)?;
-            if super::dialog::classify_dialog(&plain).is_some() {
-                return Ok(());
-            }
             // Styled, so the dim placeholder can be told from a still-typed draft.
             let capture = self.capture_tail_styled(session, 80)?;
-            let draft_visible = codex_draft_visible(&capture, text, uses_paste_buffer);
-            if !draft_visible {
+            if !codex_draft_visible(&capture, text, uses_paste_buffer) {
                 return Ok(());
             }
             if attempt + 1 == attempts {

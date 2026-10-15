@@ -659,6 +659,9 @@ fn new_session_id_base(dir: &Path) -> String {
 /// before its real id is minted.
 const MINTED_ID_SHAPE: &str = "00000000-0000-4000-8000-000000000000";
 
+/// The fresh Standard argv carrying its one-time Message. The launch budget and the real
+/// launch use this same builder so the size check measures the command that will run,
+/// including whether the launch can install its engine's hooks.
 pub(crate) fn fresh_standard_argv_with_pmtui_bin(
     engine: Engine,
     claude_id: &str,
@@ -677,8 +680,9 @@ pub(crate) fn fresh_standard_argv_with_pmtui_bin(
 }
 
 /// The exact size, as tmux receives it ([`tmux::launch_command`]), of the fresh Standard launch
-/// a new session in `dir` would start with `message`: built with [`fresh_standard_argv`] for the
-/// id [`reserve_new_session`] would claim next and a conversation id of the minted length.
+/// a new session in `dir` would start with `message`: built with
+/// [`fresh_standard_argv_with_pmtui_bin`] for the id [`reserve_new_session`] would claim next
+/// and a conversation id of the minted length.
 pub(crate) fn fresh_launch_bytes(
     reg: &Registry,
     dir: &Path,

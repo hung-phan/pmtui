@@ -3,9 +3,11 @@
 //! decline, because a false dialog parks a session that is working fine.
 
 use super::*;
+use crate::registry::Engine;
 use crate::tmux::activity::{PaneActivity, classify_pane};
 use crate::tmux::dialog::{
-    CODEX_TRUST_QUESTION, DIALOG_MAX_QUESTION_GAP, PaneDialogClass, PaneDialogMode, classify_dialog,
+    CODEX_TRUST_QUESTION, DIALOG_MAX_QUESTION_GAP, PaneDialogClass, PaneDialogMode,
+    classify_dialog, classify_dialog_for_engine,
 };
 use crate::tmux::dialog_option_is_concrete;
 
@@ -13,7 +15,8 @@ use crate::tmux::dialog_option_is_concrete;
 
 #[test]
 fn trae_hook_trust_prompt_is_a_human_only_dialog() {
-    let d = classify_dialog(FIXTURE_TRAE_DIALOG_HOOK_TRUST).expect("hook trust prompt recognised");
+    let d = classify_dialog_for_engine(FIXTURE_TRAE_DIALOG_HOOK_TRUST, Engine::Trae)
+        .expect("hook trust prompt recognised");
     assert_eq!(d.question, "Hooks need review");
     assert_eq!(
         d.options,
@@ -33,8 +36,23 @@ fn trae_hook_trust_prompt_is_a_human_only_dialog() {
 }
 
 #[test]
+fn trae_specific_prompts_do_not_match_the_shared_dialog_classifier() {
+    for (name, pane) in [
+        ("hook trust", FIXTURE_TRAE_DIALOG_HOOK_TRUST),
+        ("sign in", FIXTURE_TRAE_DIALOG_SIGNIN),
+    ] {
+        assert_eq!(
+            classify_dialog(pane),
+            None,
+            "TraeX-only {name} prompt must not park Claude or Codex panes"
+        );
+    }
+}
+
+#[test]
 fn trae_signin_chooser_is_a_human_only_dialog_even_below_its_input_box() {
-    let d = classify_dialog(FIXTURE_TRAE_DIALOG_SIGNIN).expect("sign-in chooser recognised");
+    let d = classify_dialog_for_engine(FIXTURE_TRAE_DIALOG_SIGNIN, Engine::Trae)
+        .expect("sign-in chooser recognised");
     assert_eq!(d.question, "Sign in to use TRAE CLI");
     assert_eq!(
         d.selected_index,

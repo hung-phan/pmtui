@@ -710,6 +710,7 @@ fn only_a_trae_nudge_names_the_spawn_skill_and_only_when_it_is_installed() {
     let marker = std::path::Path::new("/tmp/proj/.project-state/sessions/s/needs-you.json");
     let since = SinceLastWake::default();
     let line = "use your `pmtui-spawn` skill";
+    let audit_line = "do not use engine-native/internal subagents";
     let render = |engine, spawn_skill| {
         loop_nudge_prompt_for_engine(
             LoopNudgePromptInput::new("goal", "", "", "", &since, true, marker)
@@ -717,13 +718,20 @@ fn only_a_trae_nudge_names_the_spawn_skill_and_only_when_it_is_installed() {
             engine,
         )
     };
-    assert!(render(Engine::Trae, true).contains(line));
+    let trae_with_skill = render(Engine::Trae, true);
+    assert!(trae_with_skill.contains(line));
     assert!(
-        !render(Engine::Trae, false).contains(line),
+        trae_with_skill.contains(audit_line),
+        "TraeX must route audited delegation through pmtui, not its native subagent layer"
+    );
+    assert!(
+        !render(Engine::Trae, false).contains(audit_line),
         "no skill, no pointer"
     );
     for engine in [Engine::Claude, Engine::Codex] {
-        assert!(!render(engine, true).contains(line), "{engine:?}");
+        let prompt = render(engine, true);
+        assert!(!prompt.contains(line), "{engine:?}");
+        assert!(!prompt.contains(audit_line), "{engine:?}");
     }
 }
 
@@ -828,6 +836,10 @@ fn loop_nudge_prompt_invokes_the_worker_skill_in_the_engines_native_form() {
     assert!(!claude_without_skill.contains("/agent-manager-worker"));
     assert!(claude_without_skill.contains("follow the inline fallback below"));
     assert!(claude_without_skill.contains("If your worker skill is not loaded"));
+    assert!(
+        !claude_without_skill.contains("`state` is required"),
+        "the stricter report-schema sentence is TraeX-only: {claude_without_skill}"
+    );
     for required in [
         "finite wakes",
         "never sleep or poll",

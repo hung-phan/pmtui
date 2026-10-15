@@ -1242,3 +1242,113 @@ fn a_live_trae_session_replaces_its_name_with_the_reported_thread() {
     assert_eq!(ledger(&fx).conversation_id.as_deref(), Some(TRAE_THREAD));
     assert!(fx.driver.launched().is_empty());
 }
+
+#[test]
+fn a_live_trae_session_confirms_a_new_reported_thread() {
+    let fx = setup_with(Tier::Standard, Engine::Trae, Some(300), |l| {
+        l.conversation_id = Some("stale-name".into());
+        l.resume_unconfirmed = true;
+        l.run = JobRun::Monitoring { until: START };
+    });
+    let sess = loop_session(&fx);
+    fx.driver.set_alive(&sess, true);
+    let mut fx = fx;
+    trae_hook_reported(&fx, TRAE_THREAD);
+
+    fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+
+    let persisted = ledger(&fx);
+    assert_eq!(persisted.conversation_id.as_deref(), Some(TRAE_THREAD));
+    assert!(
+        !persisted.resume_unconfirmed,
+        "a hook-reported replacement id must not be treated as a stale resume"
+    );
+    assert_eq!(
+        persisted.conversation_id_revision.as_ref(),
+        Some(&trae_reported_revision(&fx))
+    );
+}
+
+#[test]
+fn a_different_trae_thread_must_have_a_new_hook_revision_to_confirm_resume() {
+    for rewritten in [false, true] {
+        let mut fx = setup_with(Tier::Standard, Engine::Trae, Some(300), |l| {
+            l.conversation_id = Some("01a133c3-b12f-7033-ae77-38f3294fb68f".into());
+            l.resume_unconfirmed = true;
+            l.run = JobRun::Monitoring { until: START + 300 };
+        });
+        trae_hook_reported(&fx, TRAE_THREAD);
+        let mut saved = ledger(&fx);
+        saved.conversation_id_revision = Some(trae_reported_revision(&fx));
+        job::save(&fx.paths, &saved).unwrap();
+        if rewritten {
+            trae_hook_reported(&fx, TRAE_THREAD);
+        }
+        fx.driver.set_alive(&loop_session(&fx), true);
+
+        fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+
+        let persisted = ledger(&fx);
+        assert_eq!(persisted.resume_unconfirmed, !rewritten);
+        assert_eq!(
+            persisted.conversation_id.as_deref(),
+            if rewritten {
+                Some(TRAE_THREAD)
+            } else {
+                saved.conversation_id.as_deref()
+            }
+        );
+        assert!(fx.driver.launched().is_empty());
+    }
+}
+
+#[test]
+fn a_dead_trae_resume_cannot_adopt_a_different_stale_hook_id() {
+    for direct in [false, true] {
+        let mut fx = setup_with(Tier::Autopilot, Engine::Trae, Some(300), |l| {
+            l.conversation_id = Some("01a133c3-b12f-7033-ae77-38f3294fb68f".into());
+            l.resume_unconfirmed = true;
+        });
+        trae_hook_reported(&fx, TRAE_THREAD);
+        let mut saved = ledger(&fx);
+        saved.conversation_id_revision = Some(trae_reported_revision(&fx));
+        job::save(&fx.paths, &saved).unwrap();
+
+        if direct {
+            fx.sched.ensure_session(&fx.driver, START, &saved).unwrap();
+        } else {
+            fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+        }
+
+        let argv = launched_argv(&fx, &loop_session(&fx)).unwrap();
+        assert!(
+            !argv.iter().any(|arg| arg == "resume" || arg == TRAE_THREAD),
+            "{argv:?}"
+        );
+        assert!(!ledger(&fx).resume_unconfirmed);
+        assert!(!fx.paths.codex_conversation_id().exists());
+    }
+}
+
+#[test]
+fn ensure_session_adopts_a_different_trae_id_only_with_new_evidence() {
+    for baseline in [false, true] {
+        let mut fx = setup(Tier::Autopilot, Engine::Trae, Some(300));
+        trae_hook_reported(&fx, TRAE_THREAD);
+        let mut saved = ledger(&fx);
+        saved.conversation_id = Some("old-name".into());
+        saved.resume_unconfirmed = true;
+        saved.conversation_id_revision = baseline.then(|| trae_reported_revision(&fx));
+        trae_hook_reported(&fx, TRAE_THREAD);
+
+        fx.sched.ensure_session(&fx.driver, START, &saved).unwrap();
+
+        assert_eq!(
+            launched_flag(&fx, &loop_session(&fx), "resume").as_deref(),
+            Some(TRAE_THREAD)
+        );
+        let persisted = ledger(&fx);
+        assert_eq!(persisted.conversation_id.as_deref(), Some(TRAE_THREAD));
+        assert_eq!(persisted.resume_unconfirmed, !baseline);
+    }
+}

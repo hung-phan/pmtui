@@ -231,19 +231,21 @@ impl JobScheduler {
                 &self.paths.codex_conversation_id(),
             ) {
                 Some((id, revision)) => {
-                    if next.resume_unconfirmed
-                        && next.conversation_id.as_deref() == Some(id.as_str())
-                    {
+                    // A changed id cannot turn an old hook write into proof that this resume
+                    // reached TraeX. The relaunch path must enforce the same baseline as tick.
+                    if next.resume_unconfirmed {
                         if next
                             .conversation_id_revision
                             .as_ref()
                             .is_some_and(|prior| prior != &revision)
                         {
+                            next.conversation_id = Some(id.clone());
                             next.resume_unconfirmed = false;
                             next.conversation_id_revision = Some(revision);
                             return Resume::Continue(id);
                         }
                         if next.conversation_id_revision.is_none() {
+                            next.conversation_id = Some(id.clone());
                             next.conversation_id_revision = Some(revision);
                             return Resume::Continue(id);
                         }

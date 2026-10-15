@@ -254,6 +254,31 @@ fn keybar_hides_chips_that_do_not_apply() {
 }
 
 #[test]
+fn claude_and_codex_keep_the_fork_chip_when_the_handler_will_explain_refusal() {
+    for engine in [Engine::Claude, Engine::Codex] {
+        let mut row = agent_loop_view("bot");
+        row.engine = Some(engine);
+        row.session_live = true;
+        row.agent_working = Some(true);
+        let text = line_text(&keybar_line(&app_with(vec![row], UiMode::Normal), 240));
+        assert!(
+            text.contains("Fork"),
+            "{engine:?}: hidden fork chip prevents the refusal reason from being shown: {text}"
+        );
+    }
+
+    let mut trae = agent_loop_view("trae");
+    trae.engine = Some(Engine::Trae);
+    trae.session_live = true;
+    trae.agent_working = Some(true);
+    let text = line_text(&keybar_line(&app_with(vec![trae], UiMode::Normal), 240));
+    assert!(
+        !text.contains("Fork"),
+        "TraeX-specific fork gating may hide the chip: {text}"
+    );
+}
+
+#[test]
 fn keybar_mode_chip_names_the_direction_of_the_press() {
     // Preserved from the pre-adaptive bar, through the `m` -> `m` rename: the autonomy
     // dial is a 2-value toggle, so the chip says what the press will DO to the selected

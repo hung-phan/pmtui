@@ -302,7 +302,7 @@ impl JobScheduler {
                 // to capture until the session is alive), and AFTER the marker disposer at
                 // 2.5, which keeps its precedence: the agent's own written
                 // self-assessment outranks anything we infer from pixels.
-                if let Some(dialog) = tmux::classify_dialog(&capture) {
+                if let Some(dialog) = tmux::classify_dialog_for_engine(&capture, self.engine) {
                     let policy_decision = crate::policy::decide_kind(
                         config.autonomy,
                         StopKind::Ambiguity,

@@ -30,6 +30,23 @@ fn assert_recovered(fx: &Fx) {
     assert!(fx.driver.sent_keys().is_empty());
 }
 
+fn latch_current_selection(fx: &mut Fx, reason: &str) {
+    fx.sched.advise_health.latch_off(SESSION_ID, reason);
+    fx.sched.advise_health.no_result_streak = SUPERVISOR_DEAD_AFTER;
+    fx.sched.advise_health.refusal_streak = SUPERVISOR_MAX_REFUSALS;
+    let mut saved = ledger(fx);
+    fx.sched.save_ledger(&mut saved).unwrap();
+}
+
+fn trae_latched_fixture() -> Fx {
+    let mut fx = latched_fixture();
+    set_decider_engine(&fx, Engine::Trae);
+    fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+    assert_recovered(&fx);
+    latch_current_selection(&mut fx, "model unavailable");
+    fx
+}
+
 #[test]
 fn engine_change_recovers_missing_binary_before_another_decision() {
     let (mut fx, _) = marker_fx(Tier::Autopilot, |_| {});
@@ -49,24 +66,48 @@ fn engine_change_recovers_missing_binary_before_another_decision() {
 }
 
 #[test]
-fn model_change_resets_all_transport_health() {
+fn claude_model_change_preserves_latched_transport_health() {
     let mut fx = latched_fixture();
+    set_decider_model(&fx, Some("replacement-model"));
+    fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+    assert!(ledger(&fx).decider_latched);
+    assert_eq!(
+        fx.sched.advise_health.reason.as_deref(),
+        Some("model unavailable")
+    );
+}
+
+#[test]
+fn trae_model_change_resets_transport_health() {
+    let mut fx = trae_latched_fixture();
     set_decider_model(&fx, Some("replacement-model"));
     fx.sched.tick(&fx.driver, &fx.clock).unwrap();
     assert_recovered(&fx);
 }
 
 #[test]
-fn removing_model_override_also_resets_health() {
-    let mut fx = latched_fixture();
+fn leaving_trae_recovers_health_and_missing_binary_cache() {
+    for engine in [Engine::Claude, Engine::Codex] {
+        for after_restart in [false, true] {
+            let mut fx = trae_latched_fixture();
+            fx.sched.set_decider_binary_available(false);
+            set_decider_engine(&fx, engine);
+            if after_restart {
+                restart(&mut fx);
+            }
+            fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+            assert_recovered(&fx);
+            assert_eq!(ledger(&fx).decider_health_selection, None);
+        }
+    }
+}
+
+#[test]
+fn trae_removing_model_override_also_resets_health() {
+    let mut fx = trae_latched_fixture();
     set_decider_model(&fx, Some("bad-model"));
     fx.sched.tick(&fx.driver, &fx.clock).unwrap();
-    fx.sched
-        .advise_health
-        .latch_off(SESSION_ID, "model unavailable");
-    fx.sched.set_decider_binary_available(false);
-    let mut saved = ledger(&fx);
-    fx.sched.save_ledger(&mut saved).unwrap();
+    latch_current_selection(&mut fx, "model unavailable");
 
     set_decider_model(&fx, None);
     fx.sched.tick(&fx.driver, &fx.clock).unwrap();
@@ -96,9 +137,35 @@ fn unchanged_selection_preserves_latch_and_cache() {
 }
 
 #[test]
+fn claude_and_codex_do_not_persist_a_selection_baseline_on_upgrade() {
+    for decider in [Engine::Claude, Engine::Codex] {
+        let mut fx = setup_with(Tier::Autopilot, Engine::Claude, Some(300), |saved| {
+            saved.decider_health_selection = None;
+            saved.run = JobRun::Monitoring { until: START + 300 };
+        });
+        set_decider_engine(&fx, decider);
+
+        assert_eq!(
+            fx.sched.tick(&fx.driver, &fx.clock).unwrap(),
+            JobTick::Monitoring { until: START + 300 },
+            "{decider:?}"
+        );
+        assert_eq!(
+            ledger(&fx).decider_health_selection,
+            None,
+            "{decider:?}: old ledgers must not get a first-tick selection write"
+        );
+    }
+}
+
+#[test]
 fn selection_changed_while_pmd_was_stopped_recovers() {
     for engine_change in [true, false] {
-        let mut fx = latched_fixture();
+        let mut fx = if engine_change {
+            latched_fixture()
+        } else {
+            trae_latched_fixture()
+        };
         if engine_change {
             set_decider_engine(&fx, Engine::Trae);
         } else {

@@ -157,24 +157,16 @@ pub(crate) fn send_decision(t: &SendTarget, p: &SendProbe) -> SendPlan {
     let Some(cap) = p.capture.as_deref() else {
         return SendPlan::Refuse("can't read the pane — nothing sent".into());
     };
-    if tmux::classify_dialog(cap).is_some() {
+    if tmux::classify_dialog_for_engine(cap, t.engine).is_some() {
         return SendPlan::Refuse("dialog up — press Enter and answer it there".into());
     }
-    let has_composer = t.engine.map_or_else(
-        || tmux::has_composer(cap),
-        |engine| tmux::has_composer_for_engine(cap, engine),
-    );
-    if !has_composer {
+    if !tmux::has_composer_for_engine(cap, t.engine) {
         return SendPlan::Refuse("no prompt on screen — press Enter to look".into());
     }
     // Mid-response is FINE and is sent, not refused: the composer accepts it and it
     // becomes the agent's next turn. Refusing here would reproduce "it did nothing", and
     // the send only DELAYS pmd's next nudge (idle confirmations reset naturally).
-    let activity = t.engine.map_or_else(
-        || tmux::classify_pane(cap),
-        |engine| tmux::classify_pane_for_engine(cap, engine),
-    );
-    if activity == tmux::PaneActivity::Busy {
+    if tmux::classify_pane_for_engine(cap, t.engine) == tmux::PaneActivity::Busy {
         return SendPlan::Send(format!("sent → {} (it was working)", t.id));
     }
     SendPlan::Send(format!("sent → {}", t.id))

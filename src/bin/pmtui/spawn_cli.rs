@@ -723,7 +723,7 @@ pub(crate) fn render_plain(out: &CliOutput) -> String {
         .and_then(|found| found.next_action.as_ref())
     {
         line.push_str("; next: ");
-        line.push_str(&tmux::shell_command(&next.argv));
+        line.push_str(&tmux::launch_command(&next.argv));
     }
     line
 }

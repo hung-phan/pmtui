@@ -210,7 +210,7 @@ impl JobScheduler {
                 return Ok(AdviseStep::Yields(tick));
             }
         };
-        let current = tmux::classify_dialog(&capture);
+        let current = tmux::classify_dialog_for_engine(&capture, self.engine);
         if current.as_ref() != Some(&expected) {
             let mut changed = base.clone();
             changed.finish_decider_run(

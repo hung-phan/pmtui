@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use agent_manager::registry::{Engine, Registry};
 use agent_manager::tmux::{
-    Driver, ManagedEnv, PaneActivity, TmuxDriver, classify_dialog, classify_pane_for_engine,
-    has_composer_for_engine, session_name,
+    Driver, ManagedEnv, PaneActivity, TmuxDriver, classify_dialog_for_engine,
+    classify_pane_for_engine, has_composer_for_engine, session_name,
 };
 
 use crate::keystrokes::{send_key, send_literal};
@@ -170,7 +170,7 @@ fn trae_input_dashboard_refuses_dialogs_even_with_a_visible_composer() {
         let fx = Fixture::new(&format!("{COMPOSER}{dialog}"));
         let before = fx.agent.capture_tail(&fx.session, 60).unwrap();
         eprintln!("blocked agent:\n{before}");
-        assert!(classify_dialog(&before).is_some());
+        assert!(classify_dialog_for_engine(&before, Engine::Trae).is_some());
         assert!(!has_composer_for_engine(&before, Engine::Trae));
         assert_eq!(
             classify_pane_for_engine(&before, Engine::Trae),

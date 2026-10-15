@@ -4,6 +4,7 @@
 //! behind, each asserted on what the pane's PROCESS received rather than on what a
 //! terminal chose to render.
 
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
@@ -20,6 +21,78 @@ fn write_executable(path: &std::path::Path, body: &str) {
     std::fs::write(path, body).expect("write executable fixture");
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
         .expect("make executable fixture");
+}
+
+fn write_rust_codex_fixture(dir: &Path, source: &str) -> PathBuf {
+    let source_path = dir.join("codex_fixture.rs");
+    let binary = dir.join("codex");
+    std::fs::write(&source_path, source).expect("write Rust codex fixture");
+    let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let status = Command::new(rustc)
+        .arg("--edition=2021")
+        .arg(&source_path)
+        .arg("-o")
+        .arg(&binary)
+        .status()
+        .expect("run rustc for codex fixture");
+    assert!(status.success(), "compile codex fixture");
+    binary
+}
+
+/// Retry detection relies on tmux's live process name. A single quoted command must preserve
+/// that name without spending launch budget on an explicit shell `exec`.
+#[test]
+#[ignore]
+fn codex_launch_reports_the_process_name_without_an_exec_prefix() {
+    assert!(tmux_available(), "tmux is required");
+    let dir = tempfile::tempdir().unwrap();
+    let socket = TmuxSocket::new("am-codex-process-name");
+    let driver = TmuxDriver::with_socket(socket.name());
+    let binary = write_rust_codex_fixture(
+        dir.path(),
+        "fn main() { println!(\"CODEX_PROCESS_READY\"); std::thread::sleep(std::time::Duration::from_secs(30)); }",
+    );
+    for wrapped in [false, true] {
+        let mut argv = if wrapped {
+            vec!["env".into(), "-u".into(), "CLAUDECODE".into()]
+        } else {
+            vec![]
+        };
+        argv.push(binary.display().to_string());
+        driver
+            .launch_interactive(
+                "codex-process",
+                dir.path(),
+                &argv,
+                &agent_manager::tmux::ManagedEnv::default(),
+            )
+            .unwrap();
+        assert!(wait_for_pane_text(
+            &driver,
+            "codex-process",
+            "CODEX_PROCESS_READY"
+        ));
+        let pane = driver.capture_tail("codex-process", 20).unwrap();
+        let command = Command::new("tmux")
+            .args([
+                "-L",
+                socket.name(),
+                "display-message",
+                "-p",
+                "-t",
+                "=codex-process:",
+                "#{pane_current_command}",
+            ])
+            .output()
+            .unwrap();
+        driver.terminate("codex-process").unwrap();
+        assert!(command.status.success(), "{pane}");
+        assert_eq!(
+            String::from_utf8_lossy(&command.stdout).trim(),
+            "codex",
+            "{pane}"
+        );
+    }
 }
 
 /// Raw option selection is a different terminal operation from sending prose:
@@ -499,17 +572,37 @@ fn codex_visible_literal_message_is_retried_until_submitted() {
     let session = format!("amcld-{}", std::process::id());
     let driver = TmuxDriver::with_socket(socket.name());
     let received = dir.path().join("received.txt");
-    let codex = dir.path().join("codex");
-    std::fs::copy("/bin/sh", &codex).expect("copy shell as codex fixture");
-    let command = format!(
-        "printf '› Ask Codex to do anything\n'; IFS= read -r first; printf '\n› %s\n' \"$first\"; IFS= read -r ignored; printf '\n› Ask Codex to do anything\n'; printf '%s\n' \"$first\" > {}; sleep 5",
-        received.display()
+    let received_literal = format!("{:?}", received.to_string_lossy());
+    let codex = write_rust_codex_fixture(
+        dir.path(),
+        &format!(
+            r#"
+use std::io::{{self, BufRead, Write}};
+use std::time::Duration;
+
+fn main() {{
+    print!("› Ask Codex to do anything\n");
+    io::stdout().flush().unwrap();
+    let mut first = String::new();
+    io::stdin().lock().read_line(&mut first).unwrap();
+    let first = first.trim_end_matches(['\r', '\n']).to_string();
+    print!("\n› {{first}}\n");
+    io::stdout().flush().unwrap();
+    let mut ignored = String::new();
+    io::stdin().lock().read_line(&mut ignored).unwrap();
+    print!("\n› Ask Codex to do anything\n");
+    io::stdout().flush().unwrap();
+    std::fs::write({received_literal}, format!("{{first}}\n")).unwrap();
+    std::thread::sleep(Duration::from_secs(5));
+}}
+"#
+        ),
     );
     driver
         .launch_interactive(
             &session,
             dir.path(),
-            &[codex.display().to_string(), "-c".into(), command],
+            &[codex.display().to_string()],
             &agent_manager::tmux::ManagedEnv::default(),
         )
         .expect("launch literal fixture");
@@ -590,26 +683,39 @@ fn codex_wrapped_literal_message_is_retried_until_submitted() {
     let session = format!("amcwl-{}", std::process::id());
     let driver = TmuxDriver::with_socket(socket.name());
     let received = dir.path().join("received.txt");
-    let codex = dir.path().join("codex");
-    std::fs::copy("/bin/sh", &codex).expect("copy shell as codex fixture");
-    // Draw the swallowed draft as Codex does: 60 columns on the `›` row, the rest indented below,
-    // then the blank row and footer. Only the second Enter submits. Shell pattern removal avoids
-    // a subprocess delaying the redraw until after the driver has already rechecked the placeholder.
-    let command = format!(
-        "printf '› Ask Codex to do anything\n'; \
-         IFS= read -r first; rest=${{first#{skip}}}; \
-         printf '\\n› %.60s\\n  %s\\n\\n  footer\\n' \"$first\" \"$rest\"; \
-         IFS= read -r ignored; \
-         printf '\\n\\033[1m›\\033[0m \\033[2mAsk Codex to do anything\\033[0m\\n'; \
-         printf '%s\\n' \"$first\" > {}; sleep 5",
-        received.display(),
-        skip = "?".repeat(60),
+    let received_literal = format!("{:?}", received.to_string_lossy());
+    let codex = write_rust_codex_fixture(
+        dir.path(),
+        &format!(
+            r#"
+use std::io::{{self, BufRead, Write}};
+use std::time::Duration;
+
+fn main() {{
+    print!("› Ask Codex to do anything\n");
+    io::stdout().flush().unwrap();
+    let mut first = String::new();
+    io::stdin().lock().read_line(&mut first).unwrap();
+    let first = first.trim_end_matches(['\r', '\n']).to_string();
+    let split = first.char_indices().nth(60).map(|(index, _)| index).unwrap_or(first.len());
+    let (head, rest) = first.split_at(split);
+    print!("\n› {{head}}\n  {{rest}}\n\n  footer\n");
+    io::stdout().flush().unwrap();
+    let mut ignored = String::new();
+    io::stdin().lock().read_line(&mut ignored).unwrap();
+    print!("\n\x1b[1m›\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m\n");
+    io::stdout().flush().unwrap();
+    std::fs::write({received_literal}, format!("{{first}}\n")).unwrap();
+    std::thread::sleep(Duration::from_secs(5));
+}}
+"#
+        ),
     );
     driver
         .launch_interactive(
             &session,
             dir.path(),
-            &[codex.display().to_string(), "-c".into(), command],
+            &[codex.display().to_string()],
             &agent_manager::tmux::ManagedEnv::default(),
         )
         .expect("launch wrapped-literal fixture");

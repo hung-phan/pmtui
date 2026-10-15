@@ -534,35 +534,42 @@ pub fn loop_nudge_prompt_for_engine(input: LoopNudgePromptInput<'_>, engine: Eng
     // TraeX because its running process may have snapshotted skills before pmd installed the file.
     // Without a schema fallback a skill-less worker can write `seq`/`status`/`next_step` with no
     // `state`; every report then fails to parse, and the session parks `Stuck` after three wakes.
-    let inline_contract = !skill_available || engine == Engine::Trae;
+    let (inline_contract, state_clause, spawn_reminder) = if engine == Engine::Trae {
+        // Claude and Codex find the `pmtui-spawn` skill and use it on their own. A live TRAE worker
+        // could see the skill and run it end to end when told to, but never chose it unprompted, so
+        // TRAE is told it exists — only when the file is really installed.
+        let spawn_reminder = if spawn_skill {
+            "\n- To hand an independent part of the goal to a child job, or when \
+             delegated work must be visible in pmtui/audited by the supervisor, do not use \
+             engine-native/internal subagents; use your `pmtui-spawn` skill."
+        } else {
+            ""
+        };
+        (
+            true,
+            " `state` is required and is exactly one of `working`, `monitoring` or `blocked`.",
+            spawn_reminder,
+        )
+    } else {
+        (!skill_available, "", "")
+    };
     let degrade = if !inline_contract {
         String::new()
     } else {
-        "\n- If your worker skill is not loaded, work in finite wakes: never sleep or poll in \
+        format!(
+            "\n- If your worker skill is not loaded, work in finite wakes: never sleep or poll in \
          the foreground. Before each wake ends, overwrite the marker with seq, state, status, and \
-         next_step (bump seq; write atomically tmp+rename), then end the turn. `state` is \
-         required and is exactly one of `working`, `monitoring` or `blocked`.\n\
+         next_step (bump seq; write atomically tmp+rename), then end the turn.{state_clause}\n\
          - For slow work, detach only lifecycle-safe, non-interactive work with durable output that \
          is independently observable through a revalidatable handle and enforced hard deadline; \
          write the checkpoint plus a monitoring marker, end the turn, and reconcile on the next \
-         wake."
-            .to_string()
+         wake.{spawn_reminder}"
+        )
         // The codex line that used to close this block — "on your FIRST marker also include a
         // `conversation_id`" — is GONE. It asked the worker to declare its own identity because
         // nothing else could learn it; codex's turn hook now reports that id as a fact and pmd
         // ignores a worker-authored one. Keeping the instruction would ask an agent for something
         // discarded on arrival, which is how a prompt and a policy start disagreeing.
-    };
-    // Claude and Codex find the `pmtui-spawn` skill and use it on their own. A live TRAE worker
-    // could see the skill and run it end to end when told to, but never chose it unprompted, so
-    // TRAE is told it exists — only when the file is really installed.
-    let degrade = if engine == Engine::Trae && spawn_skill {
-        format!(
-            "{degrade}\n- To hand an independent part of the goal to a child job, use your \
-             `pmtui-spawn` skill."
-        )
-    } else {
-        degrade
     };
 
     // The deterministic "Since last wake" block: a FIXED line per whitelisted signal, and the

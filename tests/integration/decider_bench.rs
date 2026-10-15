@@ -436,7 +436,7 @@ fn bench_engines_from(v: Option<&str>) -> Vec<Engine> {
         Some("claude") => vec![Engine::Claude],
         Some("codex") => vec![Engine::Codex],
         Some("trae" | "traex") => vec![Engine::Trae],
-        _ => Engine::DECIDERS.to_vec(),
+        _ => Engine::ALL.to_vec(),
     }
 }
 
@@ -665,7 +665,7 @@ fn run_decider(engine: Engine, model: &str, prompt: &str, consult: &Consult) -> 
     let (raw, code) = match run_headless(
         engine,
         model,
-        &advise::supervisor_system_prompt(),
+        &advise::supervisor_system_prompt_for_engine(engine),
         advise::OUTPUT_SCHEMA,
         prompt,
     ) {

@@ -4,8 +4,8 @@ use super::{
 };
 use crate::registry::Engine;
 use crate::tmux::{
-    PaneActivity, classify_dialog, classify_pane_for_engine, has_composer_for_engine,
-    idle_fingerprint_for_engine, progress_fingerprint_for_engine,
+    PaneActivity, classify_dialog, classify_dialog_for_engine, classify_pane_for_engine,
+    has_composer_for_engine, idle_fingerprint_for_engine, progress_fingerprint_for_engine,
 };
 
 fn input_box(text: &str) -> String {
@@ -24,7 +24,11 @@ fn trae_captured_busy_composer_accepts_text_without_becoming_idle() {
 
 #[test]
 fn trae_observed_placeholders_in_the_input_box_are_idle() {
-    for hint in ["Explain this codebase", "Ask TRAE CLI to do anything"] {
+    for hint in [
+        "Explain this codebase",
+        "Ask TRAE CLI to do anything",
+        "Use /skills to list available skills",
+    ] {
         let pane = format!("Finished response\n{}  ? for shortcuts\n", input_box(hint));
         assert!(has_composer_for_engine(&pane, Engine::Trae), "{hint}");
         assert_eq!(
@@ -79,7 +83,10 @@ fn trae_dialogs_veto_a_visible_placeholder_composer() {
         menu,
     ] {
         let pane = format!("{}{dialog}", input_box("Explain this codebase"));
-        assert!(classify_dialog(&pane).is_some(), "{pane}");
+        assert!(
+            classify_dialog_for_engine(&pane, Engine::Trae).is_some(),
+            "{pane}"
+        );
         assert!(!has_composer_for_engine(&pane, Engine::Trae), "{pane}");
         assert_eq!(
             classify_pane_for_engine(&pane, Engine::Trae),
@@ -116,6 +123,46 @@ fn trae_placeholder_and_footer_churn_do_not_count_as_progress() {
         progress_fingerprint_for_engine(&second, Engine::Trae),
         progress_fingerprint_for_engine(&growing, Engine::Trae)
     );
+}
+
+#[test]
+fn trae_blank_padding_near_the_composer_does_not_hash_placeholder_churn() {
+    for (above, below) in [("\n", ""), ("", "\n"), ("\n \n", " \n\n")] {
+        let pane =
+            |hint, footer| format!("Response\n────\n{above}❯ {hint}\n{below}────\n{footer}\n");
+        let first = pane("Explain this codebase", "Context 94% left");
+        let second = pane("Ask TRAE CLI to do anything", "Context 93% left");
+        for capture in [&first, &second] {
+            assert_eq!(
+                classify_pane_for_engine(capture, Engine::Trae),
+                PaneActivity::Idle
+            );
+            assert!(has_composer_for_engine(capture, Engine::Trae));
+        }
+        assert_eq!(
+            idle_fingerprint_for_engine(&first, Engine::Trae),
+            idle_fingerprint_for_engine(&second, Engine::Trae)
+        );
+        assert_eq!(
+            progress_fingerprint_for_engine(
+                &format!("Working (1s · esc to interrupt)\n{first}"),
+                Engine::Trae
+            ),
+            progress_fingerprint_for_engine(
+                &format!("Working (2s · esc to interrupt)\n{second}"),
+                Engine::Trae
+            )
+        );
+        let growing = format!("New output\n{second}");
+        assert_ne!(
+            idle_fingerprint_for_engine(&second, Engine::Trae),
+            idle_fingerprint_for_engine(&growing, Engine::Trae)
+        );
+        assert_ne!(
+            progress_fingerprint_for_engine(&second, Engine::Trae),
+            progress_fingerprint_for_engine(&growing, Engine::Trae)
+        );
+    }
 }
 
 #[test]

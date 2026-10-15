@@ -144,26 +144,11 @@ impl App {
                 return;
             }
         };
-        let engine = match (ledger.as_ref().map(|state| state.engine), source.engine) {
-            (Some(ledger), Some(registry)) if ledger != registry => {
-                self.status = format!(
-                    "{}: ledger engine {ledger:?} disagrees with registry {registry:?}",
-                    source.id
-                );
-                return;
-            }
-            (Some(engine), _) | (None, Some(engine)) => engine,
-            (None, None) => Engine::Claude,
-        };
-        if engine == Engine::Trae
-            && !agent_manager::worker::turn_hook_runnable_for(engine, self.pmtui_bin.as_deref())
-        {
-            self.status = format!(
-                "{}: cannot fork TraeX without working pmtui hooks (PMTUI_BIN unavailable or hooks disabled)",
-                source.id
-            );
-            return;
-        }
+        let engine = ledger
+            .as_ref()
+            .map(|state| state.engine)
+            .or(source.engine)
+            .unwrap_or(Engine::Claude);
         let ledger_id = ledger
             .as_ref()
             .and_then(|state| state.conversation_id.as_deref());
@@ -180,6 +165,27 @@ impl App {
             (Some(id), _) | (None, Some(id)) => Some(id.to_string()),
             (None, None) => None,
         };
+        // Preserve the conversation refusal's precedence for Claude/Codex while allowing
+        // TraeX to disregard saved names that are not engine-reported thread ids.
+        if let (Some(ledger), Some(registry)) =
+            (ledger.as_ref().map(|state| state.engine), source.engine)
+            && ledger != registry
+        {
+            self.status = format!(
+                "{}: ledger engine {ledger:?} disagrees with registry {registry:?}",
+                source.id
+            );
+            return;
+        }
+        if engine == Engine::Trae
+            && !agent_manager::worker::turn_hook_runnable_for(engine, self.pmtui_bin.as_deref())
+        {
+            self.status = format!(
+                "{}: cannot fork TraeX without working pmtui hooks (PMTUI_BIN unavailable or hooks disabled)",
+                source.id
+            );
+            return;
+        }
         // A Claude id is minted before the first turn, and Claude writes no transcript until
         // that turn runs. `--resume` of such an id opens an empty session, so a confidently
         // absent transcript is a session nobody has messaged yet.
@@ -504,14 +510,10 @@ impl App {
         let source_view =
             ProjectView::read_agent_loop(&source.id, paths, source.enabled, SystemClock.now());
         let hook_working = source_view.agent_working;
-        let hook_authoritative =
-            agent_manager::daemon::pmd_drives_row(source_view.mode, source_view.tier);
+        let pmd_driven = agent_manager::daemon::pmd_drives_row(source_view.mode, source_view.tier);
         if first != second
-            || super::refresh::confirmed_idle_activity(
-                hook_authoritative,
-                Some(engine),
-                hook_working,
-            ) != Some(false)
+            || super::refresh::confirmed_idle_activity(pmd_driven, Some(engine), hook_working)
+                != Some(false)
         {
             self.status = format!("{}: still working; fork once it is idle", source.id);
             return false;

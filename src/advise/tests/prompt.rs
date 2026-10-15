@@ -1,8 +1,11 @@
 use serde_json::Value;
 
 use super::super::prompt::fence;
+use crate::registry::Engine;
+
 use super::super::{
-    Consult, OUTPUT_SCHEMA, SUPERVISOR_SYSTEM_PROMPT, build_consult_prompt, validate,
+    Consult, OUTPUT_SCHEMA, SUPERVISOR_SYSTEM_PROMPT, TRAE_SUPERVISOR_POLICY_EXTRA,
+    build_consult_prompt, supervisor_system_prompt_for_engine, validate,
 };
 use super::{NONCE, consult_free, consult_with_options};
 
@@ -116,6 +119,20 @@ fn system_prompt_and_schema_pin_the_structural_contract() {
         .as_array()
         .expect("action enum");
     assert_eq!(actions.len(), 3, "{actions:?}");
+}
+
+#[test]
+fn stricter_decider_policy_is_trae_only() {
+    assert!(!SUPERVISOR_SYSTEM_PROMPT.contains(TRAE_SUPERVISOR_POLICY_EXTRA));
+    assert!(
+        supervisor_system_prompt_for_engine(Engine::Trae).contains(TRAE_SUPERVISOR_POLICY_EXTRA)
+    );
+    assert!(
+        !supervisor_system_prompt_for_engine(Engine::Claude).contains(TRAE_SUPERVISOR_POLICY_EXTRA)
+    );
+    assert!(
+        !supervisor_system_prompt_for_engine(Engine::Codex).contains(TRAE_SUPERVISOR_POLICY_EXTRA)
+    );
 }
 
 #[test]
