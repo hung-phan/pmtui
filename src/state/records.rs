@@ -300,7 +300,7 @@ pub const ANSWERS_MAX: usize = 500;
 /// Drop stale answers in place: anything older than [`ANSWERS_RETENTION_S`] before the
 /// newest entry, then (as a backstop) the oldest beyond [`ANSWERS_MAX`]. Answers are
 /// appended in time order, so `drain(0..)` sheds the oldest; the newest are always kept.
-fn prune_answers(answers: &mut Vec<Answer>) {
+pub(super) fn prune_answers(answers: &mut Vec<Answer>) {
     // Reference "now" is the newest answer (max, to be robust to any clock skew), not the
     // wall clock — this function is pure and needs no `Clock`.
     let Some(newest) = answers.iter().map(|a| a.answered_at).max() else {
@@ -324,117 +324,4 @@ pub fn append_answer(paths: &ProjectPaths, answer: &Answer) -> Result<()> {
     answers.push(answer.clone());
     prune_answers(&mut answers);
     write_json_atomic(&paths.answers(), &answers)
-}
-
-#[cfg(test)]
-mod answer_prune_tests {
-    use super::*;
-
-    fn ans(stop: &str, at: Epoch) -> Answer {
-        Answer {
-            stop_id: stop.to_string(),
-            answer: "ok".to_string(),
-            note: None,
-            answered_by: "user".to_string(),
-            answered_at: at,
-        }
-    }
-
-    #[test]
-    fn prune_drops_only_answers_older_than_the_retention_window() {
-        let now: Epoch = 1_700_000_000;
-        // Appended in time order (oldest first), like the real file.
-        let mut v = vec![
-            ans("old", now - ANSWERS_RETENTION_S - 1), // just past the window → dropped
-            ans("edge", now - ANSWERS_RETENTION_S),    // exactly at the window → kept
-            ans("recent", now - 10),                   // kept
-            ans("newest", now),                        // the reference → kept
-        ];
-        prune_answers(&mut v);
-        let ids: Vec<&str> = v.iter().map(|a| a.stop_id.as_str()).collect();
-        assert_eq!(
-            ids,
-            vec!["edge", "recent", "newest"],
-            "only the answer older than the retention window is pruned"
-        );
-    }
-
-    #[test]
-    fn prune_caps_the_count_dropping_the_oldest() {
-        let now: Epoch = 1_700_000_000;
-        // ANSWERS_MAX + 50 answers, all within the window (1s apart), oldest first.
-        let n = ANSWERS_MAX + 50;
-        let mut v: Vec<Answer> = (0..n)
-            .map(|i| ans(&format!("s{i}"), now - (n as Epoch) + i as Epoch))
-            .collect();
-        prune_answers(&mut v);
-        assert_eq!(v.len(), ANSWERS_MAX, "count is capped to ANSWERS_MAX");
-        assert_eq!(
-            v.last().unwrap().stop_id,
-            format!("s{}", n - 1),
-            "the newest answer is retained"
-        );
-        assert_eq!(
-            v.first().unwrap().stop_id,
-            format!("s{}", n - ANSWERS_MAX),
-            "the oldest beyond the cap were dropped"
-        );
-    }
-
-    #[test]
-    fn prune_is_a_noop_below_both_bounds() {
-        let now: Epoch = 1_700_000_000;
-        let mut v = vec![ans("a", now - 100), ans("b", now)];
-        let before = v.clone();
-        prune_answers(&mut v);
-        assert_eq!(v, before, "a small, recent set is left untouched");
-    }
-}
-
-#[cfg(test)]
-mod decider_engine_tests {
-    use super::*;
-    use crate::registry::Engine;
-
-    #[test]
-    fn a_config_without_decider_engine_defaults_to_claude() {
-        // A config written before this field existed (or by another tool) must still load,
-        // and must read as Claude — the safe/validated default. This is a safety property:
-        // the decider auto-approves, so an unknown/missing engine must NOT silently become codex.
-        let json = r#"{"autonomy":"autopilot","step_timeout_s":1800,"max_failures":3,"stuck_threshold":3,"coordinator_lease_s":1860}"#;
-        let cfg: Config = serde_json::from_str(json).expect("legacy config must still parse");
-        assert_eq!(cfg.decider_engine, Engine::Claude);
-    }
-
-    #[test]
-    fn decider_engine_round_trips_codex() {
-        let json = r#"{"autonomy":"autopilot","step_timeout_s":1800,"max_failures":3,"stuck_threshold":3,"coordinator_lease_s":1860,"decider_engine":"codex"}"#;
-        let cfg: Config =
-            serde_json::from_str(json).expect("config with decider_engine must parse");
-        assert_eq!(cfg.decider_engine, Engine::Codex);
-        let back = serde_json::to_string(&cfg).unwrap();
-        assert!(back.contains("\"decider_engine\":\"codex\""), "got {back}");
-    }
-
-    #[test]
-    fn config_without_decider_model_loads_as_none() {
-        let json = r#"{"autonomy":"autopilot","step_timeout_s":1800,"max_failures":3,"stuck_threshold":3,"coordinator_lease_s":1860,"decider_engine":"codex"}"#;
-        let cfg: Config = serde_json::from_str(json).expect("legacy config must parse");
-        assert_eq!(cfg.decider_model, None);
-    }
-
-    #[test]
-    fn decider_model_round_trips() {
-        let json = r#"{"autonomy":"autopilot","step_timeout_s":1800,"max_failures":3,"stuck_threshold":3,"coordinator_lease_s":1860,"decider_engine":"claude","decider_model":"global.anthropic.claude-opus-5"}"#;
-        let cfg: Config = serde_json::from_str(json).expect("must parse");
-        assert_eq!(
-            cfg.decider_model.as_deref(),
-            Some("global.anthropic.claude-opus-5")
-        );
-        assert!(
-            serde_json::to_string(&cfg)
-                .unwrap()
-                .contains("\"decider_model\":\"global.anthropic.claude-opus-5\"")
-        );
-    }
 }

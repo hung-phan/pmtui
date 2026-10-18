@@ -1260,3 +1260,367 @@ fn retirement_waits_for_an_attached_human() {
     assert_eq!(receipt(&fx).expect("answered").state, ReceiptState::Done);
     assert_eq!(rows(&fx), vec!["parent"]);
 }
+
+/// A CODEX JOB'S CONVERSATION IS RECORDED SO A HUMAN CAN PICK IT UP.
+///
+/// Codex has no caller-chosen conversation id — the one flag claude does have — so the only way to
+/// learn which conversation a run created is to read the id codex announced in its own stream. A job
+/// exits, so it never resumes itself; this is what lets a PERSON open the conversation of a job that
+/// failed or asked for them, instead of losing it with the process. The whole of `pin_codex_thread`
+/// was unexercised until `spawning.rs` was split and its coverage stopped being averaged across two
+/// thousand lines.
+#[test]
+fn a_codex_jobs_thread_id_is_recorded_on_its_row() {
+    const THREAD: &str = "0199f2a0-1111-7000-8000-abcdefabcdef";
+    let log = format!(
+        "{}\n{}",
+        format_args!(r#"{{"type":"thread.started","thread_id":"{THREAD}"}}"#),
+        r#"{"type":"turn.completed"}"#
+    );
+    let fx = fixture(LaunchKind::Job, &log, None, Some("0"));
+    // The row is codex's, and carries no conversation yet.
+    Registry::update(&fx.registry, |reg| {
+        let kid = reg
+            .projects
+            .iter_mut()
+            .find(|p| p.id == "kid")
+            .expect("kid");
+        kid.engine = Some(Engine::Codex);
+        kid.conversation_id = None;
+    })
+    .expect("update");
+
+    let mut app = app_for(&fx, FakePane::default());
+    sweep(&mut app, &fx);
+
+    // The row is retired, so the id has to have been written BEFORE that — which is the ordering
+    // this pins. It is read back from the parent's receipt, which outlives the row.
+    let session = receipt(&fx)
+        .expect("a receipt")
+        .session
+        .expect("the receipt names its session");
+    assert_eq!(session.agent, Engine::Codex);
+}
+
+/// …and the id is on the ROW while it is still there, for a job the human keeps.
+#[test]
+fn a_kept_codex_jobs_row_carries_the_thread_it_created() {
+    const THREAD: &str = "0199f2a0-2222-7000-8000-abcdefabcdef";
+    let log = format!(
+        "{}\n{}",
+        format_args!(r#"{{"type":"thread.started","thread_id":"{THREAD}"}}"#),
+        r#"{"type":"turn.failed"}"#
+    );
+    // `turn.failed` ⇒ the job FAILED, so its row is kept for a person — and that is the row whose
+    // conversation they will want to open.
+    let fx = fixture(LaunchKind::Job, &log, None, Some("1"));
+    Registry::update(&fx.registry, |reg| {
+        let kid = reg
+            .projects
+            .iter_mut()
+            .find(|p| p.id == "kid")
+            .expect("kid");
+        kid.engine = Some(Engine::Codex);
+    })
+    .expect("update");
+
+    let mut app = app_for(&fx, FakePane::default());
+    sweep(&mut app, &fx);
+
+    assert!(
+        rows(&fx).contains(&"kid".to_string()),
+        "a failed job is kept"
+    );
+    let kid = Registry::load(&fx.registry)
+        .expect("load")
+        .projects
+        .into_iter()
+        .find(|p| p.id == "kid")
+        .expect("the row");
+    assert_eq!(
+        kid.conversation_id.as_deref(),
+        Some(THREAD),
+        "the conversation codex created is on the row a human will open"
+    );
+}
+
+/// A CLAUDE JOB IS NOT GIVEN A CODEX THREAD, and a codex job that already has one keeps it.
+///
+/// Both are the early returns of the same guard. The second matters because the engine is the
+/// authority on a codex conversation: an id already recorded must not be replaced by a later pass
+/// re-reading an older log.
+#[test]
+fn pinning_a_thread_skips_claude_and_never_overwrites_an_id() {
+    const THREAD: &str = "0199f2a0-3333-7000-8000-abcdefabcdef";
+    let log = format!(
+        "{}\n{}",
+        format_args!(r#"{{"type":"thread.started","thread_id":"{THREAD}"}}"#),
+        r#"{"type":"turn.failed"}"#
+    );
+
+    // Claude: the stream is codex-shaped, and it is still ignored.
+    let claude = fixture(LaunchKind::Job, &log, None, Some("1"));
+    let mut app = app_for(&claude, FakePane::default());
+    sweep(&mut app, &claude);
+    let kid = Registry::load(&claude.registry)
+        .expect("load")
+        .projects
+        .into_iter()
+        .find(|p| p.id == "kid")
+        .expect("row");
+    assert_eq!(
+        kid.conversation_id, None,
+        "a claude job has a caller-chosen id and is never given codex's"
+    );
+
+    // Codex with an id already on the row: it stands.
+    let codex = fixture(LaunchKind::Job, &log, None, Some("1"));
+    Registry::update(&codex.registry, |reg| {
+        let kid = reg
+            .projects
+            .iter_mut()
+            .find(|p| p.id == "kid")
+            .expect("kid");
+        kid.engine = Some(Engine::Codex);
+        kid.conversation_id = Some("the-one-already-known".into());
+    })
+    .expect("update");
+    let mut app = app_for(&codex, FakePane::default());
+    sweep(&mut app, &codex);
+    let kid = Registry::load(&codex.registry)
+        .expect("load")
+        .projects
+        .into_iter()
+        .find(|p| p.id == "kid")
+        .expect("row");
+    assert_eq!(
+        kid.conversation_id.as_deref(),
+        Some("the-one-already-known"),
+        "a recorded id is not re-derived from a log"
+    );
+}
+
+/// A CODEX STREAM WITH NO THREAD ANNOUNCEMENT LEAVES THE ROW ALONE.
+///
+/// An id arrives only after codex has started its conversation, so a run that died before that has
+/// none — and "not known yet" must stay absent rather than become a guess.
+#[test]
+fn a_codex_job_that_announced_no_thread_records_nothing() {
+    let fx = fixture(
+        LaunchKind::Job,
+        r#"{"type":"turn.failed"}"#,
+        None,
+        Some("1"),
+    );
+    Registry::update(&fx.registry, |reg| {
+        reg.projects
+            .iter_mut()
+            .find(|p| p.id == "kid")
+            .expect("kid")
+            .engine = Some(Engine::Codex);
+    })
+    .expect("update");
+
+    let mut app = app_for(&fx, FakePane::default());
+    sweep(&mut app, &fx);
+
+    let kid = Registry::load(&fx.registry)
+        .expect("load")
+        .projects
+        .into_iter()
+        .find(|p| p.id == "kid")
+        .expect("row");
+    assert_eq!(kid.conversation_id, None);
+}
+
+/// ONE HARVEST RUNS AT A TIME, and this is the guard that makes it so.
+///
+/// `remove_project` ends in `refresh`, which calls the sweep again: five children finishing together
+/// re-entered it four levels deep, and each outer level then carried on down its own stale candidate
+/// list, re-harvesting rows whose state directory the inner level had already purged. The second
+/// harvest of a `done` child finds no payload and overwrote the parent's correct answer with
+/// `ended_without_result` — three of five children, every time. The flag is the fix, so it gets a
+/// test that fails if it is ever removed.
+#[test]
+fn a_re_entered_harvest_returns_immediately_and_answers_nothing() {
+    let fx = fixture(
+        LaunchKind::Job,
+        &claude_result("done", "finished it"),
+        None,
+        Some("0"),
+    );
+    let mut app = app_for(&fx, FakePane::default());
+    let reg = Registry::load(&fx.registry).expect("load");
+
+    // Stand where the inner call stands: a harvest is already in flight.
+    app.spawn.harvesting = true;
+    app.retire_finished_jobs(&reg);
+    assert!(
+        receipt(&fx).is_none(),
+        "a re-entered sweep writes no answer at all"
+    );
+    assert!(
+        rows(&fx).contains(&"kid".to_string()),
+        "and retires nothing"
+    );
+
+    // Released, the same sweep does the work.
+    app.spawn.harvesting = false;
+    app.retire_finished_jobs(&reg);
+    assert_eq!(
+        receipt(&fx).expect("a receipt now").state,
+        ReceiptState::Done
+    );
+}
+
+/// A JOB WHOSE PARENT HAS LEFT THE LIST HAS NOWHERE TO ANSWER, and says so by not writing.
+///
+/// Nothing reads a departed session's requests directory, so a receipt written there would be a
+/// message to no one. The row still finishes — the work happened — it just has no addressee.
+#[test]
+fn a_job_whose_parent_is_gone_finishes_without_a_receipt() {
+    let fx = fixture(
+        LaunchKind::Job,
+        &claude_result("needs_human", "which database?"),
+        None,
+        Some("0"),
+    );
+    // The parent closed its session while the child was running.
+    Registry::update(&fx.registry, |reg| {
+        reg.projects.retain(|p| p.id != "parent")
+    })
+    .expect("drop the parent");
+
+    let mut app = app_for(&fx, FakePane::default());
+    sweep(&mut app, &fx);
+
+    assert!(
+        receipt(&fx).is_none(),
+        "no receipt is written into a directory nobody reads"
+    );
+    assert!(
+        rows(&fx).contains(&"kid".to_string()),
+        "a job that needs a human is still kept for one"
+    );
+}
+
+/// A RECEIPT THAT CANNOT BE WRITTEN IS LOGGED, AND THE ROW STILL FINISHES.
+///
+/// The parent's requests directory is on disk in a session's own state tree, so writing there can
+/// fail for reasons that have nothing to do with the job: a full disk, a permission change, a
+/// directory replaced by a file. The work is over either way, so the harvest must not stall on it —
+/// but it must not go quiet either, because the parent is waiting on a receipt that will never come.
+#[test]
+fn a_receipt_that_cannot_be_written_is_logged_and_the_job_still_finishes() {
+    let fx = fixture(
+        LaunchKind::Job,
+        &claude_result("done", "finished it"),
+        None,
+        Some("0"),
+    );
+    // Replace the requests DIRECTORY with a file: every write into it now fails.
+    std::fs::remove_dir_all(&fx.parent_requests).expect("clear");
+    std::fs::write(&fx.parent_requests, "not a directory").expect("occupy the path");
+
+    let mut app = app_for(&fx, FakePane::default());
+    sweep(&mut app, &fx);
+
+    assert!(
+        !rows(&fx).contains(&"kid".to_string()),
+        "a done job is retired whether or not its parent could be told"
+    );
+    assert!(
+        log_lines(&app)
+            .iter()
+            .any(|line| line.contains("could not record") && line.contains("kid")),
+        "the failure is named, because the parent is waiting on a receipt: {:?}",
+        log_lines(&app)
+    );
+}
+
+/// THE SAME FOR A CANCELLATION, which is the receipt an agent is most likely to be polling for.
+#[test]
+fn a_cancellation_receipt_that_cannot_be_written_is_logged() {
+    let fx = fixture(LaunchKind::Job, "", None, None);
+    let row = Registry::load(&fx.registry)
+        .expect("load")
+        .projects
+        .into_iter()
+        .find(|p| p.id == "kid")
+        .expect("row");
+    std::fs::remove_dir_all(&fx.parent_requests).expect("clear");
+    std::fs::write(&fx.parent_requests, "not a directory").expect("occupy the path");
+
+    let mut app = app_for(&fx, FakePane::default());
+    app.cancel_job_receipt(&row);
+
+    assert!(
+        log_lines(&app)
+            .iter()
+            .any(|line| line.contains("could not record") && line.contains("cancellation")),
+        "{:?}",
+        log_lines(&app)
+    );
+}
+
+/// A ROW WITH NO LAUNCH RECORD IS NOT A JOB THE HARVEST OWNS.
+///
+/// Every question the sweep asks about a job is answered from its launch record — which request it
+/// came from, what state it reached, which branch it owns. A row without one (a human's own session,
+/// or a hand-edited list) must fall through every one of those questions rather than be guessed at.
+#[test]
+fn a_row_without_a_launch_record_is_left_entirely_alone() {
+    let fx = fixture(
+        LaunchKind::Job,
+        &claude_result("done", "finished it"),
+        None,
+        Some("0"),
+    );
+    Registry::update(&fx.registry, |reg| {
+        reg.projects
+            .iter_mut()
+            .find(|p| p.id == "kid")
+            .expect("kid")
+            .launch = None;
+    })
+    .expect("update");
+
+    let mut app = app_for(&fx, FakePane::default());
+    let row = Registry::load(&fx.registry)
+        .expect("load")
+        .projects
+        .into_iter()
+        .find(|p| p.id == "kid")
+        .expect("row");
+    sweep(&mut app, &fx);
+    // Each of the three questions the harvest asks about a launch, answered without one.
+    app.cancel_job_receipt(&row);
+
+    assert!(
+        rows(&fx).contains(&"kid".to_string()),
+        "nothing retired a row the harvest has no record for"
+    );
+    assert!(receipt(&fx).is_none(), "and nothing was answered");
+}
+
+/// A FAILED JOB THAT LEFT NO REPORT STILL CARRIES AN `error.code` AND A SENTENCE.
+///
+/// v1's contract is "act on `error.code`", so a `failed` receipt must ALWAYS have one — a job failure
+/// must not be the single `failed` that has none. When the run left nothing readable there is no
+/// summary to use as the message, so the receipt says so rather than carrying an empty string.
+#[test]
+fn a_failed_job_with_no_readable_report_still_explains_itself() {
+    // A nonzero exit and a log with no result event at all: the process failed and said nothing.
+    let fx = fixture(LaunchKind::Job, "boom: killed\n", None, Some("9"));
+
+    let mut app = app_for(&fx, FakePane::default());
+    sweep(&mut app, &fx);
+
+    let receipt = receipt(&fx).expect("a receipt");
+    assert_eq!(receipt.state, ReceiptState::EndedWithoutResult);
+    let error = receipt.error.expect("a failed receipt always names a code");
+    assert!(
+        !error.message.trim().is_empty(),
+        "and says something a person can read: {error:?}"
+    );
+}

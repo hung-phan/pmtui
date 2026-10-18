@@ -12,7 +12,7 @@
 /// on their verbs (the second happens to be caught by `production`, the first by
 /// nothing at all). Over-triggering here costs one escalation to a human, which is the
 /// direction this floor is supposed to fail in.
-const HARD_FLOOR_MARKERS: &[&str] = &[
+pub(super) const HARD_FLOOR_MARKERS: &[&str] = &[
     // Irreversible / externally-visible git + release actions.
     "publish",
     "publishing",
@@ -201,41 +201,5 @@ pub fn supervisor_enabled(raw: Option<&str>) -> bool {
             v.trim().to_ascii_lowercase().as_str(),
             "off" | "0" | "false" | "no"
         ),
-    }
-}
-
-#[cfg(test)]
-mod membership_tests {
-    use super::*;
-
-    #[test]
-    fn every_hard_floor_marker_hits_the_floor_bare_and_inside_a_host() {
-        // Iterate the ACTUAL list so a silently-dropped or misspelled entry (one that no longer
-        // equals its own lowercased segment, or a segment-splitter regression) fails here rather
-        // than quietly shrinking the deterministic safety floor.
-        for m in HARD_FLOOR_MARKERS {
-            assert_eq!(
-                hard_floor_hit(m),
-                Some(*m),
-                "bare marker `{m}` must hit its own floor"
-            );
-            let snake = format!("do_{m}_now");
-            assert!(
-                hard_floor_hit(&snake).is_some(),
-                "`{m}` must be found as a segment of `{snake}`"
-            );
-            let camel = {
-                let mut c = m.chars();
-                let head = c
-                    .next()
-                    .map(|f| f.to_uppercase().collect::<String>())
-                    .unwrap_or_default();
-                format!("do{head}{}Now", c.as_str())
-            };
-            assert!(
-                hard_floor_hit(&camel).is_some(),
-                "`{m}` must be found as a camelCase hump of `{camel}`"
-            );
-        }
     }
 }

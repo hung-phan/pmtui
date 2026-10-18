@@ -86,7 +86,7 @@ pub(crate) struct SpawnBroker {
     /// A harvest is running. Retiring a row ends in [`App::refresh`], which calls the harvest again,
     /// so without this ONE sweep of five finished children re-enters itself four levels deep, each
     /// level holding a snapshot that still lists rows the deeper ones already retired and purged.
-    pub(super) harvesting: bool,
+    pub(crate) harvesting: bool,
 }
 
 impl Default for SpawnBroker {

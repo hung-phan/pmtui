@@ -202,3 +202,6 @@ where
         .filter_map(|v| serde_json::from_value(v).ok())
         .collect())
 }
+
+#[cfg(test)]
+mod tests;

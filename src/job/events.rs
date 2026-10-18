@@ -285,3 +285,6 @@ impl AutopilotEventKind {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

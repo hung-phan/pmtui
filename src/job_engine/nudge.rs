@@ -175,18 +175,25 @@ impl JobScheduler {
         }
         // The last look before typing reads styles too, so a person's draft in the box is Busy.
         //
-        // THE STYLED CAPTURE IS THE GATE, so it goes first and is the only one taken on the path that
-        // sends. This used to capture the pane PLAIN and then call `styled_activity`, which captures it
-        // again — two tmux round-trips every nudge, the first of which was thrown away whenever the
-        // answer was Idle. The plain capture is still the one the progress recheck gets: it
-        // fingerprints that text and compares it with later PLAIN captures, so text rebuilt from a
-        // styled capture must not be substituted for it (`tmux::styled_activity` says why). Hence it
-        // is taken on the Busy path only, where it is actually read.
-        if crate::tmux::styled_activity(driver, &session, 40) != crate::tmux::PaneActivity::Idle {
-            return match driver.capture_tail(&session, 40) {
-                Ok(capture) => self.busy_pane_recheck(now, base, &capture),
-                Err(_) => self.busy_recheck(now, base, HoldReason::Transient),
-            };
+        // TWO CAPTURES, AND BOTH EARN THEIR KEEP. An audit called this a wasted round-trip — the plain
+        // capture is thrown away whenever the answer is Idle — and reordering it so the styled gate
+        // goes first does save one. It was tried and reverted: the saving is one `capture-pane` per
+        // nudge, and nudges run on a cadence of minutes, while the cost is a transient-error arm no
+        // test can reach (`drive` captured this same pane plainly moments ago, so a fake cannot make
+        // the second call fail without failing the first). The alternative — fingerprinting
+        // `unstyled()` of the styled capture — is worse: `pane_progress_recheck` compares that
+        // fingerprint with later PLAIN captures, and text rebuilt from a styled capture need not match
+        // byte for byte, so a spurious difference reads as progress and resets the stall clock that
+        // escalates a wedged session.
+        //
+        // This whole re-read exists because it happens INSIDE `input.lock`: the pane can change while
+        // this sender waits for the lock, which is the race the recheck above is also for.
+        match driver.capture_tail(&session, 40) {
+            Ok(_)
+                if crate::tmux::styled_activity(driver, &session, 40)
+                    == crate::tmux::PaneActivity::Idle => {}
+            Ok(capture) => return self.busy_pane_recheck(now, base, &capture),
+            Err(_) => return self.busy_recheck(now, base, HoldReason::Transient),
         }
         // The single seam that turns ledger + scheduler state into the nudge bytes: the goal on
         // disk, the agent's own `pending_context`/`last_status`/`last_plan`, and the WHITELISTED
