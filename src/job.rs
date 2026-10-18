@@ -16,9 +16,9 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::clock::Epoch;
-use crate::pmstate::{OpenStop, StopKind};
+use crate::pmstate::OpenStop;
 use crate::registry::Engine;
-use crate::state::{self, ProjectPaths, RiskClass};
+use crate::state::{self, ProjectPaths};
 use crate::worker::StopDraft;
 
 mod turn_trace;
@@ -26,6 +26,32 @@ pub use turn_trace::{
     TURN_TRACE_MAX, TurnDisposition, TurnNoReportReason, TurnOutcome, TurnReviewOutcome, TurnTrace,
     TurnTrigger,
 };
+
+// FOUR CONCERNS, FOUR FILES. This module held the run state, the decider's records, the autopilot
+// event log and the situation projection in one 1,100-line file, so reading any one of them meant
+// reading all four. Each type keeps its old path through these re-exports: `job::DeciderRun` still
+// resolves, and no importer changed.
+mod decider;
+mod events;
+mod situation;
+
+pub use decider::{
+    ADVICE_QUEUE_MAX, DECIDER_RUNS_MAX, DeciderOutcome, DeciderPolicy, DeciderRun, DeciderTarget,
+    ParkedAdvice, QueuedAdvice,
+};
+pub use events::{
+    AUTOPILOT_EVENTS_MAX, AutopilotEvent, AutopilotEventKind, DECISIONS_SLICE_MAX,
+    DecisionCounters, DecisionKind, DecisionRecord,
+};
+pub use situation::LedgerSituation;
+
+// `use`d rather than named as `events::…` in each `#[serde(…)]` attribute, so the attribute strings
+// on `AgentLoopState` are the bytes they always were.
+use decider::{
+    cap_audit_option, cap_audit_text, cap_decider_outcome, de_advice_queue_bounded,
+    de_decider_runs_lenient,
+};
+use events::{cap_detail, de_decisions_lenient, de_events_lenient};
 
 /// The harness's run state for one agent-loop session. Mirrors
 /// `scheduler::RunState` but is serializable (persisted in the per-session ledger)
@@ -290,327 +316,8 @@ pub struct AgentLoopState {
     pub updated_at: Epoch,
 }
 
-/// A supervisor consult that is spawned-but-unhonoured, recorded on the ledger so a
-/// `pmd` restart cannot lose the approval the worker is waiting for.
-///
-/// WHY this must be durable at all: the consult is started from the auto-flow branch of
-/// the marker disposer, which has ALREADY consumed the marker `seq` (`last_marker_seq`
-/// is the anti-replay watermark, so the same bump is never disposed twice). A daemon
-/// that dies mid-consult and comes back with only in-memory state would therefore nudge
-/// a bare heartbeat and NEVER answer the worker's question — strictly worse than before
-/// the supervisor existed, and invisible until the 30-minute stall backstop fires. With
-/// this record the restarted daemon knows whether it owes the worker a marker answer
-/// or must re-detect a live pane dialog.
-///
-/// Deliberately holds IDs/a target bit and not prose: marker notes are formatted in
-/// exactly one place, pane dialogs are re-read from the terminal, and nothing
-/// supervisor-authored is persisted here (this record is written before any reply exists).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ParkedAdvice {
-    /// The consult counter — the `<seq>` in its `pmsup-` session name and in its
-    /// done-signal/log paths. Persisted so a restarted daemon RESUMES the counter
-    /// instead of restarting it at 0 and reading a dead consult's exit code as a fresh
-    /// one's.
-    pub seq: u64,
-    /// The auto-flow stop ids the deterministic policy already approved. Empty for
-    /// a pane-dialog consult, whose live terminal is the source of truth.
-    pub stop_ids: Vec<String>,
-    /// This debt targets an in-pane dialog rather than a consumed worker marker.
-    /// A restarted daemon must re-detect and re-consult that live dialog; it must
-    /// never recover this record as prose in `pending_context`.
-    #[serde(default, skip_serializing_if = "bool_is_false")]
-    pub pane_dialog: bool,
-}
-
-/// One worker-authored decision waiting for a decider verdict.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct QueuedAdvice {
-    pub stop_id: String,
-    pub report_seq: u64,
-    pub draft: crate::worker::StopDraft,
-}
-
 fn bool_is_false(value: &bool) -> bool {
     !*value
-}
-
-/// Maximum retained decider consults. Audit rows are richer than the compact event feed, so keep a
-/// smaller history while still covering a long interactive session.
-pub const DECIDER_RUNS_MAX: usize = 50;
-/// Maximum ordinary decisions accepted from one marker for serial review. Additional decisions are
-/// audited and handed to the human instead of creating an unbounded model-call queue.
-pub const ADVICE_QUEUE_MAX: usize = 8;
-
-fn de_advice_queue_bounded<'de, D>(deserializer: D) -> Result<Vec<QueuedAdvice>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let mut queue = Vec::<QueuedAdvice>::deserialize(deserializer)?;
-    queue.truncate(ADVICE_QUEUE_MAX);
-    Ok(queue)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DeciderTarget {
-    Marker,
-    Dialog,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DeciderPolicy {
-    pub kind: StopKind,
-    pub labelled_risk: RiskClass,
-    pub effective_risk: RiskClass,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DeciderOutcome {
-    Consulting,
-    Skipped {
-        reason: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        reported_kind: Option<StopKind>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        effect: Option<crate::worker::StopEffect>,
-    },
-    Resolved {
-        answer: String,
-        reason: String,
-    },
-    Refused {
-        reason: String,
-    },
-    Failed {
-        reason: String,
-    },
-    Recovered {
-        answer: String,
-    },
-    Interrupted {
-        reason: String,
-    },
-}
-
-/// One decider decision from preflight through its terminal outcome. Most records are
-/// read-only model consults; [`DeciderOutcome::Skipped`] records a deterministic preflight
-/// decision for which no model was called.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DeciderRun {
-    pub seq: u64,
-    pub started_at: Epoch,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub finished_at: Option<Epoch>,
-    pub engine: Engine,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    pub target: DeciderTarget,
-    pub question: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub options: Vec<String>,
-    /// The worker's typed report is untrusted evidence, not authority. Keeping it on every audit
-    /// row makes both called and skipped decisions explainable without exposing model reasoning.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reported_kind: Option<StopKind>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effect: Option<crate::worker::StopEffect>,
-    pub policy: DeciderPolicy,
-    pub outcome: DeciderOutcome,
-}
-
-/// The most recent autopilot decisions kept on the ledger for the dashboard's AUTOPILOT
-/// feed. Bounded so the ledger stays small (the oldest are dropped); coalescing keeps a
-/// held nudge rechecked every few seconds from filling it. A hundred (user: *"we don't need
-/// to keep every logline on autopilot, it is better to keep it at 100 lines"*) — deep enough
-/// to scroll back through a session's recent history, still a small, bounded `state.json`.
-pub const AUTOPILOT_EVENTS_MAX: usize = 100;
-
-/// One decision `pmd` made while driving this session, for the dashboard to render.
-/// Consecutive IDENTICAL decisions coalesce into one entry with a bumped `at` and
-/// `count` (see [`AgentLoopState::record_event`]), so a heartbeat held on the same
-/// reason across many rechecks is ONE "held ×N" line, not a flood.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AutopilotEvent {
-    /// When this decision last happened (Unix seconds).
-    pub at: Epoch,
-    /// How many times in a row the same decision repeated (≥ 1).
-    #[serde(default = "one_count")]
-    pub count: u32,
-    pub kind: AutopilotEventKind,
-}
-
-fn one_count() -> u32 {
-    1
-}
-
-/// Monotonic, saturating decider-lane counters kept on the ledger. `disposed` is the
-/// EXACT count of accepted marker bumps (structurally guaranteed by the single dispose
-/// seam); the per-kind counters are best-effort. `is_zero()` drives skip-serialize so a
-/// fresh/idle ledger stays byte-identical to a pre-B one. All fields `#[serde(default)]`
-/// so a future additive counter loads against an older ledger.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct DecisionCounters {
-    #[serde(default)]
-    pub disposed: u64,
-    #[serde(default)]
-    pub working: u64,
-    #[serde(default)]
-    pub monitoring: u64,
-    #[serde(default)]
-    pub auto_flow: u64,
-    #[serde(default)]
-    pub escalated: u64,
-    #[serde(default)]
-    pub stalled: u64,
-}
-
-impl DecisionCounters {
-    /// True when every counter is 0 — the skip-serialize predicate.
-    pub fn is_zero(&self) -> bool {
-        *self == Self::default()
-    }
-}
-
-/// The disposition class of one decision `pmd` made while driving. Snake-case on the wire
-/// (`auto_flow`) so it reads the same in `raw.jsonl` and `decisions.md`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DecisionKind {
-    Working,
-    Monitoring,
-    AutoFlow,
-    Escalated,
-    Stalled,
-}
-
-impl DecisionKind {
-    /// The token written into `decisions.md` (`- {epoch} pmd {kind}: {summary}`).
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            DecisionKind::Working => "working",
-            DecisionKind::Monitoring => "monitoring",
-            DecisionKind::AutoFlow => "auto_flow",
-            DecisionKind::Escalated => "escalated",
-            DecisionKind::Stalled => "stalled",
-        }
-    }
-}
-
-/// One decision `pmd` disposed, kept in the bounded [`AgentLoopState::decisions`] slice.
-/// Consecutive entries with the same `(kind, summary, stop_ids)` coalesce into one with a
-/// bumped `count`/`at` (see [`AgentLoopState::record_decision`]).
-///
-/// `seq` is `Option<u64>`: `Some` = an accepted marker bump; `None` is reserved for a
-/// `Stalled` record raised on a NON-dispose park path (never a row with a bumped seq but
-/// stale ids). B only ever writes `Some` (the non-dispose park paths do not record here
-/// yet — documented as future).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DecisionRecord {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub seq: Option<u64>,
-    pub at: Epoch,
-    #[serde(default = "one_count")]
-    pub count: u32,
-    pub kind: DecisionKind,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub stop_ids: Vec<String>,
-}
-
-impl DecisionRecord {
-    /// One decision from an accepted marker bump (`seq` present), starting at `count == 1`.
-    pub fn at(
-        now: Epoch,
-        seq: Option<u64>,
-        kind: DecisionKind,
-        summary: Option<String>,
-        stop_ids: Vec<String>,
-    ) -> Self {
-        Self {
-            seq,
-            at: now,
-            count: one_count(),
-            kind,
-            summary,
-            stop_ids,
-        }
-    }
-}
-
-/// A snapshot of the last report `pmd` disposed — the current "situation" the supervisor
-/// projection (Milestone C) reads. Projected fresh at spawn, but persisted here so it
-/// never goes stale across a park (set by the single dispose seam on EVERY accepted bump).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LedgerSituation {
-    pub state: WakeState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub open_stops: Vec<String>,
-    pub seq: u64,
-    pub at: Epoch,
-}
-
-impl LedgerSituation {
-    /// Snapshot the just-disposed `report` (its state/status/seq) plus the stop ids the
-    /// session is open on at disposition time.
-    pub fn from_report(report: &WakeReport, open_stops: &[String], now: Epoch) -> Self {
-        Self {
-            state: report.state,
-            status: report.status.clone(),
-            open_stops: open_stops.to_vec(),
-            seq: report.seq,
-            at: now,
-        }
-    }
-}
-
-/// The bounded length of [`AgentLoopState::decisions`] — the oldest are dropped past this.
-pub const DECISIONS_SLICE_MAX: usize = 64;
-
-/// The longest detail string kept on a feed event. The feed now WRAPS and SCROLLS (see
-/// `preview_autopilot_body`), so this is no longer a display budget — a long status or stop
-/// question is shown in FULL there. It is only a ledger-bloat safety valve: it stops a
-/// pathological paste from bloating a `state.json` rewritten every tick, set well above any
-/// realistic one-line status or stop question so nothing a human would want to read is clipped
-/// (the user's report was that a capped detail still read as truncated). [`AUTOPILOT_EVENTS_MAX`]
-/// bounds how MANY events persist; this bounds how big each is.
-const AUTOPILOT_DETAIL_MAX: usize = 2000;
-const DECIDER_AUDIT_TEXT_MAX: usize = 400;
-const DECIDER_AUDIT_OPTION_MAX: usize = 200;
-
-/// One line, bounded — collapse newlines and cap length, so a stored detail can never bloat
-/// the ledger (or the render) with a paragraph.
-fn cap_detail(s: String) -> String {
-    let one = s.replace(['\n', '\r'], " ");
-    if one.chars().count() <= AUTOPILOT_DETAIL_MAX {
-        one
-    } else {
-        let mut out: String = one
-            .chars()
-            .take(AUTOPILOT_DETAIL_MAX.saturating_sub(1))
-            .collect();
-        out.push('\u{2026}');
-        out
-    }
-}
-
-fn cap_audit_text(s: String) -> String {
-    cap_one_line(s, DECIDER_AUDIT_TEXT_MAX)
-}
-
-fn cap_audit_option(s: String) -> String {
-    cap_one_line(s, DECIDER_AUDIT_OPTION_MAX)
 }
 
 fn cap_one_line(s: String, max: usize) -> String {
@@ -621,78 +328,6 @@ fn cap_one_line(s: String, max: usize) -> String {
     let mut out: String = one.chars().take(max.saturating_sub(1)).collect();
     out.push('\u{2026}');
     out
-}
-
-fn cap_decider_outcome(outcome: DeciderOutcome) -> DeciderOutcome {
-    match outcome {
-        DeciderOutcome::Consulting => DeciderOutcome::Consulting,
-        DeciderOutcome::Skipped {
-            reason,
-            reported_kind,
-            effect,
-        } => DeciderOutcome::Skipped {
-            reason: cap_audit_text(reason),
-            reported_kind,
-            effect,
-        },
-        DeciderOutcome::Resolved { answer, reason } => DeciderOutcome::Resolved {
-            answer: cap_audit_text(answer),
-            reason: cap_audit_text(reason),
-        },
-        DeciderOutcome::Refused { reason } => DeciderOutcome::Refused {
-            reason: cap_audit_text(reason),
-        },
-        DeciderOutcome::Failed { reason } => DeciderOutcome::Failed {
-            reason: cap_audit_text(reason),
-        },
-        DeciderOutcome::Recovered { answer } => DeciderOutcome::Recovered {
-            answer: cap_audit_text(answer),
-        },
-        DeciderOutcome::Interrupted { reason } => DeciderOutcome::Interrupted {
-            reason: cap_audit_text(reason),
-        },
-    }
-}
-
-/// Deserialize the [`AgentLoopState::events`] feed LENIENTLY: parse each element on its own
-/// and DROP any that fail, rather than failing the whole ledger. The feed is cosmetic, so a
-/// single unparseable entry — a kind a newer `pmd` added, a hand-edit — must never take down
-/// the operational fields (`run`, `cadence_s`, the watermarks) that share the file.
-fn de_events_lenient<'de, D>(d: D) -> std::result::Result<Vec<AutopilotEvent>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let raw = Vec::<serde_json::Value>::deserialize(d)?;
-    Ok(raw
-        .into_iter()
-        .filter_map(|v| serde_json::from_value(v).ok())
-        .collect())
-}
-
-/// Deserialize [`AgentLoopState::decisions`] LENIENTLY, exactly like [`de_events_lenient`]:
-/// parse each element on its own and DROP any that fail, so one unparseable decision never
-/// fails the operational ledger load.
-fn de_decisions_lenient<'de, D>(d: D) -> std::result::Result<Vec<DecisionRecord>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let raw = Vec::<serde_json::Value>::deserialize(d)?;
-    Ok(raw
-        .into_iter()
-        .filter_map(|v| serde_json::from_value(v).ok())
-        .collect())
-}
-
-/// Deserialize the cosmetic decider audit independently from operational state.
-fn de_decider_runs_lenient<'de, D>(d: D) -> std::result::Result<Vec<DeciderRun>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let raw = Vec::<serde_json::Value>::deserialize(d)?;
-    Ok(raw
-        .into_iter()
-        .filter_map(|v| serde_json::from_value(v).ok())
-        .collect())
 }
 
 /// Why `pmd` HELD a heartbeat instead of nudging — the sub-state the drive loop computes
@@ -721,97 +356,6 @@ impl HoldReason {
             HoldReason::TurnInProgress => "mid-turn",
             HoldReason::IdleUnconfirmed => "confirming idle",
             HoldReason::Transient => "recheck",
-        }
-    }
-}
-
-/// What one [`AutopilotEvent`] records. Variants carry only the short, human-facing
-/// detail the dashboard shows — never anything the agent or supervisor authored beyond
-/// its own one-line status.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AutopilotEventKind {
-    /// The persistent agent was (re)launched.
-    Launched,
-    /// A heartbeat nudge was delivered.
-    Nudged,
-    /// A heartbeat was withheld, and why.
-    Held(HoldReason),
-    /// The agent reported in (its one-line status, if any).
-    Reported(Option<String>),
-    /// The daemon auto-answered a low-stakes decision on the human's behalf.
-    AutoAnswered(Option<String>),
-    /// The session supervisor resolved a low-stakes decision.
-    SupervisorResolved(Option<String>),
-    /// The base cadence changed (agent-proposed), e.g. "5m → 1m".
-    CadenceChanged(String),
-    /// The agent raised a question that needs the human (its text, if any).
-    Escalated(Option<String>),
-    /// The session stalled/backstopped into a Stuck state (the reason, if any).
-    Stuck(Option<String>),
-    /// A human answered an escalation and unblocked the session (their answer text, if any) —
-    /// the other half of the loop, so the feed does not read as pmd talking to itself.
-    Answered(Option<String>),
-}
-
-impl AutopilotEventKind {
-    /// The short label the dashboard prints for this decision.
-    pub fn label(&self) -> &'static str {
-        match self {
-            AutopilotEventKind::Launched => "launched",
-            AutopilotEventKind::Nudged => "nudged",
-            AutopilotEventKind::Held(_) => "held",
-            AutopilotEventKind::Reported(_) => "reported",
-            AutopilotEventKind::AutoAnswered(_) => "auto-answered",
-            AutopilotEventKind::SupervisorResolved(_) => "resolved",
-            AutopilotEventKind::CadenceChanged(_) => "cadence",
-            AutopilotEventKind::Escalated(_) => "needs you",
-            AutopilotEventKind::Stuck(_) => "stuck",
-            AutopilotEventKind::Answered(_) => "you answered",
-        }
-    }
-
-    /// Whether this event is a DECISION worth reviewing — pmd acting on the human's behalf,
-    /// or the escalation lifecycle — as opposed to routine heartbeat activity (a nudge, a
-    /// withheld beat, or the agent's own status echo). The dashboard's decision lane (`pmtui`
-    /// `v`) filters the feed by this so it shows what autopilot DID, not every tick it took.
-    pub fn is_decision(&self) -> bool {
-        !matches!(
-            self,
-            AutopilotEventKind::Nudged
-                | AutopilotEventKind::Held(_)
-                | AutopilotEventKind::Reported(_)
-        )
-    }
-
-    /// The trailing detail, if any (a status line, a question, a hold reason, or "5m → 1m").
-    pub fn detail(&self) -> Option<String> {
-        match self {
-            AutopilotEventKind::Held(r) => Some(r.label().to_string()),
-            AutopilotEventKind::CadenceChanged(n) => Some(n.clone()),
-            AutopilotEventKind::Reported(s)
-            | AutopilotEventKind::AutoAnswered(s)
-            | AutopilotEventKind::SupervisorResolved(s)
-            | AutopilotEventKind::Escalated(s)
-            | AutopilotEventKind::Stuck(s)
-            | AutopilotEventKind::Answered(s) => s.clone(),
-            AutopilotEventKind::Launched | AutopilotEventKind::Nudged => None,
-        }
-    }
-
-    /// This kind with its free-text detail one-lined and length-capped ([`cap_detail`]), so a
-    /// feed entry can never store a paragraph. `Launched`/`Nudged`/`Held` carry no free text.
-    fn capped(self) -> Self {
-        use AutopilotEventKind::*;
-        match self {
-            Reported(s) => Reported(s.map(cap_detail)),
-            AutoAnswered(s) => AutoAnswered(s.map(cap_detail)),
-            SupervisorResolved(s) => SupervisorResolved(s.map(cap_detail)),
-            Escalated(s) => Escalated(s.map(cap_detail)),
-            Stuck(s) => Stuck(s.map(cap_detail)),
-            Answered(s) => Answered(s.map(cap_detail)),
-            CadenceChanged(n) => CadenceChanged(cap_detail(n)),
-            other => other,
         }
     }
 }
@@ -1429,13 +973,13 @@ mod tests {
         // Longer than the cap by construction, so this exercises the clip whatever the constant is.
         let huge = format!(
             "line one\nline two {}",
-            "x".repeat(AUTOPILOT_DETAIL_MAX + 500)
+            "x".repeat(events::AUTOPILOT_DETAIL_MAX + 500)
         );
         st.record_event(1, AutopilotEventKind::Reported(Some(huge)));
         let d = st.events[0].kind.detail().unwrap();
         assert!(!d.contains('\n'), "newlines are collapsed: {d:?}");
         assert!(
-            d.chars().count() <= AUTOPILOT_DETAIL_MAX,
+            d.chars().count() <= events::AUTOPILOT_DETAIL_MAX,
             "detail is length-capped ({} chars)",
             d.chars().count()
         );

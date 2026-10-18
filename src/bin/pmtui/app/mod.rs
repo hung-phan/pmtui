@@ -16,6 +16,8 @@ mod refresh;
 mod rename;
 pub(crate) mod scroll;
 mod sending;
+mod spawn_harvest;
+mod spawn_phases;
 pub(crate) mod spawning;
 mod switching;
 pub(crate) mod updates;
