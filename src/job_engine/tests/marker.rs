@@ -1564,3 +1564,38 @@ fn an_oversized_decision_batch_bounds_the_queue_and_audits_only_the_overflow() {
             if reason.contains("bounded 8-decision review queue")
     ));
 }
+
+// Moved out of `job_engine/marker.rs`, beside the rest of the disposer's tests.
+use super::super::marker::WAKEREPORT_FIELDS;
+use crate::job::WakeReport;
+
+#[test]
+fn wakereport_fields_list_matches_the_struct() {
+    // Compile-forced awareness: adding a WakeReport field breaks THIS construction, and the
+    // key-set assertion then forces updating WAKEREPORT_FIELDS — else the new field would be
+    // silently stripped on the lenient recovery path.
+    let full = WakeReport {
+        state: WakeState::Working,
+        seq: 1,
+        stops: vec![],
+        next_check_s: Some(1),
+        cadence_s: Some(1),
+        status: Some("s".into()),
+        next_step: Some("n".into()),
+        conversation_id: Some("c".into()),
+    };
+    let val = serde_json::to_value(&full).unwrap();
+    let mut keys: Vec<String> = val
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(|k| k.to_string())
+        .collect();
+    keys.sort();
+    let mut known: Vec<String> = WAKEREPORT_FIELDS.iter().map(|s| s.to_string()).collect();
+    known.sort();
+    assert_eq!(
+        keys, known,
+        "WAKEREPORT_FIELDS drifted from WakeReport's fields"
+    );
+}

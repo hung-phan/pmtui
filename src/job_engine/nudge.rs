@@ -174,6 +174,20 @@ impl JobScheduler {
             return Ok(JobTick::Monitoring { until });
         }
         // The last look before typing reads styles too, so a person's draft in the box is Busy.
+        //
+        // TWO CAPTURES, AND BOTH EARN THEIR KEEP. An audit called this a wasted round-trip — the plain
+        // capture is thrown away whenever the answer is Idle — and reordering it so the styled gate
+        // goes first does save one. It was tried and reverted: the saving is one `capture-pane` per
+        // nudge, and nudges run on a cadence of minutes, while the cost is a transient-error arm no
+        // test can reach (`drive` captured this same pane plainly moments ago, so a fake cannot make
+        // the second call fail without failing the first). The alternative — fingerprinting
+        // `unstyled()` of the styled capture — is worse: `pane_progress_recheck` compares that
+        // fingerprint with later PLAIN captures, and text rebuilt from a styled capture need not match
+        // byte for byte, so a spurious difference reads as progress and resets the stall clock that
+        // escalates a wedged session.
+        //
+        // This whole re-read exists because it happens INSIDE `input.lock`: the pane can change while
+        // this sender waits for the lock, which is the race the recheck above is also for.
         match driver.capture_tail(&session, 40) {
             Ok(_)
                 if crate::tmux::styled_activity(driver, &session, 40)

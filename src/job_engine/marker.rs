@@ -876,7 +876,7 @@ fn parse_report_lenient_bytes(raw: &[u8]) -> Result<WakeReport> {
 
 /// The top-level keys the [`WakeReport`] schema accepts, used by [`parse_report_lenient`] to
 /// strip unknowns. MUST stay in sync with the struct (a test enforces it).
-const WAKEREPORT_FIELDS: &[&str] = &[
+pub(super) const WAKEREPORT_FIELDS: &[&str] = &[
     "state",
     "seq",
     "stops",
@@ -897,42 +897,5 @@ fn marker_is_mid_write(mtime: SystemTime) -> bool {
     match mtime.elapsed() {
         Ok(elapsed) => elapsed < MARKER_MIDWRITE_GRACE,
         Err(_) => true,
-    }
-}
-
-#[cfg(test)]
-mod field_sync_tests {
-    use super::*;
-    use crate::job::{WakeReport, WakeState};
-
-    #[test]
-    fn wakereport_fields_list_matches_the_struct() {
-        // Compile-forced awareness: adding a WakeReport field breaks THIS construction, and the
-        // key-set assertion then forces updating WAKEREPORT_FIELDS — else the new field would be
-        // silently stripped on the lenient recovery path.
-        let full = WakeReport {
-            state: WakeState::Working,
-            seq: 1,
-            stops: vec![],
-            next_check_s: Some(1),
-            cadence_s: Some(1),
-            status: Some("s".into()),
-            next_step: Some("n".into()),
-            conversation_id: Some("c".into()),
-        };
-        let val = serde_json::to_value(&full).unwrap();
-        let mut keys: Vec<String> = val
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(|k| k.to_string())
-            .collect();
-        keys.sort();
-        let mut known: Vec<String> = WAKEREPORT_FIELDS.iter().map(|s| s.to_string()).collect();
-        known.sort();
-        assert_eq!(
-            keys, known,
-            "WAKEREPORT_FIELDS drifted from WakeReport's fields"
-        );
     }
 }

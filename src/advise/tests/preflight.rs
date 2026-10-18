@@ -65,3 +65,37 @@ fn supervisor_kill_switch_defaults_on_and_accepts_off_spellings() {
         assert!(!supervisor_enabled(Some(off)), "{off:?}");
     }
 }
+
+// Moved out of `advise/preflight.rs`, beside the rest of this module's tests.
+use super::super::preflight::HARD_FLOOR_MARKERS;
+
+#[test]
+fn every_hard_floor_marker_hits_the_floor_bare_and_inside_a_host() {
+    // Iterate the ACTUAL list so a silently-dropped or misspelled entry (one that no longer
+    // equals its own lowercased segment, or a segment-splitter regression) fails here rather
+    // than quietly shrinking the deterministic safety floor.
+    for m in HARD_FLOOR_MARKERS {
+        assert_eq!(
+            hard_floor_hit(m),
+            Some(*m),
+            "bare marker `{m}` must hit its own floor"
+        );
+        let snake = format!("do_{m}_now");
+        assert!(
+            hard_floor_hit(&snake).is_some(),
+            "`{m}` must be found as a segment of `{snake}`"
+        );
+        let camel = {
+            let mut c = m.chars();
+            let head = c
+                .next()
+                .map(|f| f.to_uppercase().collect::<String>())
+                .unwrap_or_default();
+            format!("do{head}{}Now", c.as_str())
+        };
+        assert!(
+            hard_floor_hit(&camel).is_some(),
+            "`{m}` must be found as a camelCase hump of `{camel}`"
+        );
+    }
+}

@@ -295,27 +295,3 @@ fn fnv8(s: &str) -> String {
     }
     format!("{h:08x}")
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn directive_path_is_a_state_dir_sibling_of_brief() {
-        let p = ProjectPaths::for_session("/tmp/proj", "sess-1");
-        assert_eq!(p.directive(), p.state_dir().join("directive.md"));
-        assert_eq!(p.directive().parent(), p.brief().parent());
-    }
-
-    #[test]
-    fn advice_last_message_is_a_per_seq_sibling_of_the_advice_log() {
-        let p = ProjectPaths::new(std::path::PathBuf::from("/tmp/proj"));
-        assert_eq!(
-            p.advice_last_message(7),
-            p.steps_dir().join("advice-7.last")
-        );
-        // Distinct from the log and the done-signal so a codex verdict file cannot collide with them.
-        assert_ne!(p.advice_last_message(7), p.advice_log(7));
-        assert_ne!(p.advice_last_message(7), p.advice_done_signal(7));
-    }
-}

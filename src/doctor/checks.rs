@@ -1000,19 +1000,41 @@ pub(super) fn tmux(
     });
 }
 
+/// Can a desktop escalation actually reach the human?
+///
+/// TWO FACTS, NOT ONE. The program being installed was reported as a PASS on its own, which is wrong in
+/// the case that matters: over SSH or in a container `notify-send` exists and every delivery fails with
+/// the D-Bus `ServiceUnknown` error. `escalation::transport` already knows that failure — it warns once
+/// and latches the transport off after three — so the doctor was the only part of the tool claiming
+/// escalations were fine while they silently went nowhere. And escalation is HOW a human learns a
+/// session is waiting for them, so a false pass there costs more than most.
 pub(super) fn notifications(probe: &dyn RuntimeProbe, checks: &mut Vec<Check>) {
-    checks.push(if probe.binary_on_path("notify-send") {
-        Check::pass(
+    if !probe.binary_on_path("notify-send") {
+        checks.push(
+            Check::warn(
+                "notification.notify-send",
+                "notify-send is not on PATH; ledger escalations still work",
+            )
+            .with_remediation(
+                "install notify-send only if desktop escalation notifications are desired",
+            ),
+        );
+        return;
+    }
+    checks.push(match probe.desktop_session() {
+        Some(named) => Check::pass(
             "notification.notify-send",
-            "notify-send is available (no notification was sent)",
-        )
-    } else {
-        Check::warn(
+            format!("notify-send is available and {named} names a session to deliver to (no notification was sent)"),
+        ),
+        None => Check::warn(
             "notification.notify-send",
-            "notify-send is not on PATH; ledger escalations still work",
+            "notify-send is installed but no desktop session is reachable \
+             (DBUS_SESSION_BUS_ADDRESS, WAYLAND_DISPLAY and DISPLAY are all unset), so every \
+             notification will fail; ledger escalations still work",
         )
         .with_remediation(
-            "install notify-send only if desktop escalation notifications are desired",
-        )
+            "read escalations in pmtui or the session ledger over SSH; desktop toasts need a \
+             logged-in desktop session",
+        ),
     });
 }

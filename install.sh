@@ -189,6 +189,11 @@ latest_tag_api() {
 # live path, and the shell executing this file keeps its own inode. FAIL-OPEN throughout — a failed
 # refresh must leave a working installer in place, because the alternative is a machine with no way
 # to install anything.
+#
+# CALL IT WITH A TAG. `main` is only the fallback for a caller that could not resolve one (and the
+# right ref for a source install, which tracks a branch): defaulting to it meant every ordinary
+# update stored UNRELEASED installer code, so anything merged to the branch reached users before a
+# release said it was ready. `do_update` resolves the tag first and passes it.
 refresh_self() { # refresh_self [tag]
   local ref="${1:-main}" staged="$STATE_DIR/install.sh.new.$$"
   mkdir -p "$STATE_DIR" 2>/dev/null || return 0
@@ -645,11 +650,31 @@ do_update() {
   local cur=""
   [ -f "$STATE_DIR/version" ] && cur="$(cat "$STATE_DIR/version" 2>/dev/null || echo "")"
 
+  # WHICH REF TO TAKE OUR OWN NEXT COPY FROM, resolved before anything else because the refresh has
+  # to happen before the `--if-newer` arms below RETURN. A RELEASE, not `main`: refreshing from the
+  # branch put unreleased installer code on every machine that ran an update, so a mistake merged to
+  # `main` shipped to users before any release said it was ready — and this script is the authority
+  # on versions. Resolved ONCE and reused by the `--if-newer` comparison, so the common path makes
+  # no extra request. An unreachable or empty answer leaves it blank and `refresh_self` falls back
+  # to `main`, which is still better than not refreshing at all. A SOURCE install deliberately skips
+  # the lookup: it tracks a branch, so the branch is the right ref for it too.
+  local remote=""
+  case "$cur" in
+    source@*) : ;;
+    *)
+      if [ -n "$REQ_VERSION" ]; then
+        remote="$REQ_VERSION"
+      # `if` rather than a bare assignment, as in `do_check`: a non-zero `latest_tag` under `set -e`
+      # would abort the update instead of falling back.
+      elif remote="$(latest_tag)"; then :; else remote=""; fi
+      ;;
+  esac
+
   # FIRST, and unconditionally: the `--if-newer` arms below RETURN, so anything after them is never
   # reached on the common path — which is exactly where a machine with current binaries and a stale
   # script would be stuck forever, told "Already up to date" by a script too old to be asked
   # anything.
-  refresh_self
+  refresh_self ${remote:+"$remote"}
 
   if [ "$IF_NEWER" -eq 1 ]; then
     case "$cur" in
@@ -666,8 +691,6 @@ do_update() {
         FROM_SOURCE=1
         ;;
       *)
-        local remote=""
-        remote="$(latest_tag)"
         [ -n "$remote" ] && [ "$remote" = "$cur" ] && { info "Already up to date ($cur)."; return 0; }
         ;;
     esac

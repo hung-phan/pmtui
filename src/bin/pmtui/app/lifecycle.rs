@@ -428,9 +428,9 @@ impl App {
             return;
         };
         self.status = format!(
-            "apply {} from {} onto this checkout?",
+            "apply {} (up to {}) onto this checkout?",
+            branch.unwrap_or_default(),
             &commit[..commit.len().min(8)],
-            branch.unwrap_or_default()
         );
         self.mode = UiMode::Confirming {
             id,
@@ -439,7 +439,7 @@ impl App {
         };
     }
 
-    /// Cherry-pick one job's commit onto its project's own checkout.
+    /// Cherry-pick one job's whole branch onto its project's own checkout.
     ///
     /// The row is KEPT either way. A successful apply still leaves a job for a human to look at and clear
     /// with `d`, because they may want the log, and a conflict leaves the checkout exactly as it was with
@@ -452,19 +452,23 @@ impl App {
             self.refresh();
             return;
         };
-        let Some(work) = job_worktree(row).map(|wt| agent_manager::worktree::collect(&wt)) else {
+        // The worktree is kept, not just its `JobWork`: `base` is the other end of the range
+        // `integrate` applies, and picking only the tip left earlier commits behind while the
+        // message below named the whole branch's file count.
+        let Some(worktree) = job_worktree(row) else {
             self.status = format!("{id} has no worktree of its own, so there is nothing to apply");
             return;
         };
+        let work = agent_manager::worktree::collect(&worktree);
         let Some(commit) = work.commit.as_deref() else {
             self.status = format!("{id} committed nothing on {}", work.branch);
             return;
         };
         let short = &commit[..commit.len().min(8)];
-        self.status = match agent_manager::worktree::integrate(&row.root, commit) {
+        self.status = match agent_manager::worktree::integrate(&row.root, &worktree.base, commit) {
             agent_manager::worktree::Integration::Applied(head) => {
                 format!(
-                    "applied {short} from {} \u{2014} this checkout is now {} ({} files)",
+                    "applied {} \u{2014} this checkout is now {} ({} files)",
                     work.branch,
                     &head[..head.len().min(8)],
                     work.touched.len()

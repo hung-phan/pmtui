@@ -128,6 +128,7 @@ mod events;
 mod forking;
 mod goal;
 mod help;
+mod input;
 mod keybar;
 mod keys;
 mod launch_env;

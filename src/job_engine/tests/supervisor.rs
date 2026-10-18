@@ -1756,20 +1756,20 @@ fn the_path_probe_recognises_an_executable_and_fails_safe() {
     let bin = dir.path().join("pm-probe-bin");
     std::fs::write(&bin, "#!/bin/sh\n").unwrap();
     assert!(
-        !is_executable_file(&bin),
+        !crate::which::is_executable(&bin),
         "a data file on PATH is not an executable"
     );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(is_executable_file(&bin));
+        assert!(crate::which::is_executable(&bin));
     }
     assert!(
-        !is_executable_file(dir.path()),
+        !crate::which::is_executable(dir.path()),
         "a directory is not a binary"
     );
-    assert!(!is_executable_file(&dir.path().join("nope")));
+    assert!(!crate::which::is_executable(&dir.path().join("nope")));
     // A path WITH a separator is probed as-is rather than searched for.
     assert!(!binary_on_path(
         &dir.path().join("nope").display().to_string()
