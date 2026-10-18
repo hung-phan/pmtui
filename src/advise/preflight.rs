@@ -102,8 +102,7 @@ const HARD_FLOOR_MARKERS: &[&str] = &[
     "clobber",
     "clobbering",
     "clobbered",
-    // Schema / data migrations — irreversible; also named by `verify::is_risky_surface`,
-    // so the decider floor and the code-risk surface stay aligned.
+    // Schema / data migrations — irreversible.
     "migrate",
     "migrating",
     "migrated",
@@ -117,14 +116,46 @@ const HARD_FLOOR_MARKERS: &[&str] = &[
 /// The first [`HARD_FLOOR_MARKERS`] entry present as an identifier *segment* of
 /// `text`, or `None`.
 ///
-/// Segment matching, not substring matching — the technique is
-/// [`crate::verify::is_risky_surface`]'s, reusing the same splitter
-/// ([`crate::verify::segments`]) so the two floors cannot drift: text is split on
-/// non-alphanumerics AND camelCase humps, and a segment must EQUAL a marker
-/// (case-insensitively). That is what keeps `author` from matching `auth`,
-/// `product` from matching `prod`, and `dropdown` from matching `drop`.
+/// Split text into identifier segments: break on any non-alphanumeric character
+/// and on camelCase humps (a lowercase/digit followed by an uppercase letter),
+/// so `refresh_auth_token`, `refreshAuthToken`, and `AUTH-token` all yield an
+/// `auth`/`token` segment, while `author`/`tokenizer` stay whole.
+///
+/// Lives beside its one caller, [`hard_floor_hit`]. It used to sit in a `verify` module built for
+/// the retired per-wake job model, which was deleted once nothing else in the tree referenced any of
+/// it — this splitter was the single live function in the file. Keep it the ONLY one: two segment
+/// splitters that drift apart would mean two different answers to "does `author` contain `auth`".
+fn segments(text: &str) -> impl Iterator<Item = String> + '_ {
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut prev: Option<char> = None;
+    for c in text.chars() {
+        if c.is_alphanumeric() {
+            // camelCase / ACRONYMWord boundary: lower|digit -> Upper starts a segment.
+            if c.is_ascii_uppercase()
+                && matches!(prev, Some(p) if p.is_ascii_lowercase() || p.is_ascii_digit())
+                && !cur.is_empty()
+            {
+                out.push(std::mem::take(&mut cur));
+            }
+            cur.push(c);
+        } else if !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
+        }
+        prev = Some(c);
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out.into_iter()
+}
+
+/// Segment matching, not substring matching: text is split on non-alphanumerics AND
+/// camelCase humps, and a segment must EQUAL a marker (case-insensitively). That is
+/// what keeps `author` from matching `auth`, `product` from matching `prod`, and
+/// `dropdown` from matching `drop`.
 pub fn hard_floor_hit(text: &str) -> Option<&'static str> {
-    let segments: Vec<String> = crate::verify::segments(text)
+    let segments: Vec<String> = segments(text)
         .map(|segment| segment.to_ascii_lowercase())
         .collect();
     if segments

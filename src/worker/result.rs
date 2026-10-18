@@ -1,7 +1,6 @@
 //! The stop/completion proposals a worker hands back. Every field is a PROPOSAL — the
 //! harness validates and commits — so the schema is strict (`deny_unknown_fields`).
-//! [`StopDraft`] is the shape an agent marker carries into the ledger; [`CompletionDigest`]
-//! is the evidence `verify` accepts a code phase from.
+//! [`StopDraft`] is the shape an agent marker carries into the ledger.
 
 use serde::{Deserialize, Serialize};
 
@@ -159,18 +158,4 @@ pub struct StopDraft {
     #[serde(default)]
     pub context_ref: Option<String>,
     pub risk_class: RiskClass,
-}
-
-/// Evidence of completed work, used by `verify` to accept a code phase.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CompletionDigest {
-    #[serde(default)]
-    pub task_ids: Vec<String>,
-    #[serde(default)]
-    pub commit_ref: Option<String>,
-    #[serde(default)]
-    pub tests: Option<String>,
-    #[serde(default)]
-    pub files: Vec<String>,
 }

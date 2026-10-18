@@ -991,45 +991,11 @@ pub fn project_situation(next: &AgentLoopState) -> String {
 /// Whether `name` resolves to an executable file on `PATH` — the supervisor's cheap
 /// pre-flight (see [`JobScheduler::supervisor_binary_present`]).
 ///
-/// Hand-rolled rather than shelling out to `which`/`command -v`: this runs inside the
-/// daemon's 500ms sweep thread, and spawning a subprocess to ask whether we can spawn a
-/// subprocess is the wrong trade. An absolute/relative `name` is probed as-is (mirroring
-/// how a shell resolves anything containing a separator).
-///
-/// Returns TRUE when `PATH` itself is unavailable: "I could not tell" must behave exactly
-/// as before this probe existed, never as "switch the feature off".
+/// FAIL-OPEN, and now says so: `or_unknown` reads an unreadable `PATH` as "present", so the
+/// behaviour is exactly what it was before this probe existed (spawn, and let the exit code
+/// speak) rather than switching a working supervisor off. The search itself lives in
+/// [`crate::which`], because the tmux driver asked the same question and answered this case
+/// the other way — one process, two answers.
 pub(super) fn binary_on_path(name: &str) -> bool {
-    if name.contains(std::path::MAIN_SEPARATOR) {
-        return is_executable_file(Path::new(name));
-    }
-    let Some(path) = std::env::var_os("PATH") else {
-        return true;
-    };
-    std::env::split_paths(&path).any(|dir| is_executable_file(&dir.join(name)))
-}
-
-/// Whether `p` is a file the current process could execute. The executable BIT is checked
-/// on unix, because a same-named directory or a non-executable data file on `PATH` would
-/// otherwise read as "the supervisor is installed".
-pub(super) fn is_executable_file(p: &Path) -> bool {
-    let Ok(md) = std::fs::metadata(p) else {
-        return false;
-    };
-    if !md.is_file() {
-        return false;
-    }
-    executable_bit(&md)
-}
-
-/// The execute-permission half of [`is_executable_file`], split out so the `cfg` covers one
-/// expression instead of a function body with two tails.
-#[cfg(unix)]
-fn executable_bit(md: &std::fs::Metadata) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    md.permissions().mode() & 0o111 != 0
-}
-
-#[cfg(not(unix))]
-fn executable_bit(_md: &std::fs::Metadata) -> bool {
-    true
+    crate::which::on_env_path(name).or_unknown()
 }

@@ -19,6 +19,10 @@ struct FakeProbe {
     tmux_sessions: Result<Vec<String>, String>,
     dead_sessions: BTreeSet<String>,
     pane_error: Option<String>,
+    /// Which variable says a desktop session is reachable, as `NativeProbe` captures it. Stated here
+    /// rather than read from the environment so "there is no desktop" is a test input — edition 2024
+    /// forbids `set_var`, and a test that mutated the environment would steer its neighbours anyway.
+    desktop: Option<&'static str>,
 }
 
 impl FakeProbe {
@@ -32,6 +36,7 @@ impl FakeProbe {
             tmux_sessions: Ok(sessions),
             dead_sessions: BTreeSet::new(),
             pane_error: None,
+            desktop: Some("DBUS_SESSION_BUS_ADDRESS"),
         }
     }
 }
@@ -39,6 +44,10 @@ impl FakeProbe {
 impl RuntimeProbe for FakeProbe {
     fn binary_on_path(&self, binary: &str) -> bool {
         self.binaries.contains(binary)
+    }
+
+    fn desktop_session(&self) -> Option<&'static str> {
+        self.desktop
     }
 
     fn tmux_version(&self) -> Result<String, String> {
@@ -245,6 +254,7 @@ fn disabled_projects_do_not_require_worker_or_decider_executables() {
         tmux_sessions: Ok(Vec::new()),
         dead_sessions: BTreeSet::new(),
         pane_error: None,
+        desktop: Some("DBUS_SESSION_BUS_ADDRESS"),
     };
 
     let report = inspect_with(&options(&dir), &probe);
@@ -420,6 +430,7 @@ fn missing_worker_fails_but_optional_capabilities_warn() {
         tmux_sessions: Err("must not be called".into()),
         dead_sessions: BTreeSet::new(),
         pane_error: None,
+        desktop: Some("DBUS_SESSION_BUS_ADDRESS"),
     };
 
     let report = inspect_with(&options(&dir), &probe);
@@ -968,6 +979,54 @@ fn oversized_runtime_json_and_missing_decider_terminal_are_recovery_warnings() {
     );
 }
 
+/// AN INSTALLED NOTIFIER WITH NOWHERE TO SEND IS NOT A PASS.
+///
+/// This is the case the check used to get wrong, and the one that matters: over SSH, in a container, or
+/// from a cron job, `notify-send` is on PATH and every delivery fails with the D-Bus `ServiceUnknown`
+/// error. `escalation::transport` already warns and latches the transport off when that happens, so the
+/// doctor was the only part of the tool telling a human their escalations were fine. Escalation is how
+/// they learn a session is waiting for them, so this check has to be able to say no.
+#[test]
+fn notify_send_without_a_desktop_session_warns_instead_of_passing() {
+    let dir = TempDir::new().unwrap();
+    let with_desktop = FakeProbe::healthy(Vec::new());
+    let headless = FakeProbe {
+        desktop: None,
+        ..FakeProbe::healthy(Vec::new())
+    };
+
+    let on_a_desktop = inspect_with(&options(&dir), &with_desktop);
+    let over_ssh = inspect_with(&options(&dir), &headless);
+
+    let desktop_check = check(&on_a_desktop.checks, "notification.notify-send");
+    assert_eq!(desktop_check.status, CheckStatus::Pass);
+    assert!(
+        desktop_check.summary.contains("DBUS_SESSION_BUS_ADDRESS"),
+        "a pass names the fact it stands on: {}",
+        desktop_check.summary
+    );
+
+    let ssh_check = check(&over_ssh.checks, "notification.notify-send");
+    assert_eq!(
+        ssh_check.status,
+        CheckStatus::Warn,
+        "installed but undeliverable is not a pass: {}",
+        ssh_check.summary
+    );
+    assert!(
+        ssh_check
+            .summary
+            .contains("no desktop session is reachable"),
+        "and it says why rather than just being yellow: {}",
+        ssh_check.summary
+    );
+    assert!(
+        ssh_check.summary.contains("ledger escalations still work"),
+        "while making clear the escalation itself is not lost: {}",
+        ssh_check.summary
+    );
+}
+
 #[test]
 fn tmux_list_failure_is_a_failure_without_session_guesses() {
     let dir = TempDir::new().unwrap();
@@ -977,6 +1036,7 @@ fn tmux_list_failure_is_a_failure_without_session_guesses() {
         tmux_sessions: Err("permission denied".into()),
         dead_sessions: BTreeSet::new(),
         pane_error: None,
+        desktop: Some("DBUS_SESSION_BUS_ADDRESS"),
     };
 
     let report = inspect_with(&options(&dir), &probe);
@@ -1002,6 +1062,7 @@ fn empty_tmux_socket_fails_without_running_tmux() {
         tmux_sessions: Err("must not be called".into()),
         dead_sessions: BTreeSet::new(),
         pane_error: None,
+        desktop: Some("DBUS_SESSION_BUS_ADDRESS"),
     };
     let mut doctor_options = options(&dir);
     doctor_options.socket.clear();

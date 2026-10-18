@@ -40,12 +40,14 @@ fn a_worktree_job_is_told_to_commit_on_its_own_branch() {
         "the branch is named: {prompt}"
     );
     assert!(prompt.contains("Commit your work"), "{prompt}");
-    // ONE commit, because one is what `a` applies: the receipt names the branch's HEAD while the file list
-    // is the whole branch's, so a child that made three commits had two left behind under a status line
-    // reporting the full count as applied.
+    // HOW MANY commits is the child's business, and this asserts the prompt does NOT claim otherwise.
+    // It used to demand exactly one, because `a` applied only the branch's tip while the receipt listed
+    // the whole branch's files — a child that made three commits had two left behind under a status line
+    // reporting the full count as applied. The fix is `integrate`'s `base..HEAD` range
+    // (`every_commit_on_a_childs_branch_applies_not_only_the_tip`), not a sentence asking a model nicely.
     assert!(
-        prompt.contains("as ONE commit"),
-        "the number of commits is not left to the child: {prompt}"
+        !prompt.contains("ONE commit"),
+        "correctness must not rest on the child obeying a commit count: {prompt}"
     );
     assert!(
         prompt.contains("work you do not commit is lost"),

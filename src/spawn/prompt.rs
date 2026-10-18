@@ -25,14 +25,15 @@ You are a job worker in a managed session. Do the task below, then stop.
 /// this branch is the only thing that outlives it — so this is a step, not advice. It is also why the
 /// child is told not to merge or push: integrating is a human's decision, made from the dashboard.
 ///
-/// ONE commit, because one is what integration applies. The receipt names the branch's HEAD and `a`
-/// cherry-picks exactly that, while the file list is the whole branch's — so a child that made three
-/// commits had two left behind while the dashboard reported the full count as applied. Asking for one
-/// commit makes what is reported and what lands the same thing.
+/// HOW MANY commits is the child's business. It used to be asked for exactly one, because
+/// [`integrate`](crate::worktree::integrate) picked only the branch's tip while the receipt listed the
+/// whole branch's files — so a child that made three commits had two left behind and the dashboard
+/// called the full count applied. That is fixed where it was broken: `a` now applies `base..HEAD`. A
+/// prompt sentence is not a mechanism, and this one was load-bearing for correctness.
 const WORKTREE: &str = "\
-5. You are on branch %BRANCH% in a git worktree of your own. Commit your work on it as ONE commit
-   before you report; work you do not commit is lost when this directory is cleaned up. Do not merge,
-   rebase onto another branch, or push: a person integrates it.
+5. You are on branch %BRANCH% in a git worktree of your own. Commit your work on it before you
+   report; work you do not commit is lost when this directory is cleaned up. Do not merge, rebase
+   onto another branch, or push: a person integrates it.
 ";
 
 /// The full prompt for a job carrying `message`, and `branch` when it runs in its own worktree.

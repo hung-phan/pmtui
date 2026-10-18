@@ -4,7 +4,6 @@ mod render;
 use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsStr;
 use std::fmt;
-use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
@@ -202,12 +201,44 @@ pub(crate) trait RuntimeProbe {
     fn tmux_version(&self) -> Result<String, String>;
     fn tmux_sessions(&self, socket: &str) -> Result<Vec<String>, String>;
     fn tmux_pane_dead(&self, socket: &str, session: &str) -> Result<bool, String>;
+    /// The environment variable that proves there is a desktop session to deliver a notification to,
+    /// or `None` when nothing does. Named rather than a bare `bool` so the report can say which fact
+    /// it is standing on — and so "no desktop here" is a sentence rather than a shrug.
+    fn desktop_session(&self) -> Option<&'static str>;
+}
+
+/// Which variable, if any, says a desktop session is reachable from this process.
+///
+/// VERIFY, DO NOT PREDICT — but this is as close as a read-only check can get: actually sending a
+/// notification would pop a toast at a human who only asked for a diagnosis. So it asks whether there
+/// is anywhere to send one. All three are accepted because `notify-send` reaches a notification daemon
+/// over D-Bus, and D-Bus will autolaunch from an X11 or Wayland session even when the bus address is
+/// not exported; with NONE of them set — a plain SSH login, a cron job, a container — delivery cannot
+/// work, whatever is installed.
+///
+/// Pure, and taking its three readings as arguments, so both answers are testable without mutating
+/// the process environment (edition 2024 forbids `set_var` in tests).
+fn desktop_session_from(
+    dbus: Option<&std::ffi::OsStr>,
+    wayland: Option<&std::ffi::OsStr>,
+    display: Option<&std::ffi::OsStr>,
+) -> Option<&'static str> {
+    let named = |value: Option<&std::ffi::OsStr>| value.is_some_and(|value| !value.is_empty());
+    match (named(dbus), named(wayland), named(display)) {
+        (true, _, _) => Some("DBUS_SESSION_BUS_ADDRESS"),
+        (_, true, _) => Some("WAYLAND_DISPLAY"),
+        (_, _, true) => Some("DISPLAY"),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct NativeProbe {
     tmux: PathBuf,
     path: Option<std::ffi::OsString>,
+    /// Captured at construction, like `path`: the check reads it through the probe seam rather than
+    /// the environment, which is what lets a test state "there is no desktop here".
+    desktop: Option<&'static str>,
 }
 
 impl Default for NativeProbe {
@@ -215,6 +246,11 @@ impl Default for NativeProbe {
         Self {
             tmux: PathBuf::from("tmux"),
             path: std::env::var_os("PATH"),
+            desktop: desktop_session_from(
+                std::env::var_os("DBUS_SESSION_BUS_ADDRESS").as_deref(),
+                std::env::var_os("WAYLAND_DISPLAY").as_deref(),
+                std::env::var_os("DISPLAY").as_deref(),
+            ),
         }
     }
 }
@@ -224,7 +260,7 @@ impl NativeProbe {
     pub(crate) fn with_tmux(tmux: PathBuf) -> Self {
         Self {
             tmux,
-            path: std::env::var_os("PATH"),
+            ..Self::default()
         }
     }
 }
@@ -232,6 +268,10 @@ impl NativeProbe {
 impl RuntimeProbe for NativeProbe {
     fn binary_on_path(&self, binary: &str) -> bool {
         binary_in_path(binary, self.path.as_deref())
+    }
+
+    fn desktop_session(&self) -> Option<&'static str> {
+        self.desktop
     }
 
     fn tmux_version(&self) -> Result<String, String> {
@@ -302,24 +342,15 @@ fn command_error(command: &str, output: &std::process::Output) -> String {
     }
 }
 
+/// Whether `binary` is on the `PATH` the probe captured.
+///
+/// The one caller that reads an unreadable `PATH` as NOT FOUND, and the only one that should: this is
+/// a report to a human, so it must not claim a program is installed on evidence it does not have. The
+/// runtime probes in `job_engine` and `tmux` make the opposite choice for the opposite reason — they
+/// would otherwise disable themselves — and [`crate::which::Found`] is what keeps that difference a
+/// stated one instead of three functions quietly disagreeing.
 pub(crate) fn binary_in_path(binary: &str, path: Option<&OsStr>) -> bool {
-    let Some(path) = path else {
-        return false;
-    };
-    std::env::split_paths(path).any(|dir| executable_file(&dir.join(binary)))
-}
-
-#[cfg(unix)]
-fn executable_file(path: &std::path::Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-
-    fs::metadata(path)
-        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn executable_file(path: &std::path::Path) -> bool {
-    path.is_file()
+    crate::which::on_path(binary, path).is_yes()
 }
 
 pub(crate) fn inspect_with(options: &DoctorOptions, probe: &dyn RuntimeProbe) -> DoctorReport {

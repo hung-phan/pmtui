@@ -230,6 +230,87 @@ test_the_self_refresh_runs_before_the_up_to_date_shortcut() (
   esac
 )
 
+# THE STORED INSTALLER COMES FROM A RELEASE, NOT FROM `main`.
+#
+# `refresh_self` defaulted to the branch, so every ordinary update wrote UNRELEASED installer code
+# onto the machine and then installed the released binaries with it — anything merged to `main`
+# reached users before a release said it was ready, and this script is the authority on versions.
+# The tag must also be resolved ONCE: asking twice is a second answer to "what is newest?" that can
+# disagree with the one that installs, and an extra request on the path the dashboard runs.
+test_an_update_refreshes_itself_from_the_resolved_release() (
+  local dir
+  dir="$(mktemp -d)"
+  trap 'rm -rf "$dir"' EXIT
+  STATE_DIR="$dir/state"
+  mkdir -p "$STATE_DIR"
+  printf 'v1.0.0\n' >"$STATE_DIR/version"
+  IF_NEWER=1
+  QUIET=1
+  REQ_VERSION=""
+  detect_platform() { :; }
+  do_install() { printf 'installed\n'; }
+  asked=""
+  local probe="$dir/lookups"
+  : >"$probe"
+  refresh_self() { asked="${1-<none>}"; }
+  # `latest_tag` runs inside a command substitution, which is a SUBSHELL — a counter variable
+  # bumped in there never comes back, so the tally is kept in a file.
+  latest_tag() { printf 'x\n' >>"$probe"; printf 'v2.0.0\n'; }
+
+  do_update >/dev/null
+
+  [ "$asked" = "v2.0.0" ] || {
+    printf 'FAIL: refreshed from %s, not the resolved release\n' "$asked" >&2
+    return 1
+  }
+  [ "$(wc -l <"$probe")" -eq 1 ] || {
+    printf 'FAIL: resolved the latest tag %s times, not once\n' "$(wc -l <"$probe")" >&2
+    return 1
+  }
+
+  # AN EXPLICIT --version IS THE REF. No lookup at all, and the stored script comes from the tag
+  # being installed rather than from whatever is newest.
+  REQ_VERSION="v0.9.0"
+  asked=""
+  : >"$probe"
+  do_update >/dev/null
+  [ "$asked" = "v0.9.0" ] || {
+    printf 'FAIL: --version refreshed from %s\n' "$asked" >&2
+    return 1
+  }
+  [ ! -s "$probe" ] || {
+    printf 'FAIL: --version still asked GitHub what is newest\n' >&2
+    return 1
+  }
+
+  # AN UNREACHABLE GITHUB STILL REFRESHES. Falling back to the branch is worse than a release and
+  # better than being stuck with a script too old to answer `--check` — which is the bug the
+  # unconditional refresh exists for. `<none>` is this stub's word for "called with no argument".
+  REQ_VERSION=""
+  asked=""
+  latest_tag() { return 1; }
+  do_update >/dev/null
+  [ "$asked" = "<none>" ] || {
+    printf 'FAIL: an unreachable lookup passed %s instead of falling back\n' "$asked" >&2
+    return 1
+  }
+
+  # A SOURCE INSTALL TRACKS A BRANCH, so it skips the release lookup entirely and `main` is right.
+  printf 'source@abc123\n' >"$STATE_DIR/version"
+  asked=""
+  : >"$probe"
+  latest_tag() { printf 'x\n' >>"$probe"; printf 'v2.0.0\n'; }
+  do_update >/dev/null
+  [ ! -s "$probe" ] || {
+    printf 'FAIL: a source install asked for a release tag\n' >&2
+    return 1
+  }
+  [ "$asked" = "<none>" ] || {
+    printf 'FAIL: a source install refreshed from %s\n' "$asked" >&2
+    return 1
+  }
+)
+
 test_wrappers_are_valid_and_leave_no_staging_file() (
   local dir
   dir="$(mktemp -d)"
@@ -357,6 +438,7 @@ test_latest_tag_separates_absent_from_unreachable
 test_the_release_lookup_cannot_wait_forever
 test_an_update_refreshes_the_stored_copy_of_the_installer
 test_the_self_refresh_runs_before_the_up_to_date_shortcut
+test_an_update_refreshes_itself_from_the_resolved_release
 test_wrappers_are_valid_and_leave_no_staging_file
 test_wrapper_reclaims_a_dead_update_lock
 test_local_checkout_refuses_an_unmatched_version

@@ -169,6 +169,34 @@ pub(crate) fn lock_outcome(result: rustix::io::Result<()>) -> io::Result<bool> {
     }
 }
 
+/// [`try_acquire`], retried a few times before concluding somebody else owns the lock.
+///
+/// This exists because **a contended attempt is not proof of a live owner.** `flock` has
+/// no peek, so every liveness probe in this codebase tests the lock by TAKING it and
+/// releasing it microseconds later — [`is_held`] (which pmtui's status bar now runs every
+/// few seconds for as long as the dashboard is open) and `pmtui::ensure_daemon` (acquire,
+/// drop, spawn). A single-shot `try_acquire` landing inside one of those windows makes a
+/// perfectly healthy `pmd` exit as "already running", leaving the human in front of a
+/// session that nothing drives — the exact symptom this whole change set is about.
+///
+/// A retry cannot weaken the singleton: a REAL owner holds the lock for its entire life,
+/// so it wins every attempt and this still returns `Ok(None)`. Only a transient µs-scale
+/// probe is filtered out, which is precisely the false positive.
+pub fn acquire_with_retry(
+    lock_path: &Path,
+    tries: u32,
+    delay: std::time::Duration,
+) -> io::Result<Option<ProjectLease>> {
+    for attempt in 1..=tries.max(1) {
+        match try_acquire(lock_path)? {
+            Some(l) => return Ok(Some(l)),
+            None if attempt < tries => std::thread::sleep(delay),
+            None => {}
+        }
+    }
+    Ok(None)
+}
+
 /// Is somebody holding the lock at `path` RIGHT NOW? A read-only liveness probe:
 /// - `Ok(None)` — the file does not exist, so nobody has ever taken this lock here
 ///   (for the daemon singleton: no `pmd` has run for this `(registry, socket)`).
@@ -199,34 +227,6 @@ pub(crate) fn lock_outcome(result: rustix::io::Result<()>) -> io::Result<bool> {
 /// namespace: on Linux `flock(2)` and `fcntl(2)` record locks are independent, so
 /// `F_GETLK` cannot see this lock at all. Using it would mean migrating the whole lease
 /// protocol across both binaries — rejected as far more risk than the race it removes.)
-/// [`try_acquire`], retried a few times before concluding somebody else owns the lock.
-///
-/// This exists because **a contended attempt is not proof of a live owner.** `flock` has
-/// no peek, so every liveness probe in this codebase tests the lock by TAKING it and
-/// releasing it microseconds later — [`is_held`] (which pmtui's status bar now runs every
-/// few seconds for as long as the dashboard is open) and `pmtui::ensure_daemon` (acquire,
-/// drop, spawn). A single-shot `try_acquire` landing inside one of those windows makes a
-/// perfectly healthy `pmd` exit as "already running", leaving the human in front of a
-/// session that nothing drives — the exact symptom this whole change set is about.
-///
-/// A retry cannot weaken the singleton: a REAL owner holds the lock for its entire life,
-/// so it wins every attempt and this still returns `Ok(None)`. Only a transient µs-scale
-/// probe is filtered out, which is precisely the false positive.
-pub fn acquire_with_retry(
-    lock_path: &Path,
-    tries: u32,
-    delay: std::time::Duration,
-) -> io::Result<Option<ProjectLease>> {
-    for attempt in 1..=tries.max(1) {
-        match try_acquire(lock_path)? {
-            Some(l) => return Ok(Some(l)),
-            None if attempt < tries => std::thread::sleep(delay),
-            None => {}
-        }
-    }
-    Ok(None)
-}
-
 pub fn is_held(path: &Path) -> io::Result<Option<bool>> {
     // Read-only, `create(false)` by omission: an absent lock file stays absent.
     let file = match OpenOptions::new().read(true).open(path) {

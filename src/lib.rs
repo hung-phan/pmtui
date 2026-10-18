@@ -30,7 +30,7 @@ pub mod state;
 pub mod stream_json;
 pub mod theme;
 pub mod tmux;
-pub mod verify;
 pub mod view;
+pub mod which;
 pub mod worker;
 pub mod worktree;

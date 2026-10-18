@@ -8,9 +8,9 @@
 //!
 //! ISOLATION IS NOT INTEGRATION. Nothing here merges a child's work on its own. A finished job reports
 //! `{branch, commit, touched}` and a HUMAN decides, because this tool's rule is that no machine declares
-//! a project done and the human's checkout is theirs. [`integrate`] is what that keystroke runs, one
-//! commit at a time, and it refuses a dirty checkout rather than mixing a child's work into uncommitted
-//! changes.
+//! a project done and the human's checkout is theirs. [`integrate`] is what that keystroke runs — one
+//! branch at a time, every commit on it — and it refuses a dirty checkout rather than mixing a child's
+//! work into uncommitted changes.
 //!
 //! What this module will NOT do: delete uncommitted work. [`prune`] removes a worktree only when the
 //! child left nothing behind that is not already a commit. A dirty worktree outlives its row on purpose.
@@ -35,9 +35,11 @@ pub struct JobWorktree {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct JobWork {
     pub branch: String,
-    /// The commit the child produced, when it committed anything at all.
+    /// The branch's TIP, when the child committed anything at all. Its history back to
+    /// [`JobWorktree::base`] is what [`integrate`] applies, so this names where that range ends
+    /// rather than the only commit there is.
     pub commit: Option<String>,
-    /// Files its commits changed, relative to the base.
+    /// Files its commits changed, relative to the base — the whole range, which is what lands.
     pub touched: Vec<String>,
     /// Changes it did NOT commit. A dirty worktree is never pruned.
     pub dirty: bool,
@@ -119,8 +121,31 @@ pub fn create(repo: &Path, at: &Path, branch: &str) -> Result<JobWorktree> {
     })
 }
 
+/// The branch's tip when the child has committed something, `None` when it has not.
+///
+/// THE CHEAP HALF OF [`collect`], split out because it is the only part a FRAME needs: the dashboard
+/// draws a job row twice a second and reads nothing but "is there anything to apply?". `collect` also
+/// runs `git diff` and a `git status` that walks the whole working tree, so asking it per frame cost
+/// three git processes per job row — fifteen a tick at the five children this supports, with a full
+/// `git status` among them, which in a large repository takes longer than the tick itself.
+///
+/// `rev-parse HEAD` reads one ref and nothing else. A worktree that is gone, or whose HEAD cannot be
+/// read, has committed nothing as far as this question goes.
+pub fn committed_tip(worktree: &JobWorktree) -> Option<String> {
+    if !worktree.path.is_dir() {
+        return None;
+    }
+    git(&worktree.path, &["rev-parse", "HEAD"])
+        .ok()
+        .filter(|head| !head.is_empty() && *head != worktree.base)
+}
+
 /// Read what the job did in its worktree: its commit, what that changed, and whether anything is
 /// uncommitted.
+///
+/// THE FULL READING, for the few callers that need all of it — finishing a job, and the cleanup that
+/// decides whether a directory may be deleted. A caller that only wants the commit wants
+/// [`committed_tip`].
 ///
 /// A worktree that is gone reports empty work rather than an error — the caller is finishing a job
 /// either way, and "there is nothing there" is the honest answer.
@@ -132,8 +157,7 @@ pub fn collect(worktree: &JobWorktree) -> JobWork {
     if !worktree.path.is_dir() {
         return work;
     }
-    let head = git(&worktree.path, &["rev-parse", "HEAD"]).unwrap_or_default();
-    if !head.is_empty() && head != worktree.base {
+    if let Some(head) = committed_tip(worktree) {
         work.commit = Some(head.clone());
         work.touched = git(
             &worktree.path,
@@ -192,13 +216,21 @@ pub fn drop_branch(repo: &Path, branch: &str) -> Result<()> {
     git(repo, &["branch", "-D", branch]).map(|_| ())
 }
 
-/// Apply one of a child's commits to the parent checkout, as a cherry-pick onto its current HEAD.
+/// Apply a child's WHOLE BRANCH to the parent checkout, as a cherry-pick of `base..head` onto its
+/// current HEAD.
 ///
-/// Refuses rather than guesses: no commit, not a repository, or a checkout with changes of its own. On a
-/// conflict the pick is aborted so the human's checkout is exactly as they left it — a half-applied
-/// cherry-pick in someone else's working tree is the worst outcome available here.
-pub fn integrate(repo: &Path, commit: &str) -> Integration {
-    if commit.is_empty() {
+/// THE RANGE, NOT THE TIP. A child commits as often as it likes, and [`collect`] reports the files
+/// changed across the whole branch — so picking only `head` applied part of the work while the
+/// dashboard named the full file count as applied. Two commits ("add the function", "add its test")
+/// lost the first one silently. The range makes what is reported and what lands the same thing, which
+/// is also why the job prompt no longer has to ask the model for exactly one commit.
+///
+/// Refuses rather than guesses: an empty range, not a repository, or a checkout with changes of its
+/// own. On a conflict the pick is aborted so the human's checkout is exactly as they left it — a
+/// half-applied cherry-pick in someone else's working tree is the worst outcome available here, and
+/// `--abort` undoes the WHOLE sequence, not just the commit that failed.
+pub fn integrate(repo: &Path, base: &str, head: &str) -> Integration {
+    if base.is_empty() || head.is_empty() || base == head {
         return Integration::Refused("there is no commit to integrate".into());
     }
     if !is_repo(repo) {
@@ -220,7 +252,7 @@ pub fn integrate(repo: &Path, commit: &str) -> Integration {
             "this checkout has uncommitted changes; commit or stash them first".into(),
         );
     }
-    match git(repo, &["cherry-pick", commit]) {
+    match git(repo, &["cherry-pick", &format!("{base}..{head}")]) {
         // A pick that succeeded moved HEAD, so reading it cannot meaningfully fail; an empty answer is
         // reported as-is rather than turned into a refusal of work that already landed.
         Ok(_) => Integration::Applied(git(repo, &["rev-parse", "HEAD"]).unwrap_or_default()),

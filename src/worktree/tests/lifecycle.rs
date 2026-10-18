@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::worktree::{branch_name, collect, create, drop_branch, is_repo, prune};
+use crate::worktree::{branch_name, collect, committed_tip, create, drop_branch, is_repo, prune};
 
 /// `git -C <dir> <args…>`, which must succeed.
 pub(super) fn git(dir: &Path, args: &[&str]) -> String {
@@ -129,6 +129,41 @@ fn collect_reports_the_commit_and_its_files_then_prunes_clean() {
     assert!(
         drop_branch(&root, "pm/kid").is_err(),
         "and dropping it twice is an error, not a silent success"
+    );
+}
+
+/// THE CHEAP QUESTION, ASKED WITHOUT THE EXPENSIVE ONES.
+///
+/// `committed_tip` is what the dashboard calls on every frame, so it must agree with `collect` about
+/// whether there is anything to apply while reading one ref instead of walking the working tree. Asking
+/// `collect` twice a second per job row ran a full `git status` each time, which outlasts the tick in a
+/// large repository. The gone-directory case is here too: the frame draws rows whose worktree a purge
+/// already removed.
+#[test]
+fn committed_tip_answers_the_frames_question_and_agrees_with_collect() {
+    let (_tmp, root) = repo();
+    let wt = create(&root, &root.join(".project-state/wt/kid"), "pm/kid").expect("worktree");
+    assert_eq!(committed_tip(&wt), None, "nothing committed yet");
+    assert_eq!(committed_tip(&wt), collect(&wt).commit, "and they agree");
+
+    let sha = commit(&wt.path, "did the task", &[("src/a.rs", "// a\n")]);
+    assert_eq!(committed_tip(&wt).as_deref(), Some(sha.as_str()));
+    assert_eq!(committed_tip(&wt), collect(&wt).commit, "still agreeing");
+
+    // An UNCOMMITTED edit is not a commit. `collect` would call this worktree dirty; the frame's
+    // question is only ever "is there something to apply?".
+    std::fs::write(wt.path.join("src/a.rs"), "// edited\n").expect("write");
+    assert_eq!(
+        committed_tip(&wt).as_deref(),
+        Some(sha.as_str()),
+        "an uncommitted change does not move the tip"
+    );
+
+    std::fs::remove_dir_all(&wt.path).expect("as a purge would");
+    assert_eq!(
+        committed_tip(&wt),
+        None,
+        "a worktree that is gone has nothing to apply, and is not an error"
     );
 }
 

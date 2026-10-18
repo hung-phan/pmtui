@@ -161,11 +161,19 @@ impl App {
                 v.job = p.is_job();
                 // WHAT THERE IS TO APPLY. Read from the job's own worktree, so a row that committed
                 // offers `a` and one that did not does not. A chat row never has either.
+                //
+                // `committed_tip`, NOT `collect`: this frame reads the commit and the branch and
+                // nothing else, while `collect` also runs a `git diff` and a `git status` that walks
+                // the whole working tree for a `dirty` flag thrown away two lines later. That was
+                // three git processes per job row, twice a second, for as long as the row existed —
+                // and rows that ended badly stay for a human, so it never stopped. The branch needs
+                // no git at all: it is on the registry row the worktree was built from.
                 if v.job {
-                    let work =
-                        super::job_worktree(p).map(|wt| agent_manager::worktree::collect(&wt));
-                    v.job_commit = work.as_ref().and_then(|found| found.commit.clone());
-                    v.job_branch = work.map(|found| found.branch);
+                    let worktree = super::job_worktree(p);
+                    v.job_commit = worktree
+                        .as_ref()
+                        .and_then(agent_manager::worktree::committed_tip);
+                    v.job_branch = worktree.map(|worktree| worktree.branch);
                 }
                 v.incomplete_fork =
                     !v.spawn_staged && super::forking::incomplete_fork_refusal(p).is_some();
