@@ -1599,3 +1599,91 @@ fn wakereport_fields_list_matches_the_struct() {
         "WAKEREPORT_FIELDS drifted from WakeReport's fields"
     );
 }
+
+/// THE SAME QUESTION IS NEVER ASKED TWICE BECAUSE THE ANSWER HAS NOT BEEN TYPED YET.
+///
+/// Measured on a live session: two decisions were answered at 15:51:29 and 15:51:35 while the pane
+/// was BUSY, so no nudge could be typed; the agent's next marker landed at 15:51:36 re-stating both,
+/// the dashboard escalated them again, and the human answered the same two questions a second time
+/// (`answers.json` held two generations of byte-identical answers). The first nudge went out at
+/// 15:53:01.
+///
+/// A report written before a nudge delivered the answer cannot know about it, so its decisions are
+/// not news. That report defers instead of escalating.
+#[test]
+fn a_report_written_before_an_answer_was_delivered_does_not_re_ask_the_human() {
+    // An external/irreversible effect escalates on every tier and spends no consult, which is what
+    // makes this about the re-ask and not about the decider.
+    const ASKS: &str = r#"{"seq":101,"state":"blocked","stops":[{"kind":"ambiguity","effect":{"scope":"external","reversibility":"irreversible","authority":"ordinary"},"risk_class":"low",
+            "question":"Bump ray-cuda too?","options":["yes","no"]}]}"#;
+    // REWORDED, as the real agent reworded it — which is why matching the question text cannot work.
+    const ASKS_AGAIN: &str = r#"{"seq":102,"state":"blocked","stops":[{"kind":"ambiguity","effect":{"scope":"external","reversibility":"irreversible","authority":"ordinary"},"risk_class":"low",
+            "question":"Ray v1.5.2 is a patch rebuild; bump ray-cuda too?","options":["yes","no"]}]}"#;
+
+    let (mut fx, sess) = marker_fx(Tier::Autopilot, |_| {});
+    // BUSY: that is what stops the nudge, and it is the normal state of an agent that has been
+    // working while nobody was watching.
+    fx.driver.set_tail(&sess, BUSY_PANE);
+
+    write_marker(&fx, ASKS);
+    let out = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+    assert!(matches!(out, JobTick::Escalated(_)), "got {out:?}");
+    let stop_id = ledger(&fx).open_stops[0].id.clone();
+
+    // The human answers. The pane is busy, so the answer parks and is NOT delivered.
+    let now = START + 1;
+    fx.clock.set(now);
+    push_answer(&fx, &stop_id, None, now);
+    let _ = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+    assert!(
+        fx.driver.sent_keys().is_empty(),
+        "premise: a busy pane is never typed into, so the answer is still owed"
+    );
+    let owed = ledger(&fx).pending_context.clone().unwrap_or_default();
+    assert!(owed.contains("answered"), "premise: it parked: {owed:?}");
+
+    // The agent, still mid-turn and still uninformed, re-raises the same decision in new words.
+    fx.clock.set(now + 1);
+    write_marker(&fx, ASKS_AGAIN);
+    backdate_marker(&fx, 1);
+    let out = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+
+    assert!(
+        !matches!(out, JobTick::Escalated(_)),
+        "a question whose answer is already parked must not be asked again: {out:?}"
+    );
+    assert!(
+        ledger(&fx).open_stops.is_empty(),
+        "and nothing is parked for the human to answer: {:?}",
+        ledger(&fx).open_stops
+    );
+    let still_owed = ledger(&fx).pending_context.clone().unwrap_or_default();
+    assert_eq!(still_owed, owed, "the owed answer is untouched");
+
+    // Once the pane frees and the answer is delivered, a later report escalates normally again: the
+    // deferral is about ONE uninformed report, not a permanent gag.
+    fx.driver.set_tail(&sess, IDLE_PANE);
+    let mut step = 2;
+    while step < 12 && ledger(&fx).pending_context.is_some() {
+        fx.clock.set(now + step);
+        let _ = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+        step += 1;
+    }
+    assert!(
+        !fx.driver.sent_keys().is_empty(),
+        "the nudge carrying the answer went out once the pane was idle"
+    );
+    assert!(
+        ledger(&fx).pending_context.is_none(),
+        "and the park cleared with it"
+    );
+
+    fx.clock.set(now + 60);
+    write_marker(&fx, &ASKS_AGAIN.replace("\"seq\":102", "\"seq\":103"));
+    backdate_marker(&fx, 1);
+    let out = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+    assert!(
+        matches!(out, JobTick::Escalated(_)),
+        "an informed report still reaches the human: {out:?}"
+    );
+}

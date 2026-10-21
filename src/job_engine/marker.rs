@@ -617,6 +617,55 @@ impl JobScheduler {
                         draft: draft.clone(),
                     })
                     .collect();
+                // A REPORT WRITTEN BEFORE AN ANSWER REACHED THE AGENT CANNOT KNOW ABOUT IT, so its
+                // decisions are not news — they are the same ones the human already settled.
+                //
+                // Only a NUDGE tells the agent anything, so "the newest of {answered, nudged} on the
+                // feed is an answer" is exactly "a human answer is owed and undelivered". Every
+                // marker written in that window is uninformed by construction. Escalating one asks
+                // the human a question they have already settled: measured on a live session, two
+                // decisions were answered at 15:51:29 and 15:51:35 while the pane was busy (so no
+                // nudge could be typed), the agent's next marker landed at 15:51:36 re-stating both,
+                // and the dashboard asked for both again — twice more before the first nudge went
+                // out at 15:53:01.
+                //
+                // `pending_context` alone is the WRONG test, and four tests say so: it is the one
+                // carrier for everything owed to the agent, including a decider's auto-approval,
+                // and a blocked report arriving behind one of those is legitimately new. Only a
+                // HUMAN answer can be asked for twice, so only that one defers.
+                //
+                // Deferred, not dropped: the report's turn is recorded, `Ok(None)` lets `drive`
+                // carry on to the pane check and the nudge that delivers the answer, and the agent
+                // raises whatever is still open in its next report from an informed position. That
+                // is also why this cannot deadlock on the delivery it waits for — the `Working` arm
+                // returns `Ok(None)` for the same reason.
+                //
+                // NOT matched on the question text, which was the obvious fix and does not work:
+                // the agent REWORDS a re-raised decision (same session, same decision, "Its CUDA
+                // image (ray-cuda) has never run on a GPU" became "its dependency freeze changes
+                // only uv … Its CUDA image (ray-cuda) has never run on a GPU"), so any hash or
+                // equality check on it misses exactly the case this exists for.
+                // shortcut: read off the bounded feed, so an answer pushed out by more than
+                // AUTOPILOT_EVENTS_MAX later events stops deferring; upgrade to a ledger flag if a
+                // window ever runs long enough for that (it is seconds to minutes today).
+                let answer_owed = next
+                    .events
+                    .iter()
+                    .rev()
+                    .find(|event| {
+                        matches!(
+                            event.kind,
+                            AutopilotEventKind::Answered(_) | AutopilotEventKind::Nudged
+                        )
+                    })
+                    .is_some_and(|event| matches!(event.kind, AutopilotEventKind::Answered(_)));
+                if answer_owed && !escalating.is_empty() {
+                    next.continuations = 0;
+                    next.finish_turn_from_report(now, &report, TurnDisposition::Interrupted);
+                    next.record_event(now, AutopilotEventKind::Reported(report.status.clone()));
+                    self.save_ledger(&mut next)?;
+                    return Ok(None);
+                }
                 if !escalating.is_empty() {
                     next.finish_turn_from_report(now, &report, TurnDisposition::Escalated);
                     // NEEDING A HUMAN PAUSES THE HEARTBEAT; IT DOES NOT TOUCH THE DIAL. User:

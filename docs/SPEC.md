@@ -602,6 +602,11 @@ and the answers that wait stay saved until the automation can continue safely.
 The product MUST serialize all automatic input to a terminal. The last checks for a person and for a live
 terminal MUST cover the complete submission.
 
+While an answer waits, the agent has not been told it. A report that the agent writes in that period
+therefore cannot know the answer, and the decisions in it are not new. The product MUST NOT ask a person
+to answer them again. It keeps the answer waiting and carries on to deliver it. A person answers one
+question one time.
+
 An automatic send of prose is complete only after the terminal accepts it. Some engines leave the pasted
 text on the screen. For those engines the supervisor MAY try again a bounded number of times. It MUST look
 at the screen between two tries. It MUST stop as soon as the draft clears, or work starts, or another
