@@ -312,6 +312,33 @@ The procedure tells the worker to:
 
 To install the procedure MUST NOT stop a launch, and MUST NOT change the agent instructions of the person.
 
+### One Agent Speaks to Another
+
+A worker MAY send one message to the worker of another session. The other session is a PEER, not a child:
+it has its own goal, its own person and its own turn in progress. A message is a question, never an order.
+
+A message reaches a terminal only through the checks a person's own message passes. It therefore MUST NOT
+reach a terminal a person is attached to, MUST NOT answer a menu with its own words, and MUST NOT write
+while another input is being delivered. The product tells the sender which of these refused it, and whether
+asking again would help.
+
+A delivered message becomes ONE ordinary turn of the other worker. The product MUST mark it as coming from
+another session, and MUST say which command answers it. Without that mark the other worker cannot tell a
+peer from its own person. A message carries no authority: the procedure tells the worker that a request
+from a peer is weighed against its own goal and the directive of its person, and that anything which would
+need the approval of a person still needs it.
+
+An ANSWER IS ANOTHER MESSAGE. The product does not hold messages, does not wait for a reply, and does not
+let a worker wait for one, because two workers waiting on each other would be a stop that nothing clears.
+
+The product MUST bound how many messages one session may send to one peer in a period. Two workers that
+answer each other politely would otherwise run with nobody watching. The bound belongs to the sender and
+MUST NOT depend on a count the worker carries, because a worker that leaves the count out would clear it.
+A sender that reaches the bound is told to write down what it still needs and tell its person.
+
+The product MUST install this procedure exactly as it installs the spawn procedure, and under the same
+condition.
+
 ### The Dashboard
 
 The dashboard lets the person:

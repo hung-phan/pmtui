@@ -107,6 +107,15 @@ server and daemon when the test ends.
   preserve pmd plus every project terminal.
 - An agent requests a session only through `spawn-requests/`; the dashboard is the only process
   that turns a request into a registry row.
+- An agent reaches ANOTHER agent only through the same pane gate a human's `s` uses, so a message
+  can never type over an attached human, answer a dialog with its own text, or interleave with a
+  pmd nudge. It arrives as one ordinary user turn wearing an ENVELOPE naming the sender and the
+  command that replies — without it the recipient cannot tell a peer from its own human, and a
+  peer carries no authority: the skill says so, and a test holds it to that. A REPLY IS JUST A SEND
+  BACK, which is what makes a conversation need no mailbox, no polling and no blocking — two agents
+  waiting on each other's turn is a deadlock nothing would clear. Six sends to one peer in ten
+  minutes is the bound, enforced in the SENDER's own state and never carried in the envelope: a hop
+  count an agent has to echo is reset by an agent that omits it, which is no bound at all.
 - A spawned child is a JOB: one headless `claude -p` / `codex exec` run that does its task, reports
   a result and EXITS. Its end is a fact — the process is gone — never an inference about idleness,
   and its result is the harness's own final payload, not a file the agent must remember to write. A
@@ -250,6 +259,35 @@ next action. `--status` exits 0 whenever it could read its own directory, becaus
 an outcome. Every form reads only `PMTUI_SESSION`/`PMTUI_STATE_DIR`/`PMTUI_BIN` plus its own state
 directory, so it works where `$HOME` is read-only.
 
+## Message Command Surface
+
+A peer is not a child. `spawn` hands away work that proceeds without you; `message` asks a session
+that has its own goal, its own human and its own turn in flight.
+
+```bash
+pmtui message --to <session-id> --message <text> [--json] [--registry <path>]
+pmtui message --list [--json] [--registry <path>]
+```
+
+| Code | Meaning |
+|---|---|
+| 0 | delivered — it arrives as the peer's next turn |
+| 3 | the pane cannot take it right now (a human is attached, a dialog is up, an unsent draft, another input mid-delivery) — ask again under the SAME arguments |
+| 1 | no such session, no agent that anything will start, or the hop limit |
+| 2 | usage error |
+
+It creates NO state that outlives the send, which is why there is no broker: spawn needs the
+dashboard because only the dashboard may turn a request into a registry row, whereas a message
+writes no ledger, no `answers.json` and no row — so the command delivers it itself, through the
+same `send_decision` gate and the same `input.lock` as the dashboard's `s`, and no dashboard need
+be running. `--list` exits 0 whenever the registry could be read.
+
+Nothing in `ManagedEnv` changed for it: `PMTUI_SESSION` is the sender, `PMTUI_STATE_DIR` houses the
+hop ledger, and `$TMUX` names the socket. The registry is the one thing not in the environment —
+it maps an id to a project root, which a tmux session name only hashes — so it defaults to the
+dashboard's path and `--registry` overrides it. `Registry::load` reads a MISSING registry as an
+empty one, so an empty answer NAMES the file it read rather than blaming the id.
+
 ## Code Organization
 
 - `src/job_engine/`: persistent-session scheduling and policy application.
@@ -263,6 +301,11 @@ directory, so it works where `$HOME` is read-only.
 - `src/theme.rs`: the opaline seam — the dashboard's colour ROLES and the one place RGB
   enters chrome; `src/attention.rs` builds every style from it.
 - `src/spawn/`: the request/receipt protocol, the job prompt, and the job result the harness writes.
+- `src/message.rs`: the agent-to-agent message protocol — the hop bound, the envelope and the hop
+  arithmetic. In the library rather than beside the command because the skill text that DOCUMENTS
+  the limit is embedded here too, so a test holds the prose against the enforced number.
+  `src/bin/pmtui/message_cli.rs` owns everything with an effect: the registry, the pane and the
+  files.
 - `src/bin/pmtui/composer.rs`: the prose buffers' seam onto `ratatui-textarea` — which library call
   each key means, and nothing else. `src/bin/pmtui/input.rs`'s one-line `Field` backs the answer,
   cadence, rename and switcher fields, and the create form's rows.

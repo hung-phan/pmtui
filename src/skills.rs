@@ -55,6 +55,25 @@ pub const CLAUDE_SPAWN_SKILL_LINK_REL_PATH: &str = ".claude/skills/pmtui-spawn";
 /// Relative target from `.claude/skills/` to the canonical spawn skill directory.
 pub const CLAUDE_SPAWN_SKILL_LINK_TARGET: &str = "../../.agents/skills/pmtui-spawn";
 
+/// The procedure an agent inside a managed session follows to reach ANOTHER session's agent
+/// through `"$PMTUI_BIN" message`. Shipped alongside the spawn skill by whatever launches the
+/// terminal, and for the same reason: a command no agent is told about does not exist. The two
+/// are deliberately separate skills — a spawned child is a job that reports and exits, while a
+/// peer has its own goal and may never answer.
+pub const MESSAGE_SKILL_MD: &str = include_str!("../skills/pmtui-message/SKILL.md");
+
+/// The message skill's name, and its directory under `.agents/skills/` and `.claude/skills/`.
+pub const MESSAGE_SKILL_NAME: &str = "pmtui-message";
+
+/// The canonical message SKILL.md path relative to a project root, shared by Claude and Codex.
+pub const MESSAGE_SKILL_REL_PATH: &str = ".agents/skills/pmtui-message/SKILL.md";
+
+/// Claude's message-skill directory alias relative to the project root.
+pub const CLAUDE_MESSAGE_SKILL_LINK_REL_PATH: &str = ".claude/skills/pmtui-message";
+
+/// Relative target from `.claude/skills/` to the canonical message skill directory.
+pub const CLAUDE_MESSAGE_SKILL_LINK_TARGET: &str = "../../.agents/skills/pmtui-message";
+
 /// Relative target from `.claude/skills/` to the canonical directory of the skill `name`.
 pub fn claude_skill_link_target(name: &str) -> PathBuf {
     Path::new("../../.agents/skills").join(name)
@@ -153,10 +172,40 @@ pub fn ensure_claude_skill_link(paths: &ProjectPaths, name: &str) -> io::Result<
 /// ensure its exact `.claude/skills/pmtui-spawn` alias. NEVER creates or modifies the user's
 /// `AGENTS.md`, and never touches the worker skill or any sibling skill.
 pub fn install_spawn_skill(paths: &ProjectPaths, engine: Engine) -> anyhow::Result<()> {
-    // Creates `.agents/skills/pmtui-spawn/` as needed; the temp+rename never tears the file.
-    crate::state::write_text_atomic(&paths.canonical_spawn_skill_file(), SPAWN_SKILL_MD)?;
+    install_skill(
+        paths,
+        engine,
+        SPAWN_SKILL_NAME,
+        SPAWN_SKILL_REL_PATH,
+        SPAWN_SKILL_MD,
+    )
+}
+
+/// Install the message skill in `paths.root`, exactly as [`install_spawn_skill`] does for its own.
+pub fn install_message_skill(paths: &ProjectPaths, engine: Engine) -> anyhow::Result<()> {
+    install_skill(
+        paths,
+        engine,
+        MESSAGE_SKILL_NAME,
+        MESSAGE_SKILL_REL_PATH,
+        MESSAGE_SKILL_MD,
+    )
+}
+
+/// Write one canonical `.agents/skills/<name>/SKILL.md` and, for Claude, ensure its exact
+/// `.claude/skills/<name>` alias. NEVER creates or modifies the user's `AGENTS.md`, and never
+/// touches a sibling skill.
+fn install_skill(
+    paths: &ProjectPaths,
+    engine: Engine,
+    name: &str,
+    rel_path: &str,
+    body: &str,
+) -> anyhow::Result<()> {
+    // Creates `.agents/skills/<name>/` as needed; the temp+rename never tears the file.
+    crate::state::write_text_atomic(&paths.root.join(rel_path), body)?;
     if engine == Engine::Claude {
-        ensure_claude_skill_link(paths, SPAWN_SKILL_NAME)?;
+        ensure_claude_skill_link(paths, name)?;
     }
     Ok(())
 }
@@ -176,7 +225,11 @@ pub fn install_spawn_skill_for_launch(
     if env.pmtui_bin.is_none() {
         return Ok(());
     }
-    install_spawn_skill(&ProjectPaths::new(root), engine)
+    let paths = ProjectPaths::new(root);
+    install_spawn_skill(&paths, engine)?;
+    // Both skills run `"$PMTUI_BIN"`, so they ship together under the same gate. A failure in
+    // either is non-fatal to the launch, and `?` here still reports the first one.
+    install_message_skill(&paths, engine)
 }
 
 fn is_symlink(path: &Path) -> bool {
@@ -212,6 +265,10 @@ mod option_voice_tests;
 #[cfg(test)]
 #[path = "skills/tests/spawn.rs"]
 mod spawn_tests;
+
+#[cfg(test)]
+#[path = "skills/tests/message.rs"]
+mod message_tests;
 
 #[cfg(test)]
 #[path = "skills/tests/skill_files.rs"]
