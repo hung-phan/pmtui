@@ -185,7 +185,13 @@ pub(crate) fn render_plain(out: &MessageOutput) -> String {
 /// One reachable session, as `--list` reports it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct Peer {
+    /// The ADDRESS. Unique by construction, and what `--to` matches.
     pub(crate) id: String,
+    /// The label a human gave it, when they gave one. Shown because a human thinks of a session by
+    /// its name, and NOT an address: `normalize_display_name` enforces no uniqueness, so two
+    /// sessions can share one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) name: Option<String>,
     pub(crate) root: String,
     pub(crate) engine: String,
     /// Its agent's pane is up, so a message can land.
@@ -230,7 +236,12 @@ pub(crate) fn render_list_plain(path: &Path, peers: &[Peer]) -> String {
             } else {
                 tags.join(", ")
             };
-            format!("{}  {}  {}  — {}", p.id, p.engine, p.root, note)
+            // The id comes FIRST and alone, because it is the only field `--to` accepts.
+            let named = match &p.name {
+                Some(name) => format!("{} ({name})", p.id),
+                None => p.id.clone(),
+            };
+            format!("{named}  {}  {}  — {}", p.engine, p.root, note)
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -350,6 +361,7 @@ pub(crate) fn run_list(
                 .unwrap_or(false);
             Peer {
                 id: entry.id.clone(),
+                name: entry.display_name.clone(),
                 root: entry.root.to_string_lossy().into_owned(),
                 engine: entry.engine.map_or("default", |e| e.label()).to_string(),
                 live,
@@ -415,7 +427,26 @@ pub(crate) fn run_message(cli: &MessageCli, deps: &MessageDeps<'_>) -> MessageOu
         );
     }
     let Some(entry) = registry.projects.iter().find(|entry| entry.id == to) else {
-        return failed(&to, &from, 0, "no session with that id — see --list");
+        // A NAME IS NOT AN ADDRESS, and a human's own word for a session usually is its name:
+        // `start-up` is called `gpubox`. Names are not unique (`normalize_display_name` enforces
+        // nothing), so this NEVER delivers on one — it only turns a dead end into the id to use.
+        let by_name: Vec<&str> = registry
+            .projects
+            .iter()
+            .filter(|entry| entry.display_name.as_deref() == Some(to.as_str()))
+            .map(|entry| entry.id.as_str())
+            .collect();
+        let hint = match by_name.as_slice() {
+            [] => "no session with that id — see --list".to_string(),
+            [only] => format!("no session with that id; {only} is the one named {to} — use that"),
+            several => format!(
+                "no session with that id, and {} sessions are named {to} ({}) — a name is not an \
+                 address, so pick one id",
+                several.len(),
+                several.join(", ")
+            ),
+        };
+        return failed(&to, &from, 0, hint);
     };
     let target = target_of(entry);
     // The hop ledger is consulted BEFORE the pane is touched, so a refused send costs nothing,

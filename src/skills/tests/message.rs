@@ -102,8 +102,8 @@ fn it_shows_the_two_commands_and_reads_the_binary_from_the_environment() {
         "no bare binary name in a command an agent runs"
     );
     assert!(
-        prose().contains("Use the id, not the folder"),
-        "two sessions can share a folder, so the id is the only key"
+        prose().contains("Address it by the id"),
+        "two sessions can share a name AND a folder, so only the id addresses one"
     );
 }
 

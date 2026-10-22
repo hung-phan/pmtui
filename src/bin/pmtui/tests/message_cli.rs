@@ -141,15 +141,24 @@ struct Fx {
 
 impl Fx {
     fn new(rows: &[(&str, &str)]) -> Fx {
+        Fx::named(
+            &rows
+                .iter()
+                .map(|(id, root)| (*id, *root, None))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    fn named(rows: &[(&str, &str, Option<&str>)]) -> Fx {
         let dir = tempfile::tempdir().unwrap();
         let registry = dir.path().join("registry.json");
         let state = dir.path().join("state");
         std::fs::create_dir_all(&state).unwrap();
         let mut reg = Registry::default();
-        for (id, root) in rows {
+        for (id, root, name) in rows {
             reg.projects.push(ProjectEntry {
                 id: (*id).to_string(),
-                display_name: None,
+                display_name: name.map(str::to_string),
                 root: dir.path().join(root),
                 enabled: true,
                 mode: Mode::AgentLoop,
@@ -795,4 +804,163 @@ fn omitting_the_registry_falls_back_to_the_dashboards_path() {
     .expect("a missing registry reads as an empty one");
     assert_eq!(path, PathBuf::from("/nonexistent/pmtui-test/registry.json"));
     assert!(peers.is_empty());
+}
+
+/// TWO SESSIONS CAN SHARE A FOLDER AND A NAME; only the id addresses one.
+///
+/// `normalize_display_name` enforces no uniqueness, and two sessions legitimately live in one
+/// project folder (the user's own registry has a pair). So the listing must show both rows, name
+/// them without pretending the name is an address, and a send must reach the pane of the id it was
+/// given — the pane name is keyed on `(id, root)`, so the sibling's pane is a different one.
+#[test]
+fn same_folder_same_name_sessions_are_still_addressed_by_id() {
+    let fx = Fx::named(&[
+        ("proj", "shared", Some("The Build")),
+        ("proj-2", "shared", Some("The Build")),
+        ("plain", "plain", None),
+    ]);
+    // Both rows point at ONE folder, as two sessions in one project do.
+    let first = tmux::session_name("proj", &fx.dir.path().join("shared"));
+    let second = tmux::session_name("proj-2", &fx.dir.path().join("shared"));
+    assert_ne!(
+        first, second,
+        "a shared folder must not collapse two sessions onto one pane"
+    );
+
+    let listing = MessageCli {
+        list: true,
+        to: None,
+        message: None,
+        registry: Some(fx.registry.clone()),
+        json: false,
+    };
+    let env = |key: &str| match key {
+        "PMTUI_SESSION" => Some("me".to_string()),
+        "TMUX" => Some("/tmp/tmux-0/scratch,1,0".to_string()),
+        _ => None,
+    };
+    let live = FakePane::live(&second, COMPOSER);
+    let handle = live.clone();
+    let (path, peers) = run_list(
+        &listing,
+        &MessageDeps {
+            env: &env,
+            clock: &At(NOW),
+            driver: &|_| Some(Box::new(handle.clone()) as Box<dyn tmux::Driver>),
+            default_registry: &|| PathBuf::from("/nonexistent/pmtui-test/registry.json"),
+        },
+    )
+    .expect("readable");
+
+    assert_eq!(peers.len(), 3, "both same-folder sessions are listed");
+    assert_eq!(peers[0].name.as_deref(), Some("The Build"));
+    assert_eq!(peers[1].name.as_deref(), Some("The Build"));
+    assert_eq!(peers[2].name, None, "an unnamed session shows no name");
+    // Only the one whose pane is up is reachable, which is the point of listing them apart.
+    assert!(!peers[0].live && peers[1].live, "{peers:?}");
+
+    let plain = render_list_plain(&path, &peers);
+    assert!(
+        plain.contains("proj (The Build)") && plain.contains("proj-2 (The Build)"),
+        "each line leads with its own id: {plain}"
+    );
+    assert!(
+        plain.lines().any(|l| l.starts_with("plain  ")),
+        "an unnamed session is just its id: {plain}"
+    );
+    let json: serde_json::Value = serde_json::from_str(&render_list_json(&path, &peers)).unwrap();
+    assert_eq!(json["sessions"][1]["id"], "proj-2");
+    assert_eq!(json["sessions"][1]["name"], "The Build");
+    assert!(
+        json["sessions"][2].get("name").is_none(),
+        "no name is absent, not null"
+    );
+
+    // AND THE SEND GOES BY ID: addressed to `proj-2`, it lands on `proj-2`'s pane only.
+    let out = fx.run_with(
+        &fx.cli("proj-2", "hi"),
+        "me",
+        &|_| Some(Box::new(live.clone()) as Box<dyn tmux::Driver>),
+        NOW,
+    );
+    assert_eq!(out.status, Status::Delivered, "{out:?}");
+    let sends = live.sends();
+    assert_eq!(sends.len(), 1);
+    assert_eq!(sends[0].0, second, "the sibling's pane is never written");
+
+    // A NAME IS NOT AN ADDRESS: sending to the shared display name reaches nobody.
+    let out = fx.run_with(
+        &fx.cli("The Build", "hi"),
+        "me",
+        &|_| Some(Box::new(live.clone()) as Box<dyn tmux::Driver>),
+        NOW,
+    );
+    assert_eq!(out.status, Status::Failed, "{out:?}");
+    assert!(
+        out.detail.contains("no session with that id"),
+        "{:?}",
+        out.detail
+    );
+    assert_eq!(live.sends().len(), 1, "and still nothing new was written");
+}
+
+/// A NAME IS NOT AN ADDRESS, but it is what a human says: the user's `start-up` session is called
+/// `gpubox`. So a name never delivers — it resolves to the id to use instead, and when the name is
+/// ambiguous it refuses with every candidate rather than picking one.
+#[test]
+fn a_display_name_resolves_to_an_id_and_never_delivers_on_its_own() {
+    let fx = Fx::named(&[
+        ("start-up", "start-up", Some("gpubox")),
+        ("proj", "shared", Some("The Build")),
+        ("proj-2", "shared", Some("The Build")),
+    ]);
+    let live = FakePane::live(&fx.session_of("start-up"), COMPOSER);
+    let handle = live.clone();
+    let send = |to: &str| {
+        fx.run_with(
+            &fx.cli(to, "hi"),
+            "me",
+            &|_| Some(Box::new(handle.clone()) as Box<dyn tmux::Driver>),
+            NOW,
+        )
+    };
+
+    // ONE session has this name: say which id to use.
+    let out = send("gpubox");
+    assert_eq!(out.status, Status::Failed, "{out:?}");
+    assert!(
+        out.detail.contains("start-up is the one named gpubox"),
+        "{:?}",
+        out.detail
+    );
+
+    // SEVERAL share it: refuse with all of them, because guessing could reach the wrong agent.
+    let out = send("The Build");
+    assert_eq!(out.status, Status::Failed, "{out:?}");
+    assert!(
+        out.detail.contains("2 sessions are named The Build")
+            && out.detail.contains("proj")
+            && out.detail.contains("proj-2"),
+        "{:?}",
+        out.detail
+    );
+
+    // A word that is neither an id nor a name keeps the plain answer.
+    assert!(
+        send("nothing-at-all")
+            .detail
+            .contains("no session with that id — see --list")
+    );
+
+    // NOTHING was written on any of those paths.
+    assert!(
+        live.sends().is_empty(),
+        "a name must not deliver: {:?}",
+        live.sends()
+    );
+
+    // And the id still works.
+    let out = send("start-up");
+    assert_eq!(out.status, Status::Delivered, "{out:?}");
+    assert_eq!(live.sends().len(), 1);
 }

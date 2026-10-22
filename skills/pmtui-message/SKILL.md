@@ -18,8 +18,12 @@ needs in one message, then carry on with other work — do not sit and wait.
 "$PMTUI_BIN" message --list
 ```
 
-Each line is `id  engine  folder  — state`. Only a session marked `reachable` can take a message
-now. `this session` is you. Use the id, not the folder.
+Each line is `id (name)  engine  folder  — state`, where the name appears only if a human gave one.
+Only a session marked `reachable` can take a message now. `this session` is you.
+
+**Address it by the id — the first field, outside the parentheses.** Two sessions can share a name
+and two can share a folder, so neither identifies one; only the id does. If you only know a
+session's name, send to it anyway: the refusal names the id to use.
 
 ## Send one
 
