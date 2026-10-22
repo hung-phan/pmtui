@@ -172,6 +172,60 @@ pub(crate) fn send_decision(t: &SendTarget, p: &SendProbe) -> SendPlan {
     SendPlan::Send(format!("sent → {}", t.id))
 }
 
+/// Probe the target pane for everything [`send_decision`] needs.
+///
+/// Shared by `App::plan_send` and `pmtui message`, so a keypress and a CLI send can never
+/// disagree about what they looked at.
+pub(crate) fn probe(d: &dyn tmux::Driver, t: &SendTarget) -> SendProbe {
+    SendProbe {
+        alive: d.is_alive(&t.session).ok(),
+        pane_dead: d.pane_dead(&t.session).unwrap_or(false),
+        // `Driver::has_clients` DEFAULTS to `Ok(true)` (assume attached), which is
+        // right for the reaper and wrong here — a probe error must not make a
+        // human-pressed key dead. An error reads as "not attached"; the pane-state
+        // gate below is the one that fails closed.
+        attached: d.has_clients(&t.session).unwrap_or(false),
+        in_mode: d.pane_in_mode(&t.session).unwrap_or(false),
+        capture: d.capture_tail_styled(&t.session, SEND_GATE_LINES).ok(),
+    }
+}
+
+/// Write the bytes to the pane, under the session's `input.lock`, re-checking everything
+/// that can change while the lock is being acquired.
+///
+/// The ONE place a message reaches a pane, for `s` and for `pmtui message` alike — the
+/// invariant is that every pane input owns `input.lock` across the final recheck, the paste
+/// and the Enter, so a second writer here would be a second way to interleave with a pmd
+/// nudge.
+pub(crate) fn write_to_pane(d: &dyn tmux::Driver, t: &SendTarget, text: &str) -> Result<()> {
+    // `tmux::sanitize_send_text`, not `advise::sanitize_control_bytes`: newlines are
+    // legitimate here (`send_keys` routes them through `load-buffer`/`paste-buffer`),
+    // but a raw ESC arrives as shift+tab and cycles claude's permission mode, and a
+    // lone CR submits a second message. The inline field cannot produce either, but
+    // the `$EDITOR` buffer and a bracketed paste both can.
+    let payload = tmux::sanitize_send_text(text);
+    if payload.is_empty() {
+        anyhow::bail!("nothing left after removing control characters");
+    }
+    let paths = ProjectPaths::for_session(&t.root, &t.id);
+    let _input_lease =
+        lease::acquire_with_retry(&paths.input_lock(), 40, Duration::from_millis(25))?
+            .ok_or_else(|| anyhow::anyhow!("another input is still being delivered — try again"))?;
+    if d.is_alive(&t.session).ok() == Some(false) {
+        anyhow::bail!("the agent's session ended while we waited");
+    }
+    if d.has_clients(&t.session).unwrap_or(true) {
+        anyhow::bail!("a client attached while the message was waiting");
+    }
+    let capture = d
+        .capture_tail_styled(&t.session, SEND_GATE_LINES)
+        .context("re-read pane before send")?;
+    if let Some(why) = pane_refusal(&capture) {
+        anyhow::bail!("the pane changed while the message was waiting: {why}");
+    }
+    d.send_keys(&t.session, &payload)
+}
+
 /// Why the pane cannot take a typed Message right now, from a STYLED capture
 /// (`capture_tail_styled`), or `None` when it can.
 ///

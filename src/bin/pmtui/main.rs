@@ -120,6 +120,7 @@ mod edit;
 mod event_dispatch;
 mod input;
 mod keys;
+mod message_cli;
 mod mode;
 mod path_complete;
 mod render;
@@ -205,8 +206,10 @@ fn parse_args_from(argv: &[String]) -> Result<Args> {
 enum Action {
     Dashboard(Args),
     Spawn(spawn_cli::SpawnCli),
+    Message(message_cli::MessageCli),
     Help,
     SpawnHelp,
+    MessageHelp,
 }
 
 /// Parse a whole command line. `spawn` is recognized first and parsed on its own, so a spawn
@@ -215,6 +218,10 @@ fn parse_action(argv: &[String]) -> std::result::Result<Action, spawn_cli::Usage
     if argv.first().is_some_and(|arg| arg == "spawn") {
         return spawn_cli::parse(&argv[1..])
             .map(|parsed| parsed.map_or(Action::SpawnHelp, Action::Spawn));
+    }
+    if argv.first().is_some_and(|arg| arg == "message") {
+        return message_cli::parse(&argv[1..])
+            .map(|parsed| parsed.map_or(Action::MessageHelp, Action::Message));
     }
     match parse_args_from(argv) {
         Ok(args) if args.help => Ok(Action::Help),
@@ -229,11 +236,14 @@ fn parse_action(argv: &[String]) -> std::result::Result<Action, spawn_cli::Usage
 const HELP: &str = concat!(
     "pmtui — agent-manager dashboard\n\n",
     "Usage: pmtui [--registry <path>] [--socket <name>]\n",
-    "       pmtui spawn --message <text> [options]\n\n",
+    "       pmtui spawn --message <text> [options]\n",
+    "       pmtui message --to <session-id> --message <text>\n\n",
     "--registry <path>  registry JSON (default: ~/.config/pmd/registry.json)\n",
     "--socket <name>    private tmux server socket (default: pmd)\n",
     "spawn              from inside a managed session, ask the dashboard for a Standard child\n",
     "                   session (see `pmtui spawn --help`)\n",
+    "message            from inside a managed session, send one message to another session's\n",
+    "                   agent (see `pmtui message --help`)\n",
 );
 
 fn print_help(out: &mut dyn Write) {
@@ -253,6 +263,7 @@ fn dispatch(
     parsed: std::result::Result<Action, spawn_cli::UsageError>,
     dashboard: &mut dyn FnMut(Args) -> Result<()>,
     spawn: &mut spawn_cli::SpawnDeps<'_>,
+    message: &message_cli::MessageDeps<'_>,
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> Result<i32> {
@@ -290,6 +301,37 @@ fn dispatch(
         }
         Ok(Action::Help) => {
             print_help(err);
+            Ok(0)
+        }
+        // A LISTING, not an outcome — exit 0 whenever the registry could be read, like
+        // `spawn --status`.
+        Ok(Action::Message(cli)) if cli.list => match message_cli::run_list(&cli, message) {
+            Ok((path, peers)) => {
+                let text = if cli.json {
+                    message_cli::render_list_json(&path, &peers)
+                } else {
+                    message_cli::render_list_plain(&path, &peers)
+                };
+                emit(out, &format!("{text}\n"));
+                Ok(0)
+            }
+            Err(why) => {
+                emit(err, &format!("message --list: {why}\n"));
+                Ok(1)
+            }
+        },
+        Ok(Action::Message(cli)) => {
+            let output = message_cli::run_message(&cli, message);
+            let text = if cli.json {
+                message_cli::render_json(&output)
+            } else {
+                message_cli::render_plain(&output)
+            };
+            emit(out, &format!("{text}\n"));
+            Ok(message_cli::exit_code(&output))
+        }
+        Ok(Action::MessageHelp) => {
+            emit(err, message_cli::HELP);
             Ok(0)
         }
         Ok(Action::SpawnHelp) => {
@@ -687,10 +729,19 @@ fn main() -> Result<()> {
         clock: &SystemClock,
         waiter: &mut waiter,
     };
+    let message = message_cli::MessageDeps {
+        env: &spawn_cli::process_env,
+        clock: &SystemClock,
+        driver: &|socket| {
+            Some(Box::new(tmux::TmuxDriver::with_socket(socket)) as Box<dyn tmux::Driver>)
+        },
+        default_registry: &default_registry_path,
+    };
     let code = dispatch(
         parse_action(&argv),
         &mut |args| start_app(args, &mut run_dashboard),
         &mut spawn,
+        &message,
         &mut std::io::stdout(),
         &mut std::io::stderr(),
     )?;

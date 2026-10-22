@@ -18,6 +18,7 @@ pub mod escalation;
 pub mod job;
 pub mod job_engine;
 pub mod lease;
+pub mod message;
 pub mod models;
 pub mod ops;
 pub mod pmstate;

@@ -16,6 +16,19 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::os::unix::fs::PermissionsExt as _;
 
+/// A `MessageDeps` that can reach NOTHING. `pmtui spawn` must never touch the registry or a tmux
+/// server, so the fixture these tests hand `dispatch` is a dead end by construction rather than by
+/// omission: a path that cannot exist, and a driver factory that always declines. Defaulting either
+/// to the real environment is how a unit test once ran the live installer over a real machine.
+fn dead_end_message_deps() -> crate::message_cli::MessageDeps<'static> {
+    crate::message_cli::MessageDeps {
+        env: &|_| None,
+        clock: &FixedClock,
+        driver: &|_| None,
+        default_registry: &|| PathBuf::from("/nonexistent/pmtui-test/registry.json"),
+    }
+}
+
 const REQUEST_ID: &str = "550e8400-e29b-41d4-a716-446655440000";
 /// A second valid id, for a listing that must hold more than one child.
 const OTHER_ID: &str = "6ba7b810-9dad-41d1-80b4-00c04fd430c8";
@@ -165,6 +178,7 @@ impl Session {
             parse_action(&argv(line)),
             &mut |_| panic!("a spawn command must never open the dashboard"),
             &mut deps,
+            &dead_end_message_deps(),
             &mut out,
             &mut err,
         )
@@ -1389,6 +1403,7 @@ fn the_dashboard_action_runs_the_dashboard_and_reports_its_result() {
             Ok(())
         },
         &mut deps,
+        &dead_end_message_deps(),
         &mut out,
         &mut err,
     )
@@ -1404,6 +1419,7 @@ fn the_dashboard_action_runs_the_dashboard_and_reports_its_result() {
         Ok(Action::Dashboard(args)),
         &mut |_| anyhow::bail!("dashboard failed"),
         &mut deps,
+        &dead_end_message_deps(),
         &mut out,
         &mut err,
     )

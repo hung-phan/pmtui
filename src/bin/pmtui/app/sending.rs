@@ -146,19 +146,7 @@ impl App {
                 return SendPlan::Refuse("a chat is opening on this session — try again".into());
             }
         }
-        let d = &*self.agent_tmux;
-        let probe = SendProbe {
-            alive: d.is_alive(&t.session).ok(),
-            pane_dead: d.pane_dead(&t.session).unwrap_or(false),
-            // `Driver::has_clients` DEFAULTS to `Ok(true)` (assume attached), which is
-            // right for the reaper and wrong here — a probe error must not make a
-            // human-pressed key dead. An error reads as "not attached"; the pane-state
-            // gate below is the one that fails closed.
-            attached: d.has_clients(&t.session).unwrap_or(false),
-            in_mode: d.pane_in_mode(&t.session).unwrap_or(false),
-            capture: d.capture_tail_styled(&t.session, SEND_GATE_LINES).ok(),
-        };
-        send_decision(t, &probe)
+        send_decision(t, &send::probe(&*self.agent_tmux, t))
     }
 
     /// Enter in the send field: plan, then deliver. The field STAYS OPEN with the text
@@ -205,38 +193,10 @@ impl App {
     /// pane, and so would `attach_loop`, where a human types into that pane with no
     /// marker at all. `s` writes NO ledger and NO `answers.json`.
     pub(crate) fn deliver(&mut self, t: &SendTarget, text: &str) -> Result<()> {
-        // `tmux::sanitize_send_text`, not `advise::sanitize_control_bytes`: newlines are
-        // legitimate here (`send_keys` routes them through `load-buffer`/`paste-buffer`),
-        // but a raw ESC arrives as shift+tab and cycles claude's permission mode, and a
-        // lone CR submits a second message. The inline field cannot produce either, but
-        // the `$EDITOR` buffer and a bracketed paste both can.
-        let payload = tmux::sanitize_send_text(text);
-        if payload.is_empty() {
-            anyhow::bail!("nothing left after removing control characters");
-        }
         // NOT when we are typing into the chat pane itself: that pane's own liveness is already
         // what makes pmd defer, and claiming/releasing the marker here would CLEAR the real chat's
         // marker on the way out — turning a send into a way to unpark the poll under a live REPL.
-        let paths = ProjectPaths::for_session(&t.root, &t.id);
-        let _input_lease =
-            lease::acquire_with_retry(&paths.input_lock(), 40, Duration::from_millis(25))?
-                .ok_or_else(|| {
-                    anyhow::anyhow!("another input is still being delivered — try again")
-                })?;
-        if self.agent_tmux.is_alive(&t.session).ok() == Some(false) {
-            anyhow::bail!("the agent's session ended while we waited");
-        }
-        if self.agent_tmux.has_clients(&t.session).unwrap_or(true) {
-            anyhow::bail!("a client attached while the message was waiting");
-        }
-        let capture = self
-            .agent_tmux
-            .capture_tail_styled(&t.session, SEND_GATE_LINES)
-            .context("re-read pane before send")?;
-        if let Some(why) = pane_refusal(&capture) {
-            anyhow::bail!("the pane changed while the message was waiting: {why}");
-        }
-        self.agent_tmux.send_keys(&t.session, &payload)
+        send::write_to_pane(&*self.agent_tmux, t, text)
     }
 
     /// Ctrl+E in the send field: hand off to `$EDITOR`, seeded with what has been typed.

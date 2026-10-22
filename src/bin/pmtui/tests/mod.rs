@@ -134,6 +134,7 @@ mod keys;
 mod launch_env;
 mod lifecycle;
 mod log;
+mod message_cli;
 mod overlays;
 mod pane_dialog_answering;
 mod path_complete;
@@ -268,6 +269,29 @@ impl FakePane {
     /// A driver reporting `session` alive with an EMPTY pane (launched, silent).
     fn live_quiet(session: &str) -> Self {
         Self::live(session, "   \n \n")
+    }
+    /// A driver reporting `session` alive with `tail`, and a HUMAN attached to it.
+    fn live_attached(session: &str, tail: &str) -> Self {
+        Self(std::sync::Arc::new(PaneInner {
+            alive: std::sync::Mutex::new([session.to_string()].into_iter().collect()),
+            tails: [(session.to_string(), tail.to_string())]
+                .into_iter()
+                .collect(),
+            attached: true,
+            ..Default::default()
+        }))
+    }
+    /// A driver reporting `session` alive with `tail`, whose `send_keys` always fails — the
+    /// failure a caller must report rather than claim a delivery for.
+    fn live_send_fails(session: &str, tail: &str) -> Self {
+        Self(std::sync::Arc::new(PaneInner {
+            alive: std::sync::Mutex::new([session.to_string()].into_iter().collect()),
+            tails: [(session.to_string(), tail.to_string())]
+                .into_iter()
+                .collect(),
+            fail_send: true,
+            ..Default::default()
+        }))
     }
     /// A driver reporting `session` alive but whose capture always fails.
     fn capture_fails(session: &str) -> Self {
