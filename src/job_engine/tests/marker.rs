@@ -1687,3 +1687,115 @@ fn a_report_written_before_an_answer_was_delivered_does_not_re_ask_the_human() {
         "an informed report still reaches the human: {out:?}"
     );
 }
+
+/// A QUESTION ALREADY ANSWERED IS NOT ASKED AGAIN — and a different one still is.
+///
+/// Measured on the live `start-up` session, AFTER the event-order guard above shipped:
+///
+/// ```text
+/// 02:04:31 answered   the human's answer is recorded
+/// 02:04:31 nudged     the pane was idle, so it went out at once
+/// 02:04:32 escalated  a report disposed here, re-asking the same decision
+/// 02:04:36 answered   the human answers the same question a SECOND time
+/// ```
+///
+/// The report disposed at 02:04:32 carried `seq` 1792718800 — the agent wrote it at 01:26:40, 38
+/// minutes before the answer existed. `on_blocked` never observes a marker, so while the row was
+/// parked the agent kept working and its report sat unread; the answer unparked the row and the next
+/// tick disposed the backlog. A `Nudged` event had landed by then, so "the newest of {answered,
+/// nudged} is an answer" read FALSE and it escalated.
+///
+/// Both escalations were byte-identical (331 characters, the same three options), which is what
+/// makes equality the right test here: a report that predates the nudge was written once and never
+/// revised, unlike the live agent above that rewords what it re-raises.
+#[test]
+fn a_question_already_answered_is_not_re_asked_from_a_report_that_predates_the_nudge() {
+    const Q: &str = "Widen the instance-type cap for the packing T2?";
+    let blocked = |seq: u64, question: &str| {
+        serde_json::json!({
+            "seq": seq,
+            "state": "blocked",
+            "stops": [{
+                "kind": "ambiguity",
+                "effect": {"scope": "external", "reversibility": "irreversible", "authority": "ordinary"},
+                "risk_class": "low",
+                "question": question,
+                "options": ["widen", "skip"],
+            }]
+        })
+        .to_string()
+    };
+
+    let (mut fx, sess) = marker_fx(Tier::Autopilot, |_| {});
+    fx.driver.set_tail(&sess, IDLE_PANE);
+
+    write_marker(&fx, &blocked(201, Q));
+    let out = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+    assert!(matches!(out, JobTick::Escalated(_)), "got {out:?}");
+    let stop_id = ledger(&fx).open_stops[0].id.clone();
+
+    // The human answers, and the pane is IDLE — so the nudge goes out at once, as at 02:04:31.
+    // That is what made the event-order clause read "already told".
+    let answered_at = START + 1;
+    fx.clock.set(answered_at);
+    push_answer(&fx, &stop_id, None, answered_at);
+    let mut nudged = None;
+    for step in 1..12 {
+        fx.clock.set(answered_at + step);
+        let _ = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+        if let Some(at) = ledger(&fx).nudged_at {
+            nudged = Some(at);
+            break;
+        }
+    }
+    let nudged_at = nudged.expect("an idle pane takes the nudge");
+    assert!(
+        ledger(&fx)
+            .events
+            .iter()
+            .rev()
+            .find(|e| matches!(
+                e.kind,
+                job::AutopilotEventKind::Answered(_) | job::AutopilotEventKind::Nudged
+            ))
+            .is_some_and(|e| matches!(e.kind, job::AutopilotEventKind::Nudged)),
+        "premise: Nudged is the newest of the pair, which is why the other clause misses this"
+    );
+
+    // THE BACKLOG: written while parked, before the nudge could reach it, re-stating the decision
+    // the human has now answered.
+    fx.clock.set(nudged_at + 1);
+    write_marker(&fx, &blocked(202, Q));
+    set_marker_mtime(&fx, nudged_at - 60);
+    let out = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+    assert!(
+        !matches!(out, JobTick::Escalated(_)),
+        "a question already answered must not be asked again: {out:?}"
+    );
+    assert!(
+        ledger(&fx).open_stops.is_empty(),
+        "and nothing is parked for them to answer twice: {:?}",
+        ledger(&fx).open_stops
+    );
+
+    // A DIFFERENT QUESTION IS NEWS WHENEVER IT WAS WRITTEN. Same stale report age, a decision the
+    // human has never seen: it reaches them on this tick rather than waiting for the agent.
+    fx.clock.set(nudged_at + 30);
+    write_marker(
+        &fx,
+        &blocked(203, "Drop the packing T2 from the suite entirely?"),
+    );
+    set_marker_mtime(&fx, nudged_at - 60);
+    let out = fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+    assert!(
+        matches!(out, JobTick::Escalated(_)),
+        "an unseen question must still reach the human: {out:?}"
+    );
+    let open = ledger(&fx).open_stops;
+    assert_eq!(open.len(), 1, "{open:?}");
+    assert_eq!(
+        open[0].question.as_deref(),
+        Some("Drop the packing T2 from the suite entirely?"),
+        "and it is the NEW question, not the answered one"
+    );
+}

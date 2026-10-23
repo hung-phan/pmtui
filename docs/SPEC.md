@@ -634,6 +634,23 @@ therefore cannot know the answer, and the decisions in it are not new. The produ
 to answer them again. It keeps the answer waiting and carries on to deliver it. A person answers one
 question one time.
 
+Delivery is not the end of it. A report is WRITTEN before it is READ: while a session waits for a person,
+the product does not read its reports at all, so the agent keeps working and a report can sit unread for
+as long as the person takes. Sending the answer does not reach back and inform a report already written.
+
+So the product MUST judge a report by when it was WRITTEN, not by what has happened since. In a report
+written before the last thing the product said to the agent, a decision the person HAS ALREADY ANSWERED is
+not news, and the product MUST NOT raise it again. It records the report and asks the agent again instead.
+
+A decision in that same report that the person has NOT seen is news whenever it was written, and MUST
+reach them without waiting for the agent to raise it a second time. So the product drops only what was
+already answered and offers the rest. Dropping the whole report would delay a question nobody has
+answered; offering the whole report would ask one question twice.
+
+The product compares such a decision with what it has already asked, as asked. That is sound only for a
+report that was written once and never revised: a live agent that re-raises a waiting question REWORDS it,
+which is why the rule above does not look at the words at all.
+
 An automatic send of prose is complete only after the terminal accepts it. Some engines leave the pasted
 text on the screen. For those engines the supervisor MAY try again a bounded number of times. It MUST look
 at the screen between two tries. It MUST stop as soon as the draft clears, or work starts, or another

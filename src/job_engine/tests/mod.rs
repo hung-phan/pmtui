@@ -231,6 +231,22 @@ fn backdate_marker(fx: &Fx, secs_ago: u64) {
         .unwrap();
 }
 
+/// Stamp the marker's mtime at an exact epoch SECOND, on the same time base as the fake clock.
+///
+/// `backdate_marker` works off the real `SystemTime::now()`, which is ~1.79e9 while the test clock
+/// sits near [`START`] — so any comparison between a marker's mtime and a ledger timestamp is
+/// meaningless under that helper. Production compares two readings of the same wall clock (the
+/// filesystem's and `Clock::now`); this puts a test on that footing.
+fn set_marker_mtime(fx: &Fx, at: Epoch) {
+    let t = SystemTime::UNIX_EPOCH + Duration::from_secs(at.max(0) as u64);
+    let f = std::fs::OpenOptions::new()
+        .write(true)
+        .open(fx.paths.needs_you())
+        .unwrap();
+    f.set_times(std::fs::FileTimes::new().set_modified(t))
+        .unwrap();
+}
+
 fn blocked_fx() -> Fx {
     setup_with(Tier::Standard, Engine::Claude, Some(300), |l| {
         l.conversation_id = Some("convo-1".into());
