@@ -659,7 +659,75 @@ impl JobScheduler {
                         )
                     })
                     .is_some_and(|event| matches!(event.kind, AutopilotEventKind::Answered(_)));
-                if answer_owed && !escalating.is_empty() {
+                // AND THE OTHER HALF, which `answer_owed` could not see — measured on a live
+                // session, after the first half shipped:
+                //
+                //   02:04:31 answered   the human's answer is recorded
+                //   02:04:31 nudged     the pane was idle, so it was delivered at once
+                //   02:04:32 escalated  a report disposed here, re-asking the same decision
+                //   02:04:36 answered   the human answers the same question a SECOND time
+                //
+                // That report's own `seq` was 1792718800 — the agent wrote it at 01:26:40, 38
+                // MINUTES before the answer existed. `on_blocked` never observes a marker, so
+                // while the row was parked on the first stop the agent kept working and its new
+                // report sat unread; the answer unparked the row and the next tick disposed a
+                // 38-minute-old backlog as news. A `Nudged` event had landed by then, so
+                // `answer_owed` read "the agent has been told" — but no agent reads a nudge and
+                // writes a report one second later.
+                //
+                // Event ORDER is the wrong oracle. The honest question is whether the report was
+                // written before the last thing we said, and pmd owns both facts: the marker's own
+                // mtime, and when it last nudged.
+                //
+                // Costs at most one cycle of delay on a genuine escalation whose marker happens to
+                // predate a nudge, which is the same trade the clause above already makes, and the
+                // agent re-reports from an informed position either way.
+                // Read back off the ledger rather than the argument: `dispose_report` has already
+                // moved this same revision into `next.last_marker_revision`.
+                let predates_what_we_told_it = next
+                    .last_marker_revision
+                    .as_ref()
+                    .zip(next.nudged_at)
+                    .is_some_and(|(revision, nudged_at)| {
+                        revision.modified_ns / 1_000_000_000 < nudged_at.max(0) as u64
+                    });
+                // A DIFFERENT QUESTION IS NEWS WHENEVER IT WAS WRITTEN. User: *"i think it is fine
+                // if the question is different. but it is odd, if the question is the same"* — so a
+                // stale report is not deferred wholesale; only the decisions the human has ALREADY
+                // ANSWERED are dropped from it, and anything they have not seen still reaches them
+                // on this tick. Measured: the two escalations were byte-identical (331 characters,
+                // same three options), so equality is the right test for THIS half.
+                //
+                // Text equality is sound here and was not in the clause above, because the cases
+                // differ. A live agent re-raising an undelivered question REWORDS it (measured),
+                // which is why `answer_owed` ignores the text. A report that predates the nudge was
+                // written ONCE and never revised, so what it says is what it said.
+                //
+                // `decisions` is the record of what we asked and `answers.json` of what came back,
+                // so a repeat is a question we escalated whose stop has since been answered.
+                // shortcut: `decisions` is bounded, so a question pushed out of it stops being
+                // recognised as a repeat; upgrade to a dedicated answered-question ledger if a park
+                // ever outlives that window.
+                let answers: Vec<state::Answer> =
+                    state::read_json_or(&self.paths.answers(), Vec::new())?;
+                let answered_before = |question: &str| {
+                    next.decisions.iter().any(|decision| {
+                        decision.kind == DecisionKind::Escalated
+                            && decision.summary.as_deref() == Some(question)
+                            && decision.stop_ids.iter().any(|stop_id| {
+                                answers.iter().any(|answer| &answer.stop_id == stop_id)
+                            })
+                    })
+                };
+                let asked_count = escalating.len();
+                if predates_what_we_told_it {
+                    escalating
+                        .retain(|stop| !stop.question.as_deref().is_some_and(&answered_before));
+                }
+                let dropped_repeats = escalating.len() != asked_count;
+                if (answer_owed && !escalating.is_empty())
+                    || (dropped_repeats && escalating.is_empty())
+                {
                     next.continuations = 0;
                     next.finish_turn_from_report(now, &report, TurnDisposition::Interrupted);
                     next.record_event(now, AutopilotEventKind::Reported(report.status.clone()));
