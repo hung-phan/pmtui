@@ -325,8 +325,19 @@ empty one, so an empty answer NAMES the file it read rather than blaming the id.
   `pmtui-spawn` is one dispatch, `agent-manager-coordinator` is the standing loop that turns the
   second into a queue run over many wakes. A test holds each one's rules, and the coordinator's
   tests assert it does NOT restate the spawn skill's outcome vocabulary — two copies drift.
+  EVERY SKILL IS WRITTEN IN SIMPLIFIED TECHNICAL ENGLISH (ASD-STE100): one instruction per
+  sentence, 20 words at most, no metaphor, and no em-dash aside. A technical name (wake, nudge,
+  marker, stop, job, peer) is kept and DEFINED on first use rather than replaced. Not a style
+  preference — the reader is an LLM reading a procedure, and the files had drifted into 40-word
+  sentences with stacked clauses, which is what "sounds like jargon" means in practice.
+  `src/skills/tests/plain_language.rs` enforces the two mechanical halves (sentence length and the
+  em dash) across all six, because that drift arrives one reasonable-looking edit at a time. It
+  deliberately does NOT police word choice: a blocklist is judgement, and judgement belongs in
+  review. When a rule's wording changes, the test that pins that rule changes with it in the same
+  commit.
 - `.agents/skills/`: canonical project-local skills; `.claude/skills/` contains compatibility
-  symlinks only.
+  symlinks only. `pmtui-ui-testing` lives only here, and `plain_language.rs` reaches it with
+  `include_str!` so it is held to the same standard as the shipped five.
 - Tests live beside code; real terminal acceptance lives in `tests/integration/`.
 
 ## Test Placement

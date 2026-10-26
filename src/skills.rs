@@ -298,5 +298,9 @@ mod message_tests;
 mod coordinator_tests;
 
 #[cfg(test)]
+#[path = "skills/tests/plain_language.rs"]
+mod plain_language_tests;
+
+#[cfg(test)]
 #[path = "skills/tests/skill_files.rs"]
 mod tests;

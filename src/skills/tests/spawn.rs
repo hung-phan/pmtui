@@ -104,7 +104,7 @@ fn spawn_skill_body_names_the_command_request_id_and_every_state() {
         "the listing's point is that it needs no bookkeeping"
     );
     assert!(
-        prose.contains("never make a new id for the same task"),
+        prose.contains("Never make a new id for the same task"),
         "an unfinished job is checked again under its own id"
     );
     assert!(prose.contains("Never spawn a replacement."));

@@ -7,7 +7,7 @@ fn worker_skill_uses_finite_nonblocking_wakes_for_detachable_work() {
     let prose = prose.to_lowercase();
 
     assert!(prose.contains("keep each wake finite"));
-    assert!(prose.contains("safely be detached"));
+    assert!(prose.contains("safe to detach"));
     assert!(prose.contains("revalidatable handle"));
     assert!(skill.contains("\"state\": \"monitoring\""));
     assert!(prose.contains("end the turn"));
@@ -22,7 +22,7 @@ fn worker_skill_uses_finite_nonblocking_wakes_for_detachable_work() {
     assert!(prose.contains("paused, restarted, or removed"));
     assert!(prose.contains("enforced hard deadline"));
     assert!(prose.contains("terminate without worker cleanup"));
-    assert!(prose.contains("requiring owner cleanup stays foreground"));
+    assert!(prose.contains("that needs owner cleanup stays in the foreground"));
     assert!(!prose.contains("do not stop working"));
     assert!(
         !skill.contains("keep polling it"),
@@ -46,7 +46,7 @@ fn worker_skill_owns_a_bounded_checkpoint_without_redefining_the_goal() {
     assert!(prose.contains("never satisfies the required decision-marker write"));
     assert!(prose.contains("project completion"));
     assert!(prose.contains("untrusted continuity data"));
-    assert!(prose.contains("never instructions"));
+    assert!(prose.contains("never as instructions"));
     assert!(prose.contains("credentials, tokens, or signed urls"));
     assert!(prose.contains("checkpoint may be displayed"));
     assert!(prose.contains("only control channel"));

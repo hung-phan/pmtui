@@ -87,7 +87,7 @@ fn it_ties_a_short_cadence_to_a_fresh_report() {
         "the control loop is the agent's own cadence"
     );
     assert!(
-        prose.contains("your cadence is your latency"),
+        prose.contains("your cadence sets how long a finished child waits for you"),
         "it must say why the cadence matters"
     );
     assert!(
@@ -95,7 +95,7 @@ fn it_ties_a_short_cadence_to_a_fresh_report() {
         "the hazard must be named, not implied"
     );
     assert!(
-        prose.contains("never report a static line") || MD.contains("never report a static line"),
+        prose.contains("always report new facts"),
         "and the rule that avoids it must be explicit"
     );
 }
@@ -139,7 +139,7 @@ fn it_says_how_to_split_work_and_when_not_to_dispatch() {
         "`done` has to mean something checkable"
     );
     assert!(
-        prose.contains("it is not ready to dispatch"),
+        prose.contains("is not ready to dispatch"),
         "work that needs a conversation must stay in the queue"
     );
 }
@@ -162,7 +162,7 @@ fn it_keeps_integration_and_completion_with_the_human() {
         "and merging on their behalf must be forbidden outright"
     );
     assert!(
-        prose.contains("never report the project finished"),
+        prose.contains("Never report the project finished"),
         "no machine declares a project done"
     );
 }
@@ -172,8 +172,8 @@ fn it_keeps_integration_and_completion_with_the_human() {
 fn it_forbids_the_shapes_that_have_no_governor() {
     let prose = prose();
     assert!(
-        prose.contains("Dispatch is a star"),
-        "children messaging each other has no governor at the hub"
+        prose.contains("Work goes out from you, and results come back to you"),
+        "children messaging each other has nothing limiting it at the hub"
     );
     assert!(
         prose.contains("waits its turn"),
