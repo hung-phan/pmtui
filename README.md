@@ -9,7 +9,7 @@
 ![Runs on](https://img.shields.io/badge/runs%20on-tmux-1a1b26?style=for-the-badge&logo=tmux)
 ![Status](https://img.shields.io/badge/status-beta-1a1b26?style=for-the-badge)
 
-[Install](#install) · [Quick start](#quick-start) · [Keys](#keys-pmtui) · [Ways to use it](#ways-to-use-it) · [Guide](docs/GUIDE.md) · [Spec](docs/SPEC.md)
+[Install](#install) · [Quick start](#quick-start) · [Keys](#keys-pmtui) · [Ways to use it](#ways-to-use-it) · [Skills](#what-the-agent-can-do-for-itself-the-skills) · [Guide](docs/GUIDE.md) · [Spec](docs/SPEC.md)
 
 </div>
 
@@ -133,11 +133,10 @@ the same sessions as columns that answer "what next". The point is to stop polli
 dashboard open and let it tell you. `/` jumps straight to a session, `v` shows what autopilot did
 while you were elsewhere.
 
-**4. One agent that fans work out.** Hand the independently-specifiable parts to child jobs
-([below](#handing-work-to-a-child-job-pmtui-spawn)) and keep the rest. For a queue that outlives one
-wake, the session also gets the `agent-manager-coordinator` skill: harvest children each wake, keep
-the queue in its checkpoint, refill the free slots, report. Children work in their own worktrees;
-you integrate with `a`.
+**4. One agent that fans work out.** Give one session a goal whose parts are independent, and it
+hands those parts to child jobs itself — that is the `pmtui-spawn` skill, and for a queue that
+outlives one wake, `agent-manager-coordinator` ([both below](#what-the-agent-can-do-for-itself-the-skills)).
+You do not dispatch anything; children work in their own worktrees and you integrate with `a`.
 
 ### Getting more out of it
 
@@ -152,67 +151,62 @@ you integrate with `a`.
   preview already shows the live transcript.
 - **Pay for the big model where it matters** (`w`, per session) and pick the decider's engine and
   model separately (`e`) — the thing answering routine choices need not be the thing writing code.
-- **A job cannot ask you a question.** When you spawn, write the Message as a self-contained
-  spec — target, change, constraints, ownership, acceptance — because that is all the child ever
-  sees.
+- **A child job cannot ask a question.** So when a session fans work out, the sharpness of your goal
+  is what the children inherit — a vague one becomes several vaguely-specified jobs at once.
 
-## Handing work to a child job (`pmtui spawn`)
+## What the agent can do for itself (the skills)
 
-An agent inside a managed session can hand an independent piece of work to a **child job**: one
-headless run that does the task, reports a result and exits.
+The three sections below are **not commands you type**. Every managed terminal is installed with
+these skills and the environment they need, so the agent in your session reaches for them on its own
+when its work has that shape. You read them to know what your sessions are capable of — and which
+keys stay yours.
 
-```bash
-"$PMTUI_BIN" spawn --request-id "$(cat /proc/sys/kernel/random/uuid)" \
-  --title "Fix flaky fork test" --message "<self-contained task spec>" --json
-```
+### Handing work out: the `pmtui-spawn` skill
 
-Every managed terminal carries `PMTUI_BIN` and its own state directory in the environment, and gets
-the `pmtui-spawn` skill that documents this procedure. The command writes one request into that
-state directory and waits for the running dashboard to answer with a receipt beside it. It never
-touches the registry, tmux or `$HOME`, so it works inside Codex's sandbox, and rerunning it with the
-same request id never creates a second child.
+An agent can hand an independent piece of work to a **child job**: one headless run that does the
+task, reports a result and exits. You ask for the outcome; it decides a child is the way to get there.
 
 Five children run at once and a sixth waits its turn. In a git repository each one works in its own
 worktree on its own branch and commits there, so children never overwrite each other — and nothing
-reaches your checkout until you press `a` on the finished row. `pmtui spawn --status` lists every child
-this session asked for. `pmtui spawn --help` lists the flags, and
-[SPEC §4](docs/SPEC.md#4-features) defines the command's contract.
+reaches your checkout until **you** press `a` on the finished row. A finished `done` child retires
+itself unless it left uncommitted work.
 
-## Talking to another session (`pmtui message`)
+Two consequences for you: **a job cannot ask a question**, so the quality of the spec your agent
+writes is the whole limit on what comes back; and a child's row is a *result*, not a merge. The
+dashboard shows every child beside its parent, so `d` still removes one if you want it gone.
 
-A child job cannot answer you. A **peer** can: an agent in one managed session can send one message
-to another session's agent.
+Under the hood it writes a request into its own state directory and waits for the dashboard to
+answer with a receipt — no registry, no tmux, no `$HOME`, so it works inside Codex's sandbox and the
+same request id never creates a second child. `pmtui spawn --help` and
+[SPEC §4](docs/SPEC.md#4-features) have the contract if you want to drive it by hand.
 
-```bash
-"$PMTUI_BIN" message --list                                  # who is reachable
-"$PMTUI_BIN" message --to <session-id> --message "<ask>" --json
-```
+### Talking to a peer: the `pmtui-message` skill
 
-`--list` prints `id (name)  engine  folder  — state`, and only a row marked `reachable` can take one
-now. **Address it by the id** — two sessions can share a display name and two can share a folder, so
-neither identifies one. If you only know a name, send to it anyway and the refusal names the id.
+A child job cannot answer anybody. A **peer** can: an agent in one session can send one message to
+another session's agent — to ask what it owns, hand over a finding, or answer something it was asked.
 
-A message arrives as **one ordinary user turn** in the other agent's terminal, wearing an envelope
-that names the sender and the command that replies — so a reply is just a message back, and there is
-no mailbox, no polling and nothing blocking. It goes through the same gate as your own `s`: it will
-not type over you while you are attached, will not answer a dialog, and will not interleave with a
-nudge. A peer **carries no authority** — the skill tells recipients to weigh an ask against their own
-goal and refuse what conflicts. Six messages to one peer in ten minutes is the bound, because two
-agents being polite to each other runs forever with nobody watching.
+It arrives as **one ordinary user turn** in the other terminal, wearing an envelope that names the
+sender, so a reply is just a message back: no mailbox, no polling, nothing blocking. It goes through
+the same gate as your own `s`, which is the part that matters to you — **it will not type over you
+while you are attached**, will not answer a dialog, and will not interleave with a nudge. A peer
+carries no authority: the skill tells recipients to weigh an ask against their own goal and refuse
+what conflicts with it. Six messages to one peer in ten minutes is the bound, because two agents
+being polite to each other runs forever with nobody watching.
 
-Branch on `exit_code`: `0` delivered, `3` try again shortly (a human is attached there, a dialog is
-up, an unsent draft), `1` will not work by retrying, `2` usage. No dashboard need be running.
+`pmtui message --list` is the one form worth running yourself — it prints
+`id (name)  engine  folder  — state` and tells you which sessions can take a message right now.
+Address a session by its **id**: two can share a display name and two can share a folder, so neither
+identifies one.
 
-## Running a queue of work (the coordinator skill)
+### Running a queue: the `agent-manager-coordinator` skill
 
-When a goal is bigger than one session can do in sequence and its parts can proceed without you, the
-session can run a **queue** instead of a single task. Every managed terminal gets the
-`agent-manager-coordinator` skill for it. Nothing to turn on — it applies when the work has that
-shape.
+When a goal is bigger than one session can do in sequence and its parts can proceed without you, a
+session runs a **queue** instead of a single task. Nothing to turn on — the skill applies when the
+work has that shape.
 
 Each wake it harvests its children in one call, decides what each finished one means, prunes, fills
-the free slots, and reports. The queue lives in the session's own continuity checkpoint, so it
-survives compaction and restart; a backlog longer than a page belongs in a file in the project.
+the free slots, and reports. The queue lives in that session's own continuity checkpoint, so it
+survives compaction and restart.
 
 Two things are worth knowing as the human:
 
@@ -222,8 +216,9 @@ Two things are worth knowing as the human:
   checkout until you press `a`. A coordinator says a branch is ready; it never merges for you, and no
   machine says the project is finished.
 
-The three skills divide the work and none repeats another: `agent-manager-worker` is the heartbeat,
-`pmtui-spawn` is one dispatch, `agent-manager-coordinator` is the loop around them.
+The skills divide the work and none repeats another: `agent-manager-worker` is the heartbeat,
+`pmtui-spawn` is one dispatch, `pmtui-message` is one peer, and `agent-manager-coordinator` is the
+loop around them.
 
 ## Learn more
 
