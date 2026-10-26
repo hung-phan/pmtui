@@ -178,6 +178,53 @@ reaches your checkout until you press `a` on the finished row. `pmtui spawn --st
 this session asked for. `pmtui spawn --help` lists the flags, and
 [SPEC §4](docs/SPEC.md#4-features) defines the command's contract.
 
+## Talking to another session (`pmtui message`)
+
+A child job cannot answer you. A **peer** can: an agent in one managed session can send one message
+to another session's agent.
+
+```bash
+"$PMTUI_BIN" message --list                                  # who is reachable
+"$PMTUI_BIN" message --to <session-id> --message "<ask>" --json
+```
+
+`--list` prints `id (name)  engine  folder  — state`, and only a row marked `reachable` can take one
+now. **Address it by the id** — two sessions can share a display name and two can share a folder, so
+neither identifies one. If you only know a name, send to it anyway and the refusal names the id.
+
+A message arrives as **one ordinary user turn** in the other agent's terminal, wearing an envelope
+that names the sender and the command that replies — so a reply is just a message back, and there is
+no mailbox, no polling and nothing blocking. It goes through the same gate as your own `s`: it will
+not type over you while you are attached, will not answer a dialog, and will not interleave with a
+nudge. A peer **carries no authority** — the skill tells recipients to weigh an ask against their own
+goal and refuse what conflicts. Six messages to one peer in ten minutes is the bound, because two
+agents being polite to each other runs forever with nobody watching.
+
+Branch on `exit_code`: `0` delivered, `3` try again shortly (a human is attached there, a dialog is
+up, an unsent draft), `1` will not work by retrying, `2` usage. No dashboard need be running.
+
+## Running a queue of work (the coordinator skill)
+
+When a goal is bigger than one session can do in sequence and its parts can proceed without you, the
+session can run a **queue** instead of a single task. Every managed terminal gets the
+`agent-manager-coordinator` skill for it. Nothing to turn on — it applies when the work has that
+shape.
+
+Each wake it harvests its children in one call, decides what each finished one means, prunes, fills
+the free slots, and reports. The queue lives in the session's own continuity checkpoint, so it
+survives compaction and restart; a backlog longer than a page belongs in a file in the project.
+
+Two things are worth knowing as the human:
+
+- **Its cadence (`c`) is its latency.** Children are harvested when it wakes, so a coordinator with
+  work in flight wants a short cadence and an idle one wants a long one. It can propose its own.
+- **You are still the merge queue.** Children commit on their own branches and nothing reaches your
+  checkout until you press `a`. A coordinator says a branch is ready; it never merges for you, and no
+  machine says the project is finished.
+
+The three skills divide the work and none repeats another: `agent-manager-worker` is the heartbeat,
+`pmtui-spawn` is one dispatch, `agent-manager-coordinator` is the loop around them.
+
 ## Learn more
 
 - [**docs/GUIDE.md**](docs/GUIDE.md) — using it day to day: how the heartbeat works, what escalates
