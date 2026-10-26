@@ -13,10 +13,14 @@ use super::*;
 // have caught the worker skill shipping with an unparseable description.
 #[test]
 fn embedded_skill_frontmatter_has_no_unquoted_colon_in_a_value() {
+    // Every shipped skill, not only the three that existed when this guard was written: the bug
+    // it catches breaks the skill that carries the bad line, whichever one that is.
     for (name, md) in [
         ("worker", WORKER_SKILL_MD),
         ("decider", DECIDER_SKILL_MD),
         ("spawn", SPAWN_SKILL_MD),
+        ("message", MESSAGE_SKILL_MD),
+        ("coordinator", COORDINATOR_SKILL_MD),
     ] {
         let mut lines = md.lines();
         assert_eq!(
@@ -92,7 +96,7 @@ fn worker_skill_carries_the_non_negotiables_and_the_full_schema() {
     assert!(s.contains("A human decides when this session is complete"));
     assert!(s.contains("never mark the project finished yourself"));
     assert!(s.contains("or abandon it"));
-    assert!(s.contains("Ending a finite wake"));
+    assert!(s.contains("A finite wake that ends"));
     // The confirm_done sanction (moved out of the nudge).
     assert!(s.contains("confirm_done"));
     assert!(s.contains("\"state\": \"blocked\""));

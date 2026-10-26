@@ -30,7 +30,8 @@ pub use atomic::{
     read_json, read_json_opt, read_json_or, write_atomic, write_json_atomic, write_text_atomic,
 };
 pub use checkpoint::{
-    CheckpointActivity, CheckpointActivityStatus, WorkerCheckpoint, read_checkpoint,
+    CHECKPOINT_MAX_BYTES, CHECKPOINT_MAX_LIST_ITEMS, CheckpointActivity, CheckpointActivityStatus,
+    WorkerCheckpoint, read_checkpoint,
 };
 pub use paths::{ProjectPaths, STATE_DIR};
 pub use purge::purge_session_state;

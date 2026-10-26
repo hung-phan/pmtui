@@ -7,6 +7,7 @@ fn write_checkpoint(paths: &ProjectPaths, body: &str) {
 fn checkpoint() -> state::WorkerCheckpoint {
     state::WorkerCheckpoint {
         version: 1,
+        dropped: Vec::new(),
         seq: 12,
         done: vec!["implemented recovery".into()],
         in_progress: vec!["running verification".into()],

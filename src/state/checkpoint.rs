@@ -12,8 +12,13 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 const CHECKPOINT_VERSION: u32 = 1;
-const CHECKPOINT_MAX_BYTES: u64 = 64 * 1024;
-const CHECKPOINT_MAX_LIST_ITEMS: usize = 32;
+/// Whole-file limit. Stated in the worker skill, so it is `pub` and a test holds the prose to it.
+pub const CHECKPOINT_MAX_BYTES: u64 = 64 * 1024;
+/// Entries kept per string list. Generous on purpose: a coordinator session tracks its dispatch
+/// queue here, and measured realistic entries run ~60 bytes, so 256 of them is ~15 KiB — well
+/// inside [`CHECKPOINT_MAX_BYTES`], which stays the real governor because every reload prints the
+/// whole file into the agent's context.
+pub const CHECKPOINT_MAX_LIST_ITEMS: usize = 256;
 const CHECKPOINT_MAX_ACTIVITIES: usize = 16;
 const CHECKPOINT_MAX_TEXT_BYTES: usize = 512;
 const CHECKPOINT_MAX_ACTIVITY_ID_BYTES: usize = 128;
@@ -85,6 +90,11 @@ impl CheckpointActivityStatus {
 pub struct WorkerCheckpoint {
     pub version: u32,
     pub seq: u64,
+    /// What [`WorkerCheckpoint::clamp_lists`] removed on this read, as `"<list>: kept N of M"`.
+    /// Never read from or written to the file — it is provenance for the reader, so the agent can
+    /// be told what it lost instead of guessing.
+    #[serde(skip)]
+    pub dropped: Vec<String>,
     #[serde(default)]
     pub done: Vec<String>,
     #[serde(default)]
@@ -102,6 +112,36 @@ pub struct WorkerCheckpoint {
 }
 
 impl WorkerCheckpoint {
+    /// Keep the first [`CHECKPOINT_MAX_LIST_ITEMS`] of each string list and record what went.
+    ///
+    /// A list ONE item too long used to fail the whole read, and the worker skill tells an agent
+    /// that a rejected checkpoint means "ignore it and recover from the brief" — so a 33rd entry
+    /// cost the agent every entry. Losing the overflow and SAYING so is the lesser harm.
+    ///
+    /// Activities are deliberately not clamped here: each is a handle to detached work that
+    /// something must reconcile later, so dropping one silently orphans a process. That stays a
+    /// hard refusal in [`Self::validate`].
+    fn clamp_lists(&mut self) {
+        let mut dropped = Vec::new();
+        for (label, values) in [
+            ("done", &mut self.done),
+            ("in_progress", &mut self.in_progress),
+            ("decisions", &mut self.decisions),
+            ("blockers", &mut self.blockers),
+            ("next", &mut self.next),
+            ("important_files", &mut self.important_files),
+        ] {
+            if values.len() > CHECKPOINT_MAX_LIST_ITEMS {
+                dropped.push(format!(
+                    "{label}: kept {CHECKPOINT_MAX_LIST_ITEMS} of {}",
+                    values.len()
+                ));
+                values.truncate(CHECKPOINT_MAX_LIST_ITEMS);
+            }
+        }
+        self.dropped = dropped;
+    }
+
     fn validate(&self) -> Result<()> {
         if self.version != CHECKPOINT_VERSION {
             bail!(
@@ -198,8 +238,10 @@ pub fn read_checkpoint(path: &Path) -> Result<Option<WorkerCheckpoint>> {
             path.display()
         );
     }
-    let checkpoint: WorkerCheckpoint = serde_json::from_slice(&bytes)
+    let mut checkpoint: WorkerCheckpoint = serde_json::from_slice(&bytes)
         .with_context(|| format!("parse worker checkpoint {}", path.display()))?;
+    // Clamp BEFORE validating, so an over-long list costs its overflow and not the whole file.
+    checkpoint.clamp_lists();
     checkpoint.validate()?;
     Ok(Some(checkpoint))
 }
@@ -223,12 +265,6 @@ fn open_checkpoint(path: &Path) -> std::io::Result<File> {
 }
 
 fn validate_list(label: &str, values: &[String]) -> Result<()> {
-    if values.len() > CHECKPOINT_MAX_LIST_ITEMS {
-        bail!(
-            "worker checkpoint {label} has {} items; maximum is {CHECKPOINT_MAX_LIST_ITEMS}",
-            values.len()
-        );
-    }
     for value in values {
         validate_text(label, value, CHECKPOINT_MAX_TEXT_BYTES)?;
     }

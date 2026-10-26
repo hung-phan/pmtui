@@ -74,6 +74,17 @@ pub const CLAUDE_MESSAGE_SKILL_LINK_REL_PATH: &str = ".claude/skills/pmtui-messa
 /// Relative target from `.claude/skills/` to the canonical message skill directory.
 pub const CLAUDE_MESSAGE_SKILL_LINK_TARGET: &str = "../../.agents/skills/pmtui-message";
 
+/// The standing loop that turns `pmtui spawn` into a queue a session runs over many wakes. The
+/// worker skill owns the heartbeat and the spawn skill owns one dispatch; nothing joined them, so
+/// a session had no account of how to be a coordinator. Ships under the same gate as the others.
+pub const COORDINATOR_SKILL_MD: &str = include_str!("../skills/agent-manager-coordinator/SKILL.md");
+
+/// The coordinator skill's name, and its directory under `.agents/skills/` and `.claude/skills/`.
+pub const COORDINATOR_SKILL_NAME: &str = "agent-manager-coordinator";
+
+/// The canonical coordinator SKILL.md path relative to a project root.
+pub const COORDINATOR_SKILL_REL_PATH: &str = ".agents/skills/agent-manager-coordinator/SKILL.md";
+
 /// Relative target from `.claude/skills/` to the canonical directory of the skill `name`.
 pub fn claude_skill_link_target(name: &str) -> PathBuf {
     Path::new("../../.agents/skills").join(name)
@@ -181,6 +192,17 @@ pub fn install_spawn_skill(paths: &ProjectPaths, engine: Engine) -> anyhow::Resu
     )
 }
 
+/// Install the coordinator skill in `paths.root`, exactly as [`install_spawn_skill`] does for its own.
+pub fn install_coordinator_skill(paths: &ProjectPaths, engine: Engine) -> anyhow::Result<()> {
+    install_skill(
+        paths,
+        engine,
+        COORDINATOR_SKILL_NAME,
+        COORDINATOR_SKILL_REL_PATH,
+        COORDINATOR_SKILL_MD,
+    )
+}
+
 /// Install the message skill in `paths.root`, exactly as [`install_spawn_skill`] does for its own.
 pub fn install_message_skill(paths: &ProjectPaths, engine: Engine) -> anyhow::Result<()> {
     install_skill(
@@ -227,9 +249,10 @@ pub fn install_spawn_skill_for_launch(
     }
     let paths = ProjectPaths::new(root);
     install_spawn_skill(&paths, engine)?;
-    // Both skills run `"$PMTUI_BIN"`, so they ship together under the same gate. A failure in
-    // either is non-fatal to the launch, and `?` here still reports the first one.
-    install_message_skill(&paths, engine)
+    // All three run `"$PMTUI_BIN"`, so they ship together under the same gate. A failure in any is
+    // non-fatal to the launch, and `?` here still reports the first one.
+    install_message_skill(&paths, engine)?;
+    install_coordinator_skill(&paths, engine)
 }
 
 fn is_symlink(path: &Path) -> bool {
@@ -269,6 +292,14 @@ mod spawn_tests;
 #[cfg(test)]
 #[path = "skills/tests/message.rs"]
 mod message_tests;
+
+#[cfg(test)]
+#[path = "skills/tests/coordinator.rs"]
+mod coordinator_tests;
+
+#[cfg(test)]
+#[path = "skills/tests/plain_language.rs"]
+mod plain_language_tests;
 
 #[cfg(test)]
 #[path = "skills/tests/skill_files.rs"]

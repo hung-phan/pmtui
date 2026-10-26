@@ -115,6 +115,7 @@ fn seed_project(root: &Path, id: &str, engine: Engine) {
     .unwrap();
     crate::skills::install_spawn_skill(&paths, engine).unwrap();
     crate::skills::install_message_skill(&paths, engine).unwrap();
+    crate::skills::install_coordinator_skill(&paths, engine).unwrap();
 }
 
 fn check<'a>(checks: &'a [Check], id: &str) -> &'a Check {

@@ -3,6 +3,7 @@ use super::super::*;
 fn checkpoint() -> WorkerCheckpoint {
     WorkerCheckpoint {
         version: 1,
+        dropped: Vec::new(),
         seq: 7,
         done: vec!["implemented recovery".into()],
         in_progress: vec!["running integration tests".into()],
@@ -117,11 +118,8 @@ fn bounded_reader_accepts_the_limit_and_rejects_one_more_byte() {
 fn collection_and_text_bounds_are_enforced() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("checkpoint.json");
-    let mut value = checkpoint();
-    value.done = (0..33).map(|n| format!("done {n}")).collect();
-    write(&path, &value);
-    assert!(read_checkpoint(&path).is_err());
-
+    // A LONG LIST IS NO LONGER FATAL — see `an_over_long_list_loses_its_overflow_not_the_file`.
+    // The TEXT and ACTIVITY bounds below stay hard refusals, for reasons stated there.
     let mut value = checkpoint();
     value.next = vec!["x".repeat(513)];
     write(&path, &value);
@@ -140,6 +138,82 @@ fn collection_and_text_bounds_are_enforced() {
         .collect();
     write(&path, &value);
     assert!(read_checkpoint(&path).is_err());
+}
+
+/// AN OVER-LONG LIST COSTS ITS OVERFLOW, NOT THE WHOLE MEMORY.
+///
+/// A list one item past the cap used to fail the entire read, and the worker skill tells an agent
+/// that a rejected checkpoint means "ignore it and recover from the brief" — so a 33rd entry cost
+/// it every entry. Measured before the change: 40 realistic entries are ~2 KB, far inside the
+/// 64 KiB file cap, so the item cap was refusing files that were nowhere near too big to read.
+#[test]
+fn an_over_long_list_loses_its_overflow_not_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("checkpoint.json");
+
+    // What used to be fatal now loads whole.
+    let mut value = checkpoint();
+    value.done = (0..33).map(|n| format!("done {n}")).collect();
+    write(&path, &value);
+    let loaded = read_checkpoint(&path)
+        .expect("33 entries is not fatal")
+        .unwrap();
+    assert_eq!(loaded.done.len(), 33);
+    assert!(
+        loaded.dropped.is_empty(),
+        "nothing was dropped: {:?}",
+        loaded.dropped
+    );
+
+    // Past the cap: the overflow goes, the file loads, and the reader SAYS what it lost — an agent
+    // silently short a few entries cannot tell that from having written them wrong.
+    let mut value = checkpoint();
+    value.next = (0..300).map(|n| format!("task {n}")).collect();
+    value.done = (0..300).map(|n| format!("done {n}")).collect();
+    write(&path, &value);
+    let loaded = read_checkpoint(&path)
+        .expect("an over-long list still loads")
+        .unwrap();
+    assert_eq!(loaded.next.len(), 256);
+    assert_eq!(loaded.done.len(), 256);
+    assert_eq!(
+        loaded.dropped,
+        vec!["done: kept 256 of 300", "next: kept 256 of 300"],
+        "every clamped list is named, in field order"
+    );
+    assert_eq!(loaded.next[0], "task 0", "the OLDEST entries are kept");
+
+    // `dropped` is provenance for this read, never file content: it must not round-trip.
+    write(&path, &loaded);
+    let again = read_checkpoint(&path).expect("re-read").unwrap();
+    assert!(again.dropped.is_empty(), "{:?}", again.dropped);
+    assert_eq!(
+        again.next.len(),
+        256,
+        "and the clamped lists are now simply short"
+    );
+}
+
+/// AN ACTIVITY IS NOT CLAMPED. Each one is a handle to detached work that something must reconcile,
+/// so dropping one silently orphans a process — that stays a refusal rather than a truncation.
+#[test]
+fn too_many_activities_is_still_a_refusal() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("checkpoint.json");
+    let mut value = checkpoint();
+    value.activities = (0..17)
+        .map(|n| CheckpointActivity {
+            id: format!("activity-{n}"),
+            status: CheckpointActivityStatus::Waiting,
+            handle: None,
+            output_ref: None,
+            started_unix_s: None,
+            deadline_unix_s: None,
+        })
+        .collect();
+    write(&path, &value);
+    let error = read_checkpoint(&path).expect_err("activities are never truncated");
+    assert!(error.to_string().contains("activities"), "{error:#}");
 }
 
 #[test]

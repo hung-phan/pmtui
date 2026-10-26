@@ -58,7 +58,7 @@ fn it_tells_the_agent_to_branch_on_exit_codes_and_not_to_block() {
     // The whole reason there is no mailbox: an agent that waits on a peer's turn can deadlock
     // with it, and burns its own turn doing nothing.
     assert!(
-        prose.contains("Nothing blocks"),
+        prose.contains("The send does not wait"),
         "it must say the send does not wait"
     );
     assert!(

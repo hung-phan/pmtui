@@ -295,6 +295,30 @@ time. The engines give no way to ask for a final result, so time is all that a s
 - The dashboard MUST NOT wait for a process to die.
 - If a job reported before the stop arrived, the product keeps the outcome of the job.
 
+### To Coordinate Work
+
+A session MAY hold a queue of work and keep child jobs at work on it. The product gives it a
+procedure for this, installed with the others and under the same condition.
+
+The procedure tells the worker to keep its queue in its own continuity file, because the product
+compacts its context and the queue MUST survive that. It tells the worker that the file is read back
+into its context each time, so a queue longer than a page belongs in a file in the project.
+
+The worker harvests its children when it wakes, so the cadence it asks for is the delay it accepts.
+A worker that asks to wake often MUST report what its children are doing each time. A report that
+repeats itself is how the product finds a worker that is stuck, so a worker that says only "waiting"
+at a fast cadence asks to be treated as stuck.
+
+The procedure does not repeat the spawn procedure. It adds the loop: harvest, decide what each
+finished child means, keep the queue current, and fill the free places.
+
+A child is told its task and nothing else, and nobody is at its terminal. So the procedure tells the
+worker that work which needs a conversation is not ready to give away, and that each part it does
+give away MUST own its own files and name how to check it.
+
+Integration stays with the person: the worker says a branch is ready and the person applies it. The
+worker MUST NOT merge for them, and MUST NOT say the project is complete.
+
 ### The Spawn Procedure
 
 Each launch that names the dashboard program first installs the spawn procedure into the project directory

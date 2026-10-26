@@ -227,6 +227,13 @@ server and daemon when the test ends.
   win. Never read a running engine's own files to guess an identity; `/proc` scraping is Linux-only and
   races the engine's startup. An id arrives only after the first completed turn, and one that does not
   parse is "not known yet" — never an argument.
+- A worker's `checkpoint.json` bounds fail DIFFERENTLY, and an agent is told which is which. Over
+  the whole-file limit the reload is refused and the agent loses every entry — measured, that cost
+  a session its entire continuity for ONE item past a list cap that was refusing files of 2 KB
+  against a 64 KiB budget. A single over-long list now keeps its oldest entries and names what went
+  under `dropped`; an over-long ACTIVITY list is still refused outright, because each activity is a
+  handle to detached work and dropping one silently orphans a process. The stated caps and the
+  enforced constants are held together by a test.
 - No machine declares a project done. The human closes the session.
 
 ## Spawn Command Surface
@@ -313,8 +320,24 @@ empty one, so an empty answer NAMES the file it read rather than blaming the id.
   presenting it; pure, so every awkward state is tested without a network. `src/bin/pmtui/app/
   updates.rs` is the half that runs the installer.
 - `src/bin/pmtui/`: dashboard state, actions, rendering, and terminal handoff.
+- `skills/`: the shipped skill TEXT, embedded by `src/skills.rs` and installed into a project root
+  at launch. Three compose and none repeats another: `agent-manager-worker` is the heartbeat,
+  `pmtui-spawn` is one dispatch, `agent-manager-coordinator` is the standing loop that turns the
+  second into a queue run over many wakes. A test holds each one's rules, and the coordinator's
+  tests assert it does NOT restate the spawn skill's outcome vocabulary — two copies drift.
+  EVERY SKILL IS WRITTEN IN SIMPLIFIED TECHNICAL ENGLISH (ASD-STE100): one instruction per
+  sentence, 20 words at most, no metaphor, and no em-dash aside. A technical name (wake, nudge,
+  marker, stop, job, peer) is kept and DEFINED on first use rather than replaced. Not a style
+  preference — the reader is an LLM reading a procedure, and the files had drifted into 40-word
+  sentences with stacked clauses, which is what "sounds like jargon" means in practice.
+  `src/skills/tests/plain_language.rs` enforces the two mechanical halves (sentence length and the
+  em dash) across all six, because that drift arrives one reasonable-looking edit at a time. It
+  deliberately does NOT police word choice: a blocklist is judgement, and judgement belongs in
+  review. When a rule's wording changes, the test that pins that rule changes with it in the same
+  commit.
 - `.agents/skills/`: canonical project-local skills; `.claude/skills/` contains compatibility
-  symlinks only.
+  symlinks only. `pmtui-ui-testing` lives only here, and `plain_language.rs` reaches it with
+  `include_str!` so it is held to the same standard as the shipped five.
 - Tests live beside code; real terminal acceptance lives in `tests/integration/`.
 
 ## Test Placement
