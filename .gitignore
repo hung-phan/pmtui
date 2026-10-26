@@ -16,6 +16,8 @@
 /.claude/skills/pmtui-spawn
 /.agents/skills/pmtui-message/
 /.claude/skills/pmtui-message
+/.agents/skills/agent-manager-coordinator/
+/.claude/skills/agent-manager-coordinator
 
 # Internal design history: kept outside this repository, never published.
 # It was re-added once by a `git add -A` after being excluded from a commit.

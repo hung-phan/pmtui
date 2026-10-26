@@ -9,7 +9,7 @@
 ![Runs on](https://img.shields.io/badge/runs%20on-tmux-1a1b26?style=for-the-badge&logo=tmux)
 ![Status](https://img.shields.io/badge/status-beta-1a1b26?style=for-the-badge)
 
-[Install](#install) · [Quick start](#quick-start) · [Keys](#keys-pmtui) · [Guide](docs/GUIDE.md) · [Spec](docs/SPEC.md)
+[Install](#install) · [Quick start](#quick-start) · [Keys](#keys-pmtui) · [Ways to use it](#ways-to-use-it) · [Guide](docs/GUIDE.md) · [Spec](docs/SPEC.md)
 
 </div>
 
@@ -113,6 +113,48 @@ session list.
 | `i` | edit the standing directive (autopilot) | `e` | pick the decider **engine + model** (autopilot) |
 | `q` | quit | `v` | turn and decision audit (autopilot) |
 | `w` | set the **worker model** for the selected session (restart to apply) | `?` | key reference |
+
+## Ways to use it
+
+Four shapes, in the order people grow into them. They are the same product with different dials —
+nothing to install or configure to move between them.
+
+**1. One agent, and you watching.** The default after `n`: a Standard session. No daemon, no
+cadence, nothing nudging it. `enter` attaches, `ctrl+q` leaves it running, and `s` says one thing
+without taking the terminal over. Right for a long task you would rather steer than babysit.
+
+**2. One agent, unattended.** `m` for autopilot, then `g` for the goal. A running `pmd` nudges it on
+its cadence, the decider answers routine choices *from that goal*, and only what needs you reaches
+you. Two levers, and they are not the same: the **goal** (`g`) is where it steers, the **directive**
+(`i`) is your standing "never do X" that applies on every wake.
+
+**3. Several projects at once.** The Sessions rail is ordered by who needs you, and Tasks (`2`) is
+the same sessions as columns that answer "what next". The point is to stop polling: leave the
+dashboard open and let it tell you. `/` jumps straight to a session, `v` shows what autopilot did
+while you were elsewhere.
+
+**4. One agent that fans work out.** Hand the independently-specifiable parts to child jobs
+([below](#handing-work-to-a-child-job-pmtui-spawn)) and keep the rest. For a queue that outlives one
+wake, the session also gets the `agent-manager-coordinator` skill: harvest children each wake, keep
+the queue in its checkpoint, refill the free slots, report. Children work in their own worktrees;
+you integrate with `a`.
+
+### Getting more out of it
+
+- **Cadence is your latency *and* your spend** (`c`). A session waiting on a slow build wants
+  minutes; a tight edit loop wants a couple; an idle one wants half an hour. An agent can also
+  propose its own from its report, so it is allowed to learn the work's real rhythm.
+- **Put your effort into the goal, not into nudging.** Every nudge steers by it, so a vague goal
+  costs you on every wake. A sharp one is the cheapest thing you can do.
+- **The directive is for rules, not tasks.** "Never touch production data" belongs there; "fix the
+  parser" belongs in the goal.
+- **Don't attach just to find out what happened.** `v` is the turn and decision audit, and the
+  preview already shows the live transcript.
+- **Pay for the big model where it matters** (`w`, per session) and pick the decider's engine and
+  model separately (`e`) — the thing answering routine choices need not be the thing writing code.
+- **A job cannot ask you a question.** When you spawn, write the Message as a self-contained
+  spec — target, change, constraints, ownership, acceptance — because that is all the child ever
+  sees.
 
 ## Handing work to a child job (`pmtui spawn`)
 

@@ -72,7 +72,14 @@ URLs in it.
 
 Overwrite it atomically (tmp+rename), bump `seq` whenever its substance changes, keep entries short,
 and remove completed background activities once their outcome is captured under `done`, `decisions`,
-or `blockers`:
+or `blockers`.
+
+The two size bounds below FAIL DIFFERENTLY, which is worth knowing before you hit one. Exceed the
+whole-file limit and the reload is refused outright — you lose the entire checkpoint, so keep each
+entry to a line instead of pasting output into it. Exceed a single list's limit and you lose only
+the overflow: the reload keeps the oldest entries and names what it dropped under `dropped`, so
+read that key. Either way, a long list of work belongs in a file in the project named under
+`important_files`, not carried here — every reload prints this whole file back into your context.
 
     {
       "version": 1,
@@ -95,7 +102,7 @@ or `blockers`:
       "important_files": ["<path needed to resume accurately>"]
     }
 
-The file is bounded: at most 64 KiB; at most 32 entries in each ordinary list; at most
+The file is bounded: at most 64 KiB; at most 256 entries in each ordinary list; at most
 16 activities; ordinary strings at most 512 bytes; activity ids at most 128 bytes; handles and
 output references at most 1024 bytes. Running/waiting activity windows are at most 86400 seconds.
 Use `pid:<pid>@start:<process-start>`, or `<tmux|ci|agent|job|external>:<owner>/<id>` handles; a PID

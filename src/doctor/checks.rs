@@ -167,6 +167,7 @@ fn skip_project_files(index: usize, label: &str, checks: &mut Vec<Check>) {
         (WORKER_SKILL.check, WORKER_SKILL.noun),
         (SPAWN_SKILL.check, SPAWN_SKILL.noun),
         (MESSAGE_SKILL.check, MESSAGE_SKILL.noun),
+        (COORDINATOR_SKILL.check, COORDINATOR_SKILL.noun),
     ] {
         checks.push(Check::skip(
             format!("project.{index}.{name}"),
@@ -318,6 +319,13 @@ fn inspect_project_files(
         &paths.root.join(crate::skills::MESSAGE_SKILL_REL_PATH),
         checks,
     );
+    inspect_skill(
+        index,
+        label,
+        &COORDINATOR_SKILL,
+        &paths.root.join(crate::skills::COORDINATOR_SKILL_REL_PATH),
+        checks,
+    );
     inspection
 }
 
@@ -356,6 +364,15 @@ const MESSAGE_SKILL: ShippedSkill = ShippedSkill {
     body: crate::skills::MESSAGE_SKILL_MD,
     refresh: "restart the session from pmtui so its next launch refreshes the message skill",
     install: "start or restart the session from pmtui so its launch installs the message skill",
+};
+
+/// Ships under the same gate as the spawn and message skills, so it is remediated the same way.
+const COORDINATOR_SKILL: ShippedSkill = ShippedSkill {
+    check: "coordinator_skill",
+    noun: "coordinator skill",
+    body: crate::skills::COORDINATOR_SKILL_MD,
+    refresh: "restart the session from pmtui so its next launch refreshes the coordinator skill",
+    install: "start or restart the session from pmtui so its launch installs the coordinator skill",
 };
 
 /// Compare the canonical copy at `path` with the shipped body: current passes, a stale or missing
