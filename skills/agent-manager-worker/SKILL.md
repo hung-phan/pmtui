@@ -1,6 +1,6 @@
 ---
 name: agent-manager-worker
-description: The wake-loop protocol for an agent-manager worker session. Invoke on every wake, when the harness nudge says "continue per your agent-manager worker skill". It reloads the machine-report (WakeReport) schema and the operating rules. You reach the human only through the harness, which means through your decision marker. You never decide when the project is done. You report on EVERY wake, with a fresh status and next_step, by overwriting your decision marker.
+description: The wake-loop protocol for an agent-manager worker session. Invoke on every wake, when the harness nudge says "Continue the goal per your /agent-manager-worker skill". It reloads the machine-report (WakeReport) schema and the operating rules. You reach the human only through the harness, which means through your decision marker. You never decide when the project is done. You report on EVERY wake, with a fresh status and next_step, by overwriting your decision marker.
 ---
 
 # agent-manager worker loop protocol

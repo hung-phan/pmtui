@@ -1,6 +1,6 @@
 ---
 name: pmtui-ui-testing
-description: How to render and drive the pmtui dashboard under tmux, to test the UI end to end. Launch it headless on a scratch tmux server and a scratch registry. Navigate with send-keys, and read the screen back with capture-pane. Set up a render state by seeding .project-state/ files. Invoke whenever you change what the dashboard draws. That includes src/bin/pmtui/, the render code for a row, preview, help or chrome, the glyphs and the keybar. Invoke it also when you want to SEE a result instead of trusting a unit test. Invoke it when the user asks you to render, screenshot or verify the TUI.
+description: How to render and drive the pmtui dashboard under tmux, to test the UI end-to-end. Launch it headless on a scratch tmux server and a scratch registry. Navigate with send-keys, and read the screen back with capture-pane. Set up a render state by seeding .project-state/ files. Invoke whenever you change what the dashboard draws. That includes src/bin/pmtui/, the render code for a row, preview, help or chrome, the glyphs and the keybar. Invoke it also when you want to SEE a result instead of trusting a unit test. Invoke it when the user asks you to render, screenshot or verify the TUI.
 ---
 
 # Testing the pmtui UI with tmux

@@ -1,6 +1,6 @@
 ---
 name: pmtui-spawn
-description: Give one independent part of your task to a child job. A child job is one headless agent run that does the task, reports a result and exits. Invoke when another agent could do that part without you. Send it one complete Message, read its result, and act on the JSON.
+description: Dispatch one independent part of your task to a child job. A child job is one headless agent run that does the task, reports a result and exits. Invoke when another agent could do that part without you. Dispatch it with one complete Message, poll for its result, and act on the JSON.
 ---
 
 # Spawn a child job
