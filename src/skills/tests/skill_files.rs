@@ -157,9 +157,11 @@ fn decider_skill_formalizes_the_consult_ladder() {
         s.contains("SITUATION"),
         "explains how to read the C situation block"
     );
-    // verify-don't-defer-to-precedent (C's core anti-rubber-stamp rule).
-    assert!(s.contains("verify"));
-    assert!(s.contains("precedent"));
+    // verify-don't-defer-to-precedent (C's core anti-rubber-stamp rule). Case-insensitive: the
+    // rule is what matters, and in short STE sentences either word can fall at a sentence start.
+    let lower = s.to_lowercase();
+    assert!(lower.contains("verify"));
+    assert!(lower.contains("precedent"));
     // It must not weaken the read-only, two-writers rule.
     assert!(s.contains("READ-ONLY"));
     assert!(s.contains("cannot write"));
