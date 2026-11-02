@@ -10,11 +10,28 @@
 //! The draft check reads a STYLED capture (`capture-pane -e`): Claude's hint and a typed draft
 //! are the same characters in the same place, and only the hint is drawn dim. Every other check
 //! reads [`unstyled`] text.
+//!
+//! Both engines' "this is chrome, not typed text" style rules live here together so a reader can
+//! compare them: [`is_hint_style`] for Claude's dim hint, and [`placeholder_drawn`] for Codex's
+//! rotating placeholder, which `real::codex_draft_visible` reads after its Enter.
+//!
+//! Only CODEX needs that after-the-Enter question, and that boundary is measured rather than
+//! assumed: codex's first Enter confirms the paste, so a second is required, while claude 2.1.316
+//! submits on one (checked three ways through a real pane, including with no gap before the Enter).
+//! A claude-side `claude_draft_visible` lived here briefly on the opposite belief and bought
+//! nothing but a 300ms guard inside `input.lock` and a predicate that could fail a send which
+//! actually landed.
+//!
+//! [`classify_pane_styled`] is deliberately NOT widened to read Codex's composer: a drafted Codex
+//! box would then classify Busy and draw the working glyph on an agent that is doing nothing,
+//! which is the one thing the status-glyph invariant forbids.
 
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::Line;
 
 use super::activity::{
-    PaneActivity, classify_with, claude_box, is_box_top_rule, is_prompt_row, is_spinner_glyph,
+    PaneActivity, classify_with, claude_box, is_box_top_rule, is_codex_composer, is_prompt_row,
+    is_spinner_glyph,
 };
 
 /// How a feedback-survey row begins, lowercased. Taken from a production report of another tmux
@@ -156,6 +173,78 @@ pub fn claude_draft_in_box(styled: &str) -> bool {
             .skip(skip)
             .any(|(_, style)| !is_hint_style(style))
     })
+}
+
+/// Whether CODEX's live composer holds anything that is not its own rotating placeholder.
+///
+/// The text-free question `pane_refusal` can ask, so a send is refused onto a Codex box that is
+/// already holding unsent text instead of being appended to it. Without this, a `send_keys` that
+/// bailed on an unsubmittable draft is reported as "ask again under the same arguments", and
+/// asking again DOUBLES the text in that box.
+///
+/// Reads the last `›` row, the live one. A dialog-option row is never a draft
+/// ([`is_codex_composer`] is false on it); a `[Pasted Content ` label always is; the dim
+/// placeholder never is ([`placeholder_drawn`]).
+pub fn codex_draft_in_box(styled: &str) -> bool {
+    let lines = crate::ansi::styled_lines(styled);
+    let rows: Vec<String> = lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect()
+        })
+        .collect();
+    let Some(at) = (0..rows.len())
+        .rev()
+        .find(|&at| is_codex_composer(&rows[at]))
+    else {
+        return false;
+    };
+    let draft = rows[at]
+        .trim()
+        .strip_prefix('›')
+        .map(str::trim)
+        .unwrap_or_default();
+    if draft.starts_with("[Pasted Content ") {
+        return true;
+    }
+    // A ROW WITH NO STYLE AT ALL ANSWERS NOTHING, so it is not a draft.
+    //
+    // Measured, by the real-tmux dispatch acceptance: it drives a STUB agent that prints a plain
+    // `› Ready`, and with this read as a draft every `s` to that pane was refused with "the agent's
+    // input box has unsent text". That is not a retryable refusal — the pane never changes, so
+    // `pmtui message` answers 3 ("ask again under the SAME arguments") forever. Failing open here
+    // only skips the doubling guard on a pane that is not a real codex composer; failing closed
+    // cost the message outright. Production always passes `capture_tail_styled`, where codex's
+    // placeholder is dim and typed text is not, so the case this exists for is unaffected.
+    if lines[at]
+        .spans
+        .iter()
+        .all(|span| span.style == Style::default())
+    {
+        return false;
+    }
+    if placeholder_drawn(&lines[at]) {
+        return false;
+    }
+    !draft.is_empty()
+}
+
+/// Whether the composer row's first visible character after its `›` lead is drawn dim, the style
+/// Codex gives its placeholder and never typed text.
+///
+/// Codex's answer to the question [`is_hint_style`] answers for Claude. Both engines draw chrome
+/// in the composer that a naive "is the box non-empty" check reads as a human's draft.
+pub(super) fn placeholder_drawn(row: &Line<'_>) -> bool {
+    row.spans
+        .iter()
+        .flat_map(|span| span.content.chars().map(move |ch| (ch, span.style)))
+        .skip_while(|(ch, _)| ch.is_whitespace())
+        .skip(1)
+        .find(|(ch, _)| !ch.is_whitespace())
+        .is_some_and(|(_, style)| style.add_modifier.contains(Modifier::DIM))
 }
 
 /// Whether a cell is drawn the way a hint is: dim (SGR 2), or in a grey foreground.

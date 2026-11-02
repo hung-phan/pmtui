@@ -5,8 +5,6 @@
 //! silently failed once already.
 
 use anyhow::{Context, Result, bail};
-use ratatui::style::Modifier;
-use ratatui::text::Line;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -62,7 +60,7 @@ pub(super) fn codex_draft_visible(capture: &str, text: &str, pasted: bool) -> bo
     if draft.starts_with("[Pasted Content ") {
         return true;
     }
-    if placeholder_drawn(&lines[at]) {
+    if super::send_gate::placeholder_drawn(&lines[at]) {
         return false;
     }
     if !pasted {
@@ -81,18 +79,6 @@ pub(super) fn codex_draft_visible(capture: &str, text: &str, pasted: bool) -> bo
         let prefix: String = line.chars().take(CODEX_DRAFT_MATCH_CHARS).collect();
         !prefix.is_empty() && draft.starts_with(&prefix)
     })
-}
-
-/// Whether the composer row's first visible character after its `›` lead is drawn dim, the style
-/// Codex gives its placeholder and never typed text.
-fn placeholder_drawn(row: &Line<'_>) -> bool {
-    row.spans
-        .iter()
-        .flat_map(|span| span.content.chars().map(move |ch| (ch, span.style)))
-        .skip_while(|(ch, _)| ch.is_whitespace())
-        .skip(1)
-        .find(|(ch, _)| !ch.is_whitespace())
-        .is_some_and(|(_, style)| style.add_modifier.contains(Modifier::DIM))
 }
 
 /// POSIX single-quote escaping so arbitrary argv/paths survive the shell.
@@ -122,6 +108,15 @@ pub(crate) fn shq(s: &str) -> String {
 /// 4 KiB for them: room for a working directory a kilobyte or so deep, since the state
 /// directory repeats it.
 pub const LAUNCH_COMMAND_MAX_BYTES: usize = 12 * 1024;
+
+/// How [`Driver::send_keys`] says its submit proof failed: the text was pasted and every Enter it
+/// is allowed left it sitting in the composer.
+///
+/// A CONST because a caller must be able to tell this failure from every other one, and it is the
+/// one send error that is NOT transient. The bytes are in the box; another attempt cannot clear
+/// them, only a person can. `pmtui message` reads it to answer 1 rather than 3 — 3 means "ask again
+/// under the SAME arguments", which here is an invitation to loop forever.
+pub const SUBMIT_UNPROVEN: &str = "the composer still held the message";
 
 /// The shell command [`TmuxDriver`] runs for an interactive `argv`: every argument
 /// single-quoted ([`shq`]) and space-joined. [`LAUNCH_COMMAND_MAX_BYTES`] bounds its length.
@@ -1001,12 +996,33 @@ impl Driver for TmuxDriver {
                 .status()
                 .context("run tmux send-keys (Enter)")
         };
+        // THE PROOF IS CODEX'S ALONE, and that is a MEASURED boundary rather than an oversight.
+        //
+        // Codex needs the second Enter: the first only confirms the paste, which is why this loop
+        // exists at all. Claude does not. Measured on 2.1.316 through a real pane, three ways — a
+        // 70-byte multiline paste, a 996-byte one, and a paste with no gap before the Enter at all
+        // (testing for a race, since the driver waits only 100-200ms) — every one submitted on ONE
+        // Enter, confirmed by the turn starting and the session's own cost counter moving.
+        //
+        // A recheck arm for claude was written here on the belief that its first Enter confirms the
+        // paste and strands the text in the box. Nothing reproduced it. It would have cost a 300ms
+        // guard on every nudge, held inside `input.lock`, plus a predicate that can fail a send
+        // that actually landed — two of its misreads shipped green past 1144 unit tests before the
+        // real-tmux suite caught them. Insurance against a disproved failure is a liability.
+        //
+        // `pane_refusal` still reads BOTH composers, because that is a different question: the bail
+        // below becomes exit 3 ("ask again under the SAME arguments") and a retry must not paste
+        // onto codex's stranded text.
         let attempts = if codex { CODEX_SUBMIT_ATTEMPTS } else { 1 };
         for attempt in 0..attempts {
             let status = send_enter()?;
             if !status.success() {
                 bail!("tmux send-keys (Enter) failed for session {session}");
             }
+            // Claude's ONE Enter submits, so there is nothing left to prove and nothing to wait
+            // for. The return is here rather than above the loop because the Enter still has to be
+            // sent — hoisting it skips the submit entirely, which is a mistake this comment exists
+            // to stop the next reader repeating.
             if !codex {
                 return Ok(());
             }
@@ -1018,7 +1034,7 @@ impl Driver for TmuxDriver {
             }
             if attempt + 1 == attempts {
                 bail!(
-                    "Codex draft remained visible after {CODEX_SUBMIT_ATTEMPTS} submission attempts for session {session}"
+                    "{SUBMIT_UNPROVEN} after {CODEX_SUBMIT_ATTEMPTS} Enter presses for session {session}"
                 );
             }
         }

@@ -2,19 +2,9 @@ use serde_json::Value;
 
 use super::*;
 
-const ALL_STATES: [ReceiptState; 11] = [
-    ReceiptState::Claimed,
-    ReceiptState::Staged,
-    ReceiptState::Launching,
-    ReceiptState::Ready,
-    ReceiptState::NeedsAttention,
-    ReceiptState::Failed,
-    ReceiptState::OutcomeUnknown,
-    ReceiptState::Done,
-    ReceiptState::NeedsHuman,
-    ReceiptState::EndedWithoutResult,
-    ReceiptState::Cancelled,
-];
+/// Production's own list, not a copy of it: a second enumeration beside the assertions drifts, and
+/// the `ErrorCode` pairs below are what it costs when one does.
+const ALL_STATES: [ReceiptState; 11] = ReceiptState::ALL;
 
 /// Every dotted path in `value` whose last key is `key`.
 fn key_paths(value: &Value, key: &str, prefix: &str, found: &mut Vec<String>) {
@@ -246,7 +236,17 @@ fn error_codes_and_next_action_kinds_use_the_spec_names() {
         (ErrorCode::RegistryUnreadable, "registry_unreadable"),
         (ErrorCode::LaunchFailed, "launch_failed"),
         (ErrorCode::ReadinessUnknown, "readiness_unknown"),
+        (ErrorCode::JobFailed, "job_failed"),
     ];
+    // THE TIE THAT WAS MISSING. `job_failed` is the code the spawn skill tells an agent to branch
+    // on, and it was absent from this list: a rename would have broken every reader and nothing
+    // here would have failed. The length check is what makes the next addition impossible to
+    // forget — it fails before the renamer reaches the skill.
+    assert_eq!(
+        codes.len(),
+        ErrorCode::ALL.len(),
+        "every ErrorCode needs its wire name pinned here"
+    );
     for (code, name) in codes {
         assert_eq!(serde_json::to_value(code).unwrap(), name);
         assert_eq!(

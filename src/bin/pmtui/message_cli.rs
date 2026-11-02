@@ -211,6 +211,20 @@ pub(crate) fn render_list_json(path: &Path, peers: &[Peer]) -> String {
     .unwrap_or_default()
 }
 
+/// The document a FAILED `--list` prints under `--json`, on stdout, alongside its exit 1. Same keys
+/// a send's envelope carries (`status`, `detail`, `exit_code`, `ok`), because that is what an agent
+/// already branches on for this command — and `docs/SPEC.md` requires a JSON command to print JSON
+/// on a nonzero exit, so that an agent reads the document rather than the code alone.
+pub(crate) fn render_list_error_json(why: &str) -> String {
+    serde_json::to_string_pretty(&serde_json::json!({
+        "status": "failed",
+        "detail": why,
+        "exit_code": 1,
+        "ok": false,
+    }))
+    .unwrap_or_default()
+}
+
 pub(crate) fn render_list_plain(path: &Path, peers: &[Peer]) -> String {
     if peers.is_empty() {
         return format!(
@@ -517,14 +531,25 @@ pub(crate) fn run_message(cli: &MessageCli, deps: &MessageDeps<'_>) -> MessageOu
             from,
             hop: hops.count,
         },
-        // The write path's own refusals (the lock was busy, a client attached, the pane changed
-        // while we waited) are all transient by construction.
-        Err(error) => MessageOutput {
-            status: Status::Refused,
-            detail: format!("{error:#}"),
-            to,
-            from,
-            hop: hops.count,
-        },
+        // The write path's refusals are transient by construction — the lock was busy, a client
+        // attached, the pane changed while we waited — with ONE exception, and it is the one that
+        // matters most. A failed SUBMIT PROOF means the bytes were pasted and every Enter left them
+        // in the composer: another attempt cannot clear them, only a person can. Answering 3 there
+        // would be telling the sender to "ask again under the SAME arguments" forever, so it is 1,
+        // and the detail names what a human has to do.
+        Err(error) => {
+            let detail = format!("{error:#}");
+            MessageOutput {
+                status: if detail.contains(tmux::SUBMIT_UNPROVEN) {
+                    Status::Failed
+                } else {
+                    Status::Refused
+                },
+                detail,
+                to,
+                from,
+                hop: hops.count,
+            }
+        }
     }
 }

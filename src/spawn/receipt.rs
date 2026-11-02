@@ -35,6 +35,26 @@ pub enum ReceiptState {
 }
 
 impl ReceiptState {
+    /// Every variant, in declaration order, so a test can iterate the whole enum.
+    ///
+    /// HERE rather than in the test that reads it. A hand-kept copy beside the assertions drifts
+    /// from the enum silently — the `ErrorCode::ALL` below exists because its copy did, and
+    /// `job_failed` went untested for exactly as long as the skill told agents to branch on it.
+    /// Next to the definition, a new variant and this list are one screen apart.
+    pub const ALL: [ReceiptState; 11] = [
+        Self::Claimed,
+        Self::Staged,
+        Self::Launching,
+        Self::Ready,
+        Self::NeedsAttention,
+        Self::Failed,
+        Self::OutcomeUnknown,
+        Self::Done,
+        Self::NeedsHuman,
+        Self::EndedWithoutResult,
+        Self::Cancelled,
+    ];
+
     /// True for every launch outcome and every job outcome — everything a parent may stop polling on.
     pub fn is_final(self) -> bool {
         matches!(
@@ -88,6 +108,30 @@ pub enum ErrorCode {
     /// an `error.code` — v1's contract is "act on `error.code`", and a job failure must not be the one
     /// `failed` that has none. The result's summary is the message, and `result` carries the rest.
     JobFailed,
+}
+
+impl ErrorCode {
+    /// Every variant, in declaration order. The wire-name test iterates this and asserts its own
+    /// pair list is the same length, so a new code cannot ship with an untested name — which is
+    /// what happened to [`Self::JobFailed`], the one code the spawn skill tells an agent to branch
+    /// on by name.
+    pub const ALL: [ErrorCode; 15] = [
+        Self::NotInASession,
+        Self::InvalidArgument,
+        Self::RequestConflict,
+        Self::RequestUnwritable,
+        Self::ParentNotFound,
+        Self::NestedSpawnRefused,
+        Self::ChildLimitReached,
+        Self::DirNotFound,
+        Self::DirNotAllowed,
+        Self::MessageTooLong,
+        Self::InvalidRequest,
+        Self::RegistryUnreadable,
+        Self::LaunchFailed,
+        Self::ReadinessUnknown,
+        Self::JobFailed,
+    ];
 }
 
 /// A machine-readable code with a human-readable explanation.

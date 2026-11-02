@@ -231,9 +231,15 @@ pub(crate) fn write_to_pane(d: &dyn tmux::Driver, t: &SendTarget, text: &str) ->
 ///
 /// Shared by [`send_decision`] and `App::deliver`'s final recheck, so the press and the write
 /// can never disagree about what is safe. In order: a dialog (the `Enter` would answer it), the
-/// feedback survey drawn by the input box (its digit keys would answer it), no prompt at all, and a person's unsent draft in
-/// the box (our text would be glued onto theirs and submitted). The dialog check precedes the
-/// prompt check so its clearer reason wins; `has_composer_in_tail` refuses a dialog anyway.
+/// feedback survey drawn by the input box (its digit keys would answer it), no prompt at all, and
+/// unsent text in EITHER engine's composer — Claude's box or Codex's `›` row — which our text
+/// would be glued onto and submitted. The dialog check precedes the prompt check so its clearer
+/// reason wins; `has_composer_in_tail` refuses a dialog anyway.
+///
+/// The Codex arm is what stops a refused send from doubling. `send_keys` bails when a composer
+/// still holds the message after its Enter presses, and `pmtui message` maps that to exit 3,
+/// documented as "ask again under the SAME arguments" — so without this arm the retry pastes onto
+/// the text already stuck in that box.
 pub(crate) fn pane_refusal(styled: &str) -> Option<&'static str> {
     let cap = tmux::unstyled(styled);
     if tmux::classify_dialog(&cap).is_some() {
@@ -245,7 +251,7 @@ pub(crate) fn pane_refusal(styled: &str) -> Option<&'static str> {
     if !tmux::has_composer_in_tail(&cap, SEND_GATE_LINES) {
         return Some("no prompt on screen — press Enter to look");
     }
-    if tmux::claude_draft_in_box(styled) {
+    if tmux::claude_draft_in_box(styled) || tmux::codex_draft_in_box(styled) {
         return Some(
             "the agent's input box has unsent text — press Enter, then submit or clear it",
         );

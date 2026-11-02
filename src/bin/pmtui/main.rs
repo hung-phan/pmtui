@@ -284,8 +284,17 @@ fn dispatch(
                 emit(out, &format!("{text}\n"));
                 Ok(0)
             }
+            // A nonzero exit still PRINTS ITS DOCUMENT. An agent that asked for JSON parses stdout;
+            // a bare stderr line leaves it with an empty string and no reason.
             Err(message) => {
-                emit(err, &format!("spawn --status: {message}\n"));
+                if cli.json {
+                    emit(
+                        out,
+                        &format!("{}\n", spawn_status::render_status_error_json(&message)),
+                    );
+                } else {
+                    emit(err, &format!("spawn --status: {message}\n"));
+                }
                 Ok(1)
             }
         },
@@ -315,8 +324,16 @@ fn dispatch(
                 emit(out, &format!("{text}\n"));
                 Ok(0)
             }
+            // Prints its document on the nonzero exit too, for the same reason `spawn --status` does.
             Err(why) => {
-                emit(err, &format!("message --list: {why}\n"));
+                if cli.json {
+                    emit(
+                        out,
+                        &format!("{}\n", message_cli::render_list_error_json(&why)),
+                    );
+                } else {
+                    emit(err, &format!("message --list: {why}\n"));
+                }
                 Ok(1)
             }
         },

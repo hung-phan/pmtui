@@ -97,7 +97,26 @@ server and daemon when the test ends.
 - `control.json` carries human cadence and immediate-wake requests. pmd consumes
   those requests and updates its ledger.
 - Every pmd or pmtui pane input owns `input.lock` across the final pane recheck,
-  paste, and Enter.
+  paste, and Enter — plus, ON CODEX ONLY, the proof the composer took it. Codex's first Enter
+  confirms the paste, so a second is needed and `send_keys` reads the composer back between tries.
+  THE BOUNDARY IS MEASURED, NOT AN OVERSIGHT: claude 2.1.316 submits on ONE Enter, checked through a
+  real pane three ways — a 70-byte multiline paste, a 996-byte one, and a paste with no gap before
+  the Enter (a race test, since the driver waits only 100–200ms) — each confirmed by the turn
+  starting and the cost counter moving. A claude recheck arm was built on the opposite belief, taken
+  from reading the code rather than from a pane, and reverted: it bought a 300ms guard per nudge
+  inside the lock and a predicate that can fail a send which actually landed. Do not re-add it
+  without a capture of claude stranding text in its box.
+  A failed proof is the ONE write failure that is not transient: the bytes are in the box and only a
+  person can clear them, so `pmtui message` answers 1, keyed on `tmux::SUBMIT_UNPROVEN` — the const
+  the bail is built from — because 3 means "ask again under the SAME arguments" and here that is a
+  loop with no exit.
+  The PRE-SEND gate asks a DIFFERENT question — "is ANY unsent text showing?", with no text to
+  compare against — and it reads BOTH composers, because a refused send is retried under the same
+  arguments and a retry blind to codex's stranded draft would paste onto it. On an UNSTYLED capture
+  it answers "no draft", and failing closed there was measured wrong: a refusal on pane CONTENT is
+  not retryable, the pane does not change, and the real-tmux dispatch acceptance (a stub agent
+  printing a plain `› Ready`) was refused forever while the unit suite stayed green. Only a styled
+  capture can tell codex's dim placeholder from typing, and production always passes one.
 - Clickable preview titles, create rows, and keybar chips never bypass keyboard
   preconditions, confirmations, or lifecycle routing.
 - Quick-switch results commit by stable session id, and composer input always keeps
@@ -254,17 +273,34 @@ pmtui spawn --cancel --request-id ID      # ask once; asking twice is asking onc
 Exit codes are the contract an agent branches on. `--json` still prints a result document on a
 nonzero exit, so read the document rather than trusting the code alone. From `exit_code`:
 
+ONE TABLE PER FORM, because the forms do not share a vocabulary. The dispatch and `--cancel` forms
+report an OUTCOME; `--status` reports a LISTING and its words mean different things.
+
+Dispatch (`--message`) and `--cancel`:
+
 | Code | States |
 |---|---|
-| 0 | `ready`, `done` — "the thing you asked for happened" |
+| 0 | `done` — the child ran and reported |
 | 3 | `queued`, `in_progress`, `cancel_requested`, `needs_attention`, `needs_human`, and a receipt still `claimed`/`staged`/`launching` — ask again under the SAME request id |
-| 1 | `failed`, `outcome_unknown`, `ended_without_result`, `cancelled` |
+| 1 | `failed`, `ended_without_result`, `cancelled` — read `error.code` |
 | 2 | usage error |
 
+`--status`: always 0 whenever it could read its own directory, because a listing is not an outcome.
+Its `state` field carries any `ReceiptState`, and `ready` there means the job is STILL RUNNING.
+
+`ready` AND `outcome_unknown` ARE ABSENT FROM THE TABLE ON PURPOSE, and they are reachable in
+neither form: `answered` returns false for both, so neither ends the wait, and `--cancel` returns
+early only on `is_job_terminal`, which excludes both. The table used to promise `ready` at 0 under
+the heading "the thing you asked for happened" — for a job that is "the run started", and treating
+a launch as an answer is the single mistake this whole surface is shaped to prevent. `exit_code`
+keeps its arms for them (the match is exhaustive over the enum) and a test holds the help text to
+the predicate.
+
 `needs_human` sits in the 3 family for the same reason as `needs_attention`: the receipt names the
-next action. `--status` exits 0 whenever it could read its own directory, because a listing is not
-an outcome. Every form reads only `PMTUI_SESSION`/`PMTUI_STATE_DIR`/`PMTUI_BIN` plus its own state
-directory, so it works where `$HOME` is read-only.
+next action. Every form reads only `PMTUI_SESSION`/`PMTUI_STATE_DIR`/`PMTUI_BIN` plus its own state
+directory, so it works where `$HOME` is read-only. A FAILED LISTING STILL PRINTS ITS DOCUMENT —
+`spawn --status --json` and `message --list --json` both exited 1 with a bare stderr line, so an
+agent that asked for JSON parsed an empty string and learned nothing.
 
 ## Message Command Surface
 
@@ -280,14 +316,22 @@ pmtui message --list [--json] [--registry <path>]
 |---|---|
 | 0 | delivered — it arrives as the peer's next turn |
 | 3 | the pane cannot take it right now (a human is attached, a dialog is up, an unsent draft, another input mid-delivery) — ask again under the SAME arguments |
-| 1 | no such session, no agent that anything will start, or the hop limit |
+| 1 | no such session, no agent that anything will start, the hop limit, or a SEND THAT STUCK |
 | 2 | usage error |
 
 It creates NO state that outlives the send, which is why there is no broker: spawn needs the
 dashboard because only the dashboard may turn a request into a registry row, whereas a message
 writes no ledger, no `answers.json` and no row — so the command delivers it itself, through the
 same `send_decision` gate and the same `input.lock` as the dashboard's `s`, and no dashboard need
-be running. `--list` exits 0 whenever the registry could be read.
+be running. `--list` exits 0 whenever the registry could be read, and prints its JSON document on a
+nonzero exit too.
+
+A SEND THAT STUCK IS THE ONE WRITE FAILURE IN THE 1 FAMILY. Every other refusal from the write path
+is transient by construction — the lock was busy, a client attached, the pane changed while we
+waited — but a failed submit proof means the bytes were pasted and every Enter left them in the
+composer. Only a person can clear them, so 3 would be an invitation to loop forever. The
+classification keys on `tmux::SUBMIT_UNPROVEN`, the const the driver's own bail is built from, so a
+reword cannot quietly turn it back into a 3.
 
 Nothing in `ManagedEnv` changed for it: `PMTUI_SESSION` is the sender, `PMTUI_STATE_DIR` houses the
 hop ledger, and `$TMUX` names the socket. The registry is the one thing not in the environment —

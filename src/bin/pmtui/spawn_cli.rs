@@ -60,8 +60,16 @@ pub(crate) const HELP: &str = concat!(
     "--cancel              stop the child this --request-id names; the dashboard signals it, then\n",
     "                      kills it, and its receipt becomes `cancelled`\n",
     "--json                print the result as one JSON document\n\n",
-    "Exit codes: 0 ready or done; 3 queued, in_progress, needs_attention, needs_human or\n",
-    "cancel_requested; 1 failed, outcome_unknown, ended_without_result or cancelled; 2 usage error.\n",
+    "Exit codes, for the dispatch and --cancel forms:\n",
+    "  0  done — the child ran and reported\n",
+    "  3  queued, in_progress, needs_attention, needs_human or cancel_requested; ask again under\n",
+    "     the SAME --request-id\n",
+    "  1  failed, ended_without_result or cancelled; read error.code\n",
+    "  2  usage error\n",
+    "`ready` is NOT one of them: for a job it means the run STARTED, so it never ends the wait and\n",
+    "exit 0 always means the task is over. --status prints `ready` for a child that is RUNNING, and\n",
+    "--status itself exits 0 whenever it could read this session's directory — a listing is not an\n",
+    "outcome. Every form prints its JSON document on a nonzero exit too; read the document.\n",
 );
 
 /// A parsed `pmtui spawn` command line.
@@ -570,7 +578,7 @@ fn wait_for_receipt(dir: &Path, id: &str, wait_s: u64, waiter: &mut dyn Waiter) 
 ///
 /// Everything else that is final IS an answer: the five job outcomes, a launch that failed, and
 /// `needs_attention`, which is the dashboard asking for a person rather than reporting on the task.
-fn answered(state: ReceiptState) -> bool {
+pub(crate) fn answered(state: ReceiptState) -> bool {
     match state {
         ReceiptState::Ready
         | ReceiptState::OutcomeUnknown
@@ -596,12 +604,21 @@ fn waited(id: &str, receipt: Option<SpawnReceipt>, finished: bool) -> CliOutput 
     }
 }
 
-/// `0` ready or done; `3` queued, in progress, needs attention or needs a human (the receipt says
-/// what to do); `1` failed, cancelled, ended without a result, or outcome unknown; `2` a usage error.
+/// `0` done; `3` queued, in progress, cancel requested, needs attention, needs a human, or a
+/// receipt still claimed/staged/launching (the receipt says what to do); `1` failed, cancelled or
+/// ended without a result; `2` a usage error.
 ///
-/// A job's `done` joins `ready` at 0 because both mean "the thing you asked for happened"; a parent
-/// that branched on `$? == 0` before this change still reads correctly. `needs_human` joins the `3`
-/// family for the same reason `needs_attention` is there: the receipt names the next action.
+/// `needs_human` joins the `3` family for the same reason `needs_attention` is there: the receipt
+/// names the next action.
+///
+/// TWO ARMS BELOW ARE UNREACHABLE FROM EVERY FORM, and deliberately kept. [`answered`] returns
+/// false for `ready` and `outcome_unknown`, and `--cancel` returns early only on
+/// [`ReceiptState::is_job_terminal`], which excludes both — so no form hands either to a caller.
+/// The documentation used to advertise them anyway, which told an agent that exit 0 could mean
+/// `ready`: for a job that is "the run started", and treating a launch as an answer is the one
+/// mistake this whole surface is shaped to prevent. The arms stay because the match is exhaustive
+/// over the enum and these are the codes those states would deserve; the doc no longer promises
+/// them.
 pub(crate) fn exit_code(out: &CliOutput) -> i32 {
     match out.state {
         CliState::Receipt(ReceiptState::Ready | ReceiptState::Done) => 0,
