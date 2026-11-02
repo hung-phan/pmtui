@@ -11,12 +11,16 @@
 //! are the same characters in the same place, and only the hint is drawn dim. Every other check
 //! reads [`unstyled`] text.
 //!
-//! This file also owns the question asked AFTER an Enter, for both engines: did the composer
-//! actually take what we typed ([`claude_draft_visible`], and `real::codex_draft_visible` through
-//! [`placeholder_drawn`])? A send is not complete because tmux accepted the keystrokes; it is
-//! complete when the composer no longer shows the text. Both engines' "this is chrome, not typed
-//! text" style rules ([`is_hint_style`] for Claude, [`placeholder_drawn`] for Codex) sit here
-//! together so a reader can compare them.
+//! Both engines' "this is chrome, not typed text" style rules live here together so a reader can
+//! compare them: [`is_hint_style`] for Claude's dim hint, and [`placeholder_drawn`] for Codex's
+//! rotating placeholder, which `real::codex_draft_visible` reads after its Enter.
+//!
+//! Only CODEX needs that after-the-Enter question, and that boundary is measured rather than
+//! assumed: codex's first Enter confirms the paste, so a second is required, while claude 2.1.316
+//! submits on one (checked three ways through a real pane, including with no gap before the Enter).
+//! A claude-side `claude_draft_visible` lived here briefly on the opposite belief and bought
+//! nothing but a 300ms guard inside `input.lock` and a predicate that could fail a send which
+//! actually landed.
 //!
 //! [`classify_pane_styled`] is deliberately NOT widened to read Codex's composer: a drafted Codex
 //! box would then classify Busy and draw the working glyph on an agent that is doing nothing,
@@ -169,56 +173,6 @@ pub fn claude_draft_in_box(styled: &str) -> bool {
             .skip(skip)
             .any(|(_, style)| !is_hint_style(style))
     })
-}
-
-/// Whether CLAUDE's box still shows the message we just sent, read from a STYLED capture.
-///
-/// The twin of `real::codex_draft_visible`, same argument order, and the proof that an Enter
-/// actually submitted. It is not [`claude_draft_in_box`]: that answers "is there ANY unsent text",
-/// which a concurrent human keystroke makes true, while this answers "is OUR text still there".
-///
-/// A dialog anywhere on screen reports NOT ours, so a second Enter can never be aimed at a surface
-/// that opened after our paste — [`classify_pane_styled`]'s own fail-closed precedence, reused.
-///
-/// LITERAL send: the box's rows are concatenated (minus the `❯` lead) and compared with `text`
-/// after dropping all whitespace from both, because a long line wraps onto indented rows and an
-/// empty prompt row carries U+00A0. The dim hint therefore reads as "not ours" by inequality, so
-/// this branch needs no style reading at all.
-///
-/// PASTED send: Claude collapses a large paste into a label, so there is nothing to compare and
-/// this delegates to [`claude_draft_in_box`]. Sound only because the send was refused unless the
-/// box was draft-free and `input.lock` has been held ever since. Note that every `pmtui message`
-/// and every pmd nudge takes this branch — the envelope and the nudge are both multiline.
-pub(super) fn claude_draft_visible(styled: &str, text: &str, pasted: bool) -> bool {
-    let plain = unstyled(styled);
-    if super::dialog::classify_dialog(&plain).is_some() {
-        return false;
-    }
-    if pasted {
-        return claude_draft_in_box(styled);
-    }
-    let rows: Vec<&str> = plain.lines().collect();
-    let Some((at, close)) = (0..rows.len())
-        .rev()
-        .find_map(|at| claude_box(&rows, at).map(|close| (at, close)))
-    else {
-        return false;
-    };
-    let shown: String = rows[at..close]
-        .iter()
-        .enumerate()
-        .flat_map(|(offset, row)| {
-            let row = if offset == 0 {
-                row.trim_start().strip_prefix('❯').unwrap_or(row)
-            } else {
-                row
-            };
-            row.chars()
-        })
-        .filter(|ch| !ch.is_whitespace())
-        .collect();
-    let wanted: String = text.chars().filter(|ch| !ch.is_whitespace()).collect();
-    !wanted.is_empty() && shown == wanted
 }
 
 /// Whether CODEX's live composer holds anything that is not its own rotating placeholder.

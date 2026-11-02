@@ -680,13 +680,16 @@ The product compares such a decision with what it has already asked, as asked. T
 report that was written once and never revised: a live agent that re-raises a waiting question REWORDS it,
 which is why the rule above does not look at the words at all.
 
-An automatic send of prose is complete only after the composer takes it. An Enter the terminal accepted is
-not a message delivered: an engine can read the first Enter as confirmation of a paste and leave the text
-on the screen. So the supervisor MUST read the composer back after a send, for EVERY engine, and it MUST
-try again a bounded number of times while its own text is still there. It MUST stop as soon as the draft
-clears, or work starts, or another surface opens. A try MUST NOT confirm a surface that opened later. A
-send the supervisor cannot prove MUST fail, because a delivery that is reported and did not happen loses
-the message with no sign that anything went wrong.
+An automatic send of prose is complete only after the composer takes it. Some engines read the first Enter
+as confirmation of a paste and leave the text on the screen. For those engines the supervisor MUST read the
+composer back and try again a bounded number of times while its own text is still there. It MUST look at
+the screen between two tries. It MUST stop as soon as the draft clears, or work starts, or another surface
+opens. A try MUST NOT confirm a surface that opened later. A send the supervisor cannot prove MUST fail,
+because a delivery that is reported and did not happen loses the message with no sign of a problem.
+
+Which engines those are is a MEASUREMENT, not a guess. The product MUST NOT add this cost to an engine that
+submits on one Enter, because the extra read holds the pane lock for longer and can fail a send that
+landed.
 
 ### At Work, Waiting and Monitoring
 

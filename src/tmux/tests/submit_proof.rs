@@ -1,19 +1,16 @@
-//! The question asked AFTER an Enter: did the composer actually take what we typed?
+//! The PRE-SEND question, for both engines: is there already unsent text in the composer?
 //!
-//! `send_keys` presses Enter and then reads the composer back, for BOTH engines, because tmux
-//! accepting the keystrokes is not the same fact as the agent receiving a message. A single Enter
-//! on Claude can confirm a bracketed paste and leave the text in the box, which `pmtui message`
-//! reported as delivered with nothing sent.
+//! [`codex_draft_in_box`] is the half this file covers, and it is a different question from
+//! `real::codex_draft_visible`'s submit proof. The proof asks "is MY text still showing?" and can
+//! compare against what it sent. This one asks "is ANY unsent text showing?" and runs before there
+//! is a text to compare — which is why its answer on an unstyled capture is the subtle case below.
 //!
-//! Two predicates, two different questions, and the difference is load-bearing:
-//!
-//! - [`claude_draft_visible`] asks "is MY text still showing?" — the submit proof, which compares
-//!   against what was sent, so a concurrent keystroke from somebody else cannot answer it.
-//! - [`codex_draft_in_box`] asks "is ANY unsent text showing?" — the pre-send gate's question,
-//!   which has no text to compare against because it runs before there is one.
+//! It exists so a refused send does not DOUBLE. `send_keys` bails when codex's composer still
+//! holds the message after its Enter presses, `pmtui message` maps that to the retry family, and a
+//! retry blind to the stranded text would paste onto it.
 
 use super::*;
-use crate::tmux::send_gate::{claude_draft_visible, codex_draft_in_box};
+use crate::tmux::send_gate::codex_draft_in_box;
 
 /// Codex's composer holding a human's typed draft, with the `›` lead undimmed.
 const FIXTURE_CODEX_TYPED_DRAFT: &str = concat!(
@@ -28,100 +25,6 @@ const FIXTURE_CODEX_PASTED_DRAFT: &str = concat!(
     "\x1b[39m› [Pasted Content 801 chars]\n",
     "\x1b[38;5;244m────────────────────────────────\n",
 );
-
-// ---------------------------------------------------------------- Claude, literal send
-
-/// THE BUG THIS EXISTS FOR. A literal send whose text is still sitting in the box is NOT
-/// delivered, and before this predicate Claude's branch pressed one Enter and reported success.
-#[test]
-fn our_own_literal_text_still_in_the_box_is_not_delivered() {
-    assert!(claude_draft_visible(
-        FIXTURE_CLAUDE_STYLED_DRAFT,
-        "half typed",
-        false
-    ));
-}
-
-/// A wrapped draft: the box continues a long line onto an indented row, so the comparison has to
-/// join the rows and ignore whitespace rather than match one row.
-#[test]
-fn a_wrapped_literal_draft_is_still_recognised_as_ours() {
-    assert!(claude_draft_visible(
-        FIXTURE_CLAUDE_STYLED_MULTILINE_DRAFT,
-        "first line second line",
-        false
-    ));
-}
-
-/// The empty box drawn with Claude's dim hint reads as "not ours" by INEQUALITY — the hint is not
-/// the text we sent — so this branch never needs to read a style. An engine build that greyed its
-/// hint differently therefore cannot turn a delivered send into a failure.
-#[test]
-fn the_dim_hint_is_never_mistaken_for_our_text() {
-    assert!(!claude_draft_visible(
-        FIXTURE_CLAUDE_STYLED_HINT,
-        "half typed",
-        false
-    ));
-}
-
-/// The box after a completed turn: our message is echoed OUTSIDE the box and the box itself is a
-/// bare `❯`. The echo must not read as a draft, or every successful send would fail its proof.
-#[test]
-fn a_submitted_message_echoed_above_the_box_is_delivered() {
-    assert!(!claude_draft_visible(
-        FIXTURE_CLAUDE_STYLED_AFTER_TURN,
-        "Reply with just: ok",
-        false
-    ));
-}
-
-/// FAIL CLOSED ON A DIALOG. A surface that opened after our paste must never be answered by our
-/// next Enter, so the proof reports "not ours" and the send stops retrying.
-#[test]
-fn a_dialog_stops_the_retry_rather_than_being_answered() {
-    assert!(!claude_draft_visible(
-        FIXTURE_CODEX_DIALOG_APPROVAL,
-        "half typed",
-        false
-    ));
-}
-
-/// No Claude box at all (a bare shell, or a Codex pane): nothing to prove, and the decision is
-/// left to the caller's own engine branch.
-#[test]
-fn no_claude_box_reports_nothing_of_ours() {
-    assert!(!claude_draft_visible("captured\n", "half typed", false));
-}
-
-/// An empty `text` can never be "still showing", so a send of nothing is never a stuck draft.
-#[test]
-fn empty_text_is_never_stuck() {
-    assert!(!claude_draft_visible(
-        FIXTURE_CLAUDE_STYLED_DRAFT,
-        "",
-        false
-    ));
-}
-
-// ---------------------------------------------------------------- Claude, pasted send
-
-/// A PASTED send has nothing to compare: Claude collapses a large paste into a label, so the proof
-/// falls back to "is there any draft at all". Sound only because the send was refused unless the
-/// box was empty and `input.lock` has been held ever since.
-#[test]
-fn a_pasted_send_falls_back_to_any_draft_at_all() {
-    assert!(claude_draft_visible(
-        FIXTURE_CLAUDE_STYLED_DRAFT,
-        "something else entirely",
-        true
-    ));
-    assert!(!claude_draft_visible(
-        FIXTURE_CLAUDE_STYLED_HINT,
-        "something else entirely",
-        true
-    ));
-}
 
 // ---------------------------------------------------------------- Codex pre-send gate
 

@@ -97,24 +97,26 @@ server and daemon when the test ends.
 - `control.json` carries human cadence and immediate-wake requests. pmd consumes
   those requests and updates its ledger.
 - Every pmd or pmtui pane input owns `input.lock` across the final pane recheck,
-  paste, Enter, AND THE PROOF THE COMPOSER TOOK IT. An Enter tmux accepted is not a message
-  delivered: Claude reads the first Enter as confirming a bracketed paste and leaves the text in the
-  box, which `pmtui message` reported as delivered — exit 0, nothing sent. So `send_keys` reads the
-  composer back between tries FOR BOTH ENGINES and fails a send it cannot prove, each engine
-  answering "is MY text still showing?" with its own predicate because each draws different chrome.
-  That is why the lock spans the recheck loop and not just the keystrokes, and why pmd now holds it
-  longer per nudge: ONE 300ms guard on a send that lands and three on one that never does, where
-  codex alone used to pay any of them. A failed proof is the ONE write failure that is not
-  transient: the bytes are in the box and only a person can clear them, so `pmtui message` answers
-  1, keyed on `tmux::SUBMIT_UNPROVEN` — the const the bail is built from — because 3 means "ask
-  again under the SAME arguments" and here that is a loop with no exit.
+  paste, and Enter — plus, ON CODEX ONLY, the proof the composer took it. Codex's first Enter
+  confirms the paste, so a second is needed and `send_keys` reads the composer back between tries.
+  THE BOUNDARY IS MEASURED, NOT AN OVERSIGHT: claude 2.1.316 submits on ONE Enter, checked through a
+  real pane three ways — a 70-byte multiline paste, a 996-byte one, and a paste with no gap before
+  the Enter (a race test, since the driver waits only 100–200ms) — each confirmed by the turn
+  starting and the cost counter moving. A claude recheck arm was built on the opposite belief, taken
+  from reading the code rather than from a pane, and reverted: it bought a 300ms guard per nudge
+  inside the lock and a predicate that can fail a send which actually landed. Do not re-add it
+  without a capture of claude stranding text in its box.
+  A failed proof is the ONE write failure that is not transient: the bytes are in the box and only a
+  person can clear them, so `pmtui message` answers 1, keyed on `tmux::SUBMIT_UNPROVEN` — the const
+  the bail is built from — because 3 means "ask again under the SAME arguments" and here that is a
+  loop with no exit.
   The PRE-SEND gate asks a DIFFERENT question — "is ANY unsent text showing?", with no text to
   compare against — and it reads BOTH composers, because a refused send is retried under the same
-  arguments and a retry blind to the other engine's stuck draft would paste onto it. On an UNSTYLED
-  capture it answers "no draft", and failing closed there was measured wrong: a refusal on pane
-  CONTENT is not retryable, the pane does not change, and the real-tmux dispatch acceptance (a stub
-  agent printing a plain `› Ready`) was refused forever while the unit suite stayed green. Only a
-  styled capture can tell codex's dim placeholder from typing, and production always passes one.
+  arguments and a retry blind to codex's stranded draft would paste onto it. On an UNSTYLED capture
+  it answers "no draft", and failing closed there was measured wrong: a refusal on pane CONTENT is
+  not retryable, the pane does not change, and the real-tmux dispatch acceptance (a stub agent
+  printing a plain `› Ready`) was refused forever while the unit suite stayed green. Only a styled
+  capture can tell codex's dim placeholder from typing, and production always passes one.
 - Clickable preview titles, create rows, and keybar chips never bypass keyboard
   preconditions, confirmations, or lifecycle routing.
 - Quick-switch results commit by stable session id, and composer input always keeps

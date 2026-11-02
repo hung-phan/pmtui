@@ -897,8 +897,8 @@ impl Driver for TmuxDriver {
         const LITERAL_MAX: usize = 800;
         const SUBMIT_GUARD: Duration = Duration::from_millis(100);
         const CODEX_PASTE_GUARD: Duration = Duration::from_millis(200);
-        const SUBMIT_RECHECK_GUARD: Duration = Duration::from_millis(300);
-        const SUBMIT_ATTEMPTS: usize = 3;
+        const CODEX_SUBMIT_RECHECK_GUARD: Duration = Duration::from_millis(300);
+        const CODEX_SUBMIT_ATTEMPTS: usize = 3;
         let uses_paste_buffer = text.contains('\n') || text.len() > LITERAL_MAX;
         let codex = self.pane_current_command(session)?.as_deref() == Some("codex");
         let codex_paste = uses_paste_buffer && codex;
@@ -996,31 +996,45 @@ impl Driver for TmuxDriver {
                 .status()
                 .context("run tmux send-keys (Enter)")
         };
-        // THE PROOF IS EVERY ENGINE'S. An Enter that tmux accepted is not a message delivered:
-        // on Claude a single Enter can confirm a bracketed paste and leave the text sitting in the
-        // box, which `pmtui message` then reported as delivered (exit 0) with nothing sent. So the
-        // composer is read BETWEEN tries, for both engines, and a send that cannot be proven fails
-        // instead of lying. Each engine answers "is my text still showing?" with its own predicate,
-        // because each draws different chrome in its composer.
-        for attempt in 0..SUBMIT_ATTEMPTS {
+        // THE PROOF IS CODEX'S ALONE, and that is a MEASURED boundary rather than an oversight.
+        //
+        // Codex needs the second Enter: the first only confirms the paste, which is why this loop
+        // exists at all. Claude does not. Measured on 2.1.316 through a real pane, three ways — a
+        // 70-byte multiline paste, a 996-byte one, and a paste with no gap before the Enter at all
+        // (testing for a race, since the driver waits only 100-200ms) — every one submitted on ONE
+        // Enter, confirmed by the turn starting and the session's own cost counter moving.
+        //
+        // A recheck arm for claude was written here on the belief that its first Enter confirms the
+        // paste and strands the text in the box. Nothing reproduced it. It would have cost a 300ms
+        // guard on every nudge, held inside `input.lock`, plus a predicate that can fail a send
+        // that actually landed — two of its misreads shipped green past 1144 unit tests before the
+        // real-tmux suite caught them. Insurance against a disproved failure is a liability.
+        //
+        // `pane_refusal` still reads BOTH composers, because that is a different question: the bail
+        // below becomes exit 3 ("ask again under the SAME arguments") and a retry must not paste
+        // onto codex's stranded text.
+        let attempts = if codex { CODEX_SUBMIT_ATTEMPTS } else { 1 };
+        for attempt in 0..attempts {
             let status = send_enter()?;
             if !status.success() {
                 bail!("tmux send-keys (Enter) failed for session {session}");
             }
-            std::thread::sleep(SUBMIT_RECHECK_GUARD);
-            // Styled, so each engine's chrome can be told from a still-typed draft.
-            let capture = self.capture_tail_styled(session, 80)?;
-            let stuck = if codex {
-                codex_draft_visible(&capture, text, uses_paste_buffer)
-            } else {
-                super::send_gate::claude_draft_visible(&capture, text, uses_paste_buffer)
-            };
-            if !stuck {
+            // Claude's ONE Enter submits, so there is nothing left to prove and nothing to wait
+            // for. The return is here rather than above the loop because the Enter still has to be
+            // sent — hoisting it skips the submit entirely, which is a mistake this comment exists
+            // to stop the next reader repeating.
+            if !codex {
                 return Ok(());
             }
-            if attempt + 1 == SUBMIT_ATTEMPTS {
+            std::thread::sleep(CODEX_SUBMIT_RECHECK_GUARD);
+            // Styled, so the dim placeholder can be told from a still-typed draft.
+            let capture = self.capture_tail_styled(session, 80)?;
+            if !codex_draft_visible(&capture, text, uses_paste_buffer) {
+                return Ok(());
+            }
+            if attempt + 1 == attempts {
                 bail!(
-                    "{SUBMIT_UNPROVEN} after {SUBMIT_ATTEMPTS} Enter presses for session {session}"
+                    "{SUBMIT_UNPROVEN} after {CODEX_SUBMIT_ATTEMPTS} Enter presses for session {session}"
                 );
             }
         }
