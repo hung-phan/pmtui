@@ -511,6 +511,11 @@ text from Claude's hint by the hint's dim style, or grey colour, so it MUST read
 It MUST also refuse while Claude's feedback survey is drawn by the box, because the survey's options are
 digit keys. When the gate cannot tell, it refuses.
 
+The same refusal applies to the other engine's composer row, and for a second reason as well as the first.
+A send the supervisor could not prove fails, and the agent that asked is told to ask again with the same
+message. If the gate read only one engine's composer, that retry would paste onto the text already stuck
+in the other one.
+
 The driver's nudge follows the same rules. Read without styles, a box that holds any text is busy, because
 the hint and a draft are the same characters. The driver reads the pane with its styles before a nudge, so
 a box that holds only the hint is idle, and a box that holds a draft or sits under the survey is busy.
@@ -675,10 +680,13 @@ The product compares such a decision with what it has already asked, as asked. T
 report that was written once and never revised: a live agent that re-raises a waiting question REWORDS it,
 which is why the rule above does not look at the words at all.
 
-An automatic send of prose is complete only after the terminal accepts it. Some engines leave the pasted
-text on the screen. For those engines the supervisor MAY try again a bounded number of times. It MUST look
-at the screen between two tries. It MUST stop as soon as the draft clears, or work starts, or another
-surface opens. A try MUST NOT confirm a surface that opened later.
+An automatic send of prose is complete only after the composer takes it. An Enter the terminal accepted is
+not a message delivered: an engine can read the first Enter as confirmation of a paste and leave the text
+on the screen. So the supervisor MUST read the composer back after a send, for EVERY engine, and it MUST
+try again a bounded number of times while its own text is still there. It MUST stop as soon as the draft
+clears, or work starts, or another surface opens. A try MUST NOT confirm a surface that opened later. A
+send the supervisor cannot prove MUST fail, because a delivery that is reported and did not happen loses
+the message with no sign that anything went wrong.
 
 ### At Work, Waiting and Monitoring
 

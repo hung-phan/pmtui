@@ -5,8 +5,6 @@
 //! silently failed once already.
 
 use anyhow::{Context, Result, bail};
-use ratatui::style::Modifier;
-use ratatui::text::Line;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -62,7 +60,7 @@ pub(super) fn codex_draft_visible(capture: &str, text: &str, pasted: bool) -> bo
     if draft.starts_with("[Pasted Content ") {
         return true;
     }
-    if placeholder_drawn(&lines[at]) {
+    if super::send_gate::placeholder_drawn(&lines[at]) {
         return false;
     }
     if !pasted {
@@ -81,18 +79,6 @@ pub(super) fn codex_draft_visible(capture: &str, text: &str, pasted: bool) -> bo
         let prefix: String = line.chars().take(CODEX_DRAFT_MATCH_CHARS).collect();
         !prefix.is_empty() && draft.starts_with(&prefix)
     })
-}
-
-/// Whether the composer row's first visible character after its `›` lead is drawn dim, the style
-/// Codex gives its placeholder and never typed text.
-fn placeholder_drawn(row: &Line<'_>) -> bool {
-    row.spans
-        .iter()
-        .flat_map(|span| span.content.chars().map(move |ch| (ch, span.style)))
-        .skip_while(|(ch, _)| ch.is_whitespace())
-        .skip(1)
-        .find(|(ch, _)| !ch.is_whitespace())
-        .is_some_and(|(_, style)| style.add_modifier.contains(Modifier::DIM))
 }
 
 /// POSIX single-quote escaping so arbitrary argv/paths survive the shell.
@@ -902,8 +888,8 @@ impl Driver for TmuxDriver {
         const LITERAL_MAX: usize = 800;
         const SUBMIT_GUARD: Duration = Duration::from_millis(100);
         const CODEX_PASTE_GUARD: Duration = Duration::from_millis(200);
-        const CODEX_SUBMIT_RECHECK_GUARD: Duration = Duration::from_millis(300);
-        const CODEX_SUBMIT_ATTEMPTS: usize = 3;
+        const SUBMIT_RECHECK_GUARD: Duration = Duration::from_millis(300);
+        const SUBMIT_ATTEMPTS: usize = 3;
         let uses_paste_buffer = text.contains('\n') || text.len() > LITERAL_MAX;
         let codex = self.pane_current_command(session)?.as_deref() == Some("codex");
         let codex_paste = uses_paste_buffer && codex;
@@ -1001,24 +987,31 @@ impl Driver for TmuxDriver {
                 .status()
                 .context("run tmux send-keys (Enter)")
         };
-        let attempts = if codex { CODEX_SUBMIT_ATTEMPTS } else { 1 };
-        for attempt in 0..attempts {
+        // THE PROOF IS EVERY ENGINE'S. An Enter that tmux accepted is not a message delivered:
+        // on Claude a single Enter can confirm a bracketed paste and leave the text sitting in the
+        // box, which `pmtui message` then reported as delivered (exit 0) with nothing sent. So the
+        // composer is read BETWEEN tries, for both engines, and a send that cannot be proven fails
+        // instead of lying. Each engine answers "is my text still showing?" with its own predicate,
+        // because each draws different chrome in its composer.
+        for attempt in 0..SUBMIT_ATTEMPTS {
             let status = send_enter()?;
             if !status.success() {
                 bail!("tmux send-keys (Enter) failed for session {session}");
             }
-            if !codex {
-                return Ok(());
-            }
-            std::thread::sleep(CODEX_SUBMIT_RECHECK_GUARD);
-            // Styled, so the dim placeholder can be told from a still-typed draft.
+            std::thread::sleep(SUBMIT_RECHECK_GUARD);
+            // Styled, so each engine's chrome can be told from a still-typed draft.
             let capture = self.capture_tail_styled(session, 80)?;
-            if !codex_draft_visible(&capture, text, uses_paste_buffer) {
+            let stuck = if codex {
+                codex_draft_visible(&capture, text, uses_paste_buffer)
+            } else {
+                super::send_gate::claude_draft_visible(&capture, text, uses_paste_buffer)
+            };
+            if !stuck {
                 return Ok(());
             }
-            if attempt + 1 == attempts {
+            if attempt + 1 == SUBMIT_ATTEMPTS {
                 bail!(
-                    "Codex draft remained visible after {CODEX_SUBMIT_ATTEMPTS} submission attempts for session {session}"
+                    "the composer still held the message after {SUBMIT_ATTEMPTS} Enter presses for session {session}"
                 );
             }
         }

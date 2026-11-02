@@ -511,6 +511,7 @@ capture-pane)
       count=$(grep -c 'send-keys -t =long: Enter' {log})
       [ "$count" -lt 2 ] && echo '› [Pasted Content 801 chars]' || echo '› Ask Codex to do anything' ;;
     *=second-enter:*) echo '› [Pasted Content 801 chars]' ;;
+    *=claude-stuck:*) printf '────────────────────────────────\n❯ stuck text\n────────────────────────────────\n' ;;
     *) echo captured ;;
   esac ;;
 load-buffer)
@@ -1132,6 +1133,11 @@ fn scripted_tmux_covers_fail_safe_and_error_paths() {
     driver
         .send_keys("long-no-command", &"x".repeat(801))
         .unwrap();
+    // THE PROOF IS EVERY ENGINE'S, at the DRIVER level and not only in the predicate. Both these
+    // sessions report no `pane_current_command`, so both take the claude branch: the one above sees
+    // `captured` and returns Ok, this one sees its own text still in the box and FAILS after its
+    // three Enter presses. Revert the loop to codex-only and this assertion is what goes red.
+    assert!(driver.send_keys("claude-stuck", "stuck text").is_err());
     fx.fail("display");
     driver
         .send_keys("long-display-failure", &"x".repeat(801))

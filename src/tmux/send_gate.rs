@@ -10,11 +10,24 @@
 //! The draft check reads a STYLED capture (`capture-pane -e`): Claude's hint and a typed draft
 //! are the same characters in the same place, and only the hint is drawn dim. Every other check
 //! reads [`unstyled`] text.
+//!
+//! This file also owns the question asked AFTER an Enter, for both engines: did the composer
+//! actually take what we typed ([`claude_draft_visible`], and `real::codex_draft_visible` through
+//! [`placeholder_drawn`])? A send is not complete because tmux accepted the keystrokes; it is
+//! complete when the composer no longer shows the text. Both engines' "this is chrome, not typed
+//! text" style rules ([`is_hint_style`] for Claude, [`placeholder_drawn`] for Codex) sit here
+//! together so a reader can compare them.
+//!
+//! [`classify_pane_styled`] is deliberately NOT widened to read Codex's composer: a drafted Codex
+//! box would then classify Busy and draw the working glyph on an agent that is doing nothing,
+//! which is the one thing the status-glyph invariant forbids.
 
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::Line;
 
 use super::activity::{
-    PaneActivity, classify_with, claude_box, is_box_top_rule, is_prompt_row, is_spinner_glyph,
+    PaneActivity, classify_with, claude_box, is_box_top_rule, is_codex_composer, is_prompt_row,
+    is_spinner_glyph,
 };
 
 /// How a feedback-survey row begins, lowercased. Taken from a production report of another tmux
@@ -156,6 +169,112 @@ pub fn claude_draft_in_box(styled: &str) -> bool {
             .skip(skip)
             .any(|(_, style)| !is_hint_style(style))
     })
+}
+
+/// Whether CLAUDE's box still shows the message we just sent, read from a STYLED capture.
+///
+/// The twin of `real::codex_draft_visible`, same argument order, and the proof that an Enter
+/// actually submitted. It is not [`claude_draft_in_box`]: that answers "is there ANY unsent text",
+/// which a concurrent human keystroke makes true, while this answers "is OUR text still there".
+///
+/// A dialog anywhere on screen reports NOT ours, so a second Enter can never be aimed at a surface
+/// that opened after our paste — [`classify_pane_styled`]'s own fail-closed precedence, reused.
+///
+/// LITERAL send: the box's rows are concatenated (minus the `❯` lead) and compared with `text`
+/// after dropping all whitespace from both, because a long line wraps onto indented rows and an
+/// empty prompt row carries U+00A0. The dim hint therefore reads as "not ours" by inequality, so
+/// this branch needs no style reading at all.
+///
+/// PASTED send: Claude collapses a large paste into a label, so there is nothing to compare and
+/// this delegates to [`claude_draft_in_box`]. Sound only because the send was refused unless the
+/// box was draft-free and `input.lock` has been held ever since. Note that every `pmtui message`
+/// and every pmd nudge takes this branch — the envelope and the nudge are both multiline.
+pub(super) fn claude_draft_visible(styled: &str, text: &str, pasted: bool) -> bool {
+    let plain = unstyled(styled);
+    if super::dialog::classify_dialog(&plain).is_some() {
+        return false;
+    }
+    if pasted {
+        return claude_draft_in_box(styled);
+    }
+    let rows: Vec<&str> = plain.lines().collect();
+    let Some((at, close)) = (0..rows.len())
+        .rev()
+        .find_map(|at| claude_box(&rows, at).map(|close| (at, close)))
+    else {
+        return false;
+    };
+    let shown: String = rows[at..close]
+        .iter()
+        .enumerate()
+        .flat_map(|(offset, row)| {
+            let row = if offset == 0 {
+                row.trim_start().strip_prefix('❯').unwrap_or(row)
+            } else {
+                row
+            };
+            row.chars()
+        })
+        .filter(|ch| !ch.is_whitespace())
+        .collect();
+    let wanted: String = text.chars().filter(|ch| !ch.is_whitespace()).collect();
+    !wanted.is_empty() && shown == wanted
+}
+
+/// Whether CODEX's live composer holds anything that is not its own rotating placeholder.
+///
+/// The text-free question `pane_refusal` can ask, so a send is refused onto a Codex box that is
+/// already holding unsent text instead of being appended to it. Without this, a `send_keys` that
+/// bailed on an unsubmittable draft is reported as "ask again under the same arguments", and
+/// asking again DOUBLES the text in that box.
+///
+/// Reads the last `›` row, the live one. A dialog-option row is never a draft
+/// ([`is_codex_composer`] is false on it); a `[Pasted Content ` label always is; the dim
+/// placeholder never is ([`placeholder_drawn`]).
+pub fn codex_draft_in_box(styled: &str) -> bool {
+    let lines = crate::ansi::styled_lines(styled);
+    let rows: Vec<String> = lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect()
+        })
+        .collect();
+    let Some(at) = (0..rows.len())
+        .rev()
+        .find(|&at| is_codex_composer(&rows[at]))
+    else {
+        return false;
+    };
+    let draft = rows[at]
+        .trim()
+        .strip_prefix('›')
+        .map(str::trim)
+        .unwrap_or_default();
+    if draft.starts_with("[Pasted Content ") {
+        return true;
+    }
+    if placeholder_drawn(&lines[at]) {
+        return false;
+    }
+    !draft.is_empty()
+}
+
+/// Whether the composer row's first visible character after its `›` lead is drawn dim, the style
+/// Codex gives its placeholder and never typed text.
+///
+/// Codex's answer to the question [`is_hint_style`] answers for Claude. Both engines draw chrome
+/// in the composer that a naive "is the box non-empty" check reads as a human's draft.
+pub(super) fn placeholder_drawn(row: &Line<'_>) -> bool {
+    row.spans
+        .iter()
+        .flat_map(|span| span.content.chars().map(move |ch| (ch, span.style)))
+        .skip_while(|(ch, _)| ch.is_whitespace())
+        .skip(1)
+        .find(|(ch, _)| !ch.is_whitespace())
+        .is_some_and(|(_, style)| style.add_modifier.contains(Modifier::DIM))
 }
 
 /// Whether a cell is drawn the way a hint is: dim (SGR 2), or in a grey foreground.

@@ -97,7 +97,17 @@ server and daemon when the test ends.
 - `control.json` carries human cadence and immediate-wake requests. pmd consumes
   those requests and updates its ledger.
 - Every pmd or pmtui pane input owns `input.lock` across the final pane recheck,
-  paste, and Enter.
+  paste, Enter, AND THE PROOF THE COMPOSER TOOK IT. An Enter tmux accepted is not a message
+  delivered: Claude reads the first Enter as confirming a bracketed paste and leaves the text in the
+  box, which `pmtui message` reported as delivered — exit 0, nothing sent. So `send_keys` reads the
+  composer back between tries FOR BOTH ENGINES and fails a send it cannot prove, each engine
+  answering "is MY text still showing?" with its own predicate because each draws different chrome.
+  That is why the lock spans the recheck loop and not just the keystrokes, and why pmd now holds it
+  ~10× longer per nudge (three 300ms guards worst case, where codex alone used to pay it). A
+  PRE-SEND gate asks a different question — "is ANY unsent text showing?", with no text to compare
+  against — so it fails CLOSED on an unstyled capture, and it reads BOTH composers: a failed send
+  becomes exit 3 "ask again under the SAME arguments", and a retry that could not see the other
+  engine's stuck draft would paste onto it.
 - Clickable preview titles, create rows, and keybar chips never bypass keyboard
   preconditions, confirmations, or lifecycle routing.
 - Quick-switch results commit by stable session id, and composer input always keeps

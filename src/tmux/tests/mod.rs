@@ -19,6 +19,7 @@ mod real;
 mod send_gate;
 mod send_text;
 mod session_names;
+mod submit_proof;
 
 fn handle(dir: &Path, session: &str) -> StepHandle {
     StepHandle {
