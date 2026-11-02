@@ -23,6 +23,53 @@ fn idle_gate_step(prev: Option<(u64, u32)>, fp: u64) -> (u64, u32) {
     }
 }
 
+/// How long a row's turn anchor stands before it is dropped, in seconds.
+///
+/// pmtui's OWN number, deliberately not pmd's `DEFAULT_STALL_BUSY_S` even though they agree today.
+/// That one governs when a SUPERVISED row escalates a stall to a human; this one governs how long a
+/// glyph may say "working" on the strength of a hook byte that never arrived. Re-exporting pmd's
+/// would tie a dashboard reading to a scheduler policy, and the next person to tune the escalation
+/// would silently change what `●` means on a row pmd does not drive.
+const ACTIVITY_ANCHOR_MAX_S: i64 = 1800;
+
+/// A row's TURN ANCHOR: the turn count when its pane was last seen Busy, and the wall clock then.
+type TurnAnchor = (u64, i64);
+
+/// Arm, keep or drop a row's turn anchor for this tick.
+///
+/// ONE arming condition: a BUSY pane. That is the only observation that proves a turn STARTED, and
+/// it is the fact the hook's byte count is then compared against. An earlier design also armed on a
+/// changed transcript, which cannot tell a turn starting from a human scrolling.
+///
+/// Dropped on a human attach — they drive the same hooked process, so the count moves for reasons
+/// this anchor did not witness — on a pane that is gone, and after [`ACTIVITY_ANCHOR_MAX_S`],
+/// because a hook that never fires must not pin a glyph to `●` forever.
+fn turn_anchor_step(
+    prev: Option<TurnAnchor>,
+    observation: ActivityObservation,
+    turns: u64,
+    now: i64,
+    human_attached: bool,
+) -> Option<TurnAnchor> {
+    if human_attached || observation == ActivityObservation::Missing {
+        return None;
+    }
+    match observation {
+        ActivityObservation::Busy => Some((turns, now)),
+        _ => prev.filter(|(_, at)| now - at < ACTIVITY_ANCHOR_MAX_S),
+    }
+}
+
+/// Whether the anchored turn is provably STILL running: the hook has recorded no completed turn
+/// since the pane was seen Busy.
+///
+/// A VETO and nothing else. It can hold a confirmed-idle frame back from reading idle, but it never
+/// makes a row read working on its own — a `●` built on an anchor alone would survive the hook
+/// dying, which is exactly the failure [`ACTIVITY_ANCHOR_MAX_S`] bounds rather than permits.
+fn turn_in_progress(anchor: Option<TurnAnchor>, turns: u64) -> bool {
+    anchor.is_some_and(|(base, _)| turns <= base)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActivityObservation {
     Missing,
@@ -135,6 +182,9 @@ impl App {
         let prev_gate = std::mem::take(&mut self.idle_gate);
         let mut new_gate: std::collections::HashMap<String, (u64, u32)> =
             std::collections::HashMap::new();
+        let prev_anchor = std::mem::take(&mut self.turn_anchor);
+        let mut new_anchor: std::collections::HashMap<String, TurnAnchor> =
+            std::collections::HashMap::new();
         let mut views: Vec<ProjectView> = reg
             .projects
             .iter()
@@ -223,41 +273,62 @@ impl App {
                     // A capture error on an otherwise-live pane stays working rather than
                     // preserving a stale completed-turn/idle value.
                     let hook_working = v.agent_working;
-                    v.agent_working = match &live_pane {
-                        None => {
-                            merge_activity(v.engine, hook_working, ActivityObservation::Missing)
-                        }
+                    let observation = match &live_pane {
+                        None => ActivityObservation::Missing,
                         Some(pane) => match driver
                             .capture_tail_styled(pane, ACTIVITY_CAPTURE_LINES)
                             .map(|styled| {
                                 (tmux::classify_pane_styled(&styled), tmux::unstyled(&styled))
                             }) {
-                            Err(_) => merge_activity(
-                                v.engine,
-                                hook_working,
-                                ActivityObservation::Unreadable,
-                            ),
-                            Ok((tmux::PaneActivity::Busy, _)) => {
-                                merge_activity(v.engine, hook_working, ActivityObservation::Busy)
-                            }
+                            Err(_) => ActivityObservation::Unreadable,
+                            Ok((tmux::PaneActivity::Busy, _)) => ActivityObservation::Busy,
                             Ok((tmux::PaneActivity::Idle, cap)) => {
                                 let (fp, count) = idle_gate_step(
                                     prev_gate.get(&p.id).copied(),
                                     tmux::idle_fingerprint(&cap),
                                 );
                                 new_gate.insert(p.id.clone(), (fp, count));
-                                merge_activity(
-                                    v.engine,
-                                    hook_working,
-                                    if count < ACTIVITY_IDLE_CONFIRMATIONS {
-                                        ActivityObservation::IdleUnconfirmed
-                                    } else {
-                                        ActivityObservation::IdleConfirmed
-                                    },
-                                )
+                                if count < ACTIVITY_IDLE_CONFIRMATIONS {
+                                    ActivityObservation::IdleUnconfirmed
+                                } else {
+                                    ActivityObservation::IdleConfirmed
+                                }
                             }
                         },
                     };
+                    // THE HOOK'S COUNT SETTLES A STANDARD ROW. `hook_working` comes from the pmd
+                    // ledger, which a Standard row does not have, so above this line the pane's
+                    // pixels are the only evidence it has — and claude leaves its bare composer on
+                    // screen through a silent tool call, so two byte-stable captures of a pane that
+                    // is mid-turn confirmed idle and drew `○` on a working agent.
+                    //
+                    // The anchor closes that: no completed turn since we SAW the pane busy means
+                    // the turn we saw is still running, so the confirmation is withheld rather than
+                    // believed. It can only ever delay an idle reading, never assert work on its
+                    // own, and it expires — see `turn_anchor_step`.
+                    let turns = agent_manager::state::turn_count(&paths.turn_signal()).unwrap_or(0);
+                    let anchor = turn_anchor_step(
+                        prev_anchor.get(&p.id).copied(),
+                        observation,
+                        turns,
+                        now,
+                        v.human_attached,
+                    );
+                    if let Some(anchor) = anchor {
+                        new_anchor.insert(p.id.clone(), anchor);
+                    }
+                    v.agent_working = merge_activity(
+                        v.engine,
+                        hook_working,
+                        match observation {
+                            ActivityObservation::IdleConfirmed
+                                if turn_in_progress(anchor, turns) =>
+                            {
+                                ActivityObservation::IdleUnconfirmed
+                            }
+                            observed => observed,
+                        },
+                    );
                     // A FROZEN LEDGER DOES NOT OUTRANK A WORKING AGENT. On a row pmd does not
                     // drive, the ledger and the needs-you marker are a snapshot from whenever
                     // autopilot last ran: nothing advances them, so a question the human already
@@ -311,6 +382,7 @@ impl App {
         // The freshly rebuilt working-vs-idle gate replaces the taken one; entries for rows not
         // seen this tick were never re-inserted, so a closed session's gate state is dropped.
         self.idle_gate = new_gate;
+        self.turn_anchor = new_anchor;
         // Follow the id if it is still here; otherwise fall back to clamping the old index, which
         // keeps the cursor near where the removed row was rather than jumping to the top. A missing
         // old id means the selected SESSION changed even if its numeric index did not.

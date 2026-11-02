@@ -46,12 +46,24 @@ impl TurnSignalHealth {
     }
 }
 
+/// How many turns the hook has recorded at `path`: the file's SIZE, one byte per completed turn.
+/// `None` means there is no count to read at all — no file, or a file this process cannot stat —
+/// which is not the same fact as zero turns and is why this is not a plain `u64`.
+///
+/// Read-only and panic-free. Every reader of this count comes through here: pmd's two nudge gates,
+/// the dashboard's row classifier, the health check above and `pmtui`'s own idle veto each used to
+/// stat the file themselves, and four copies of "what does a missing file mean?" is how a
+/// diagnostic ends up describing a different fault from the one a gate acted on.
+pub fn turn_count(path: &Path) -> Option<u64> {
+    std::fs::metadata(path).map(|m| m.len()).ok()
+}
+
 /// Classify the turn-end signal at `path` against `report_generation` accepted reports.
 ///
 /// Read-only and panic-free: a missing file, an unreadable one and a permission error all read as
 /// "no signal", because none of them is a reason to fail a tick.
 pub fn turn_signal_health(path: &Path, report_generation: u64) -> TurnSignalHealth {
-    match std::fs::metadata(path).map(|m| m.len()).ok() {
+    match turn_count(path) {
         None if report_generation <= TURN_SIGNAL_LAG_MAX => TurnSignalHealth::Fresh,
         None => TurnSignalHealth::NeverFired {
             reports: report_generation,

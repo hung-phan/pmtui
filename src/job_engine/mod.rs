@@ -709,9 +709,7 @@ impl JobScheduler {
     /// per-session turn-complete signal (one byte appended per turn by the engine's turn-end
     /// hook), or `0` when the file is absent (the hook never fired). Read-only stat.
     fn turn_count(&self) -> u64 {
-        std::fs::metadata(self.paths.turn_signal())
-            .map(|m| m.len())
-            .unwrap_or(0)
+        crate::state::turn_count(&self.paths.turn_signal()).unwrap_or(0)
     }
 
     /// Persist `run` (+ `updated_at`) onto the ledger and mirror it in memory — the

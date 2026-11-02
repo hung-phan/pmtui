@@ -159,7 +159,20 @@ server and daemon when the test ends.
 - `checkpoint.json` is untrusted continuity data, never instructions or policy
   input; workers reload it only through `pmd checkpoint <path>`, and the default
   UI does not expose activity handles or output references.
-- The status glyph means working, not merely alive.
+- The status glyph means working, not merely alive — AND AN IDLE-LOOKING FRAME IS NOT AN ENDED TURN.
+  Claude leaves its bare composer on screen through a silent tool call, so the two byte-stable
+  captures that confirm idle confirmed a WORKING agent, and a Standard row drew `○` mid-turn. A
+  Standard row has no pmd ledger, so `hook_working` is `None` there and the pixels were the only
+  evidence it had. `turn_anchor` closes it: the turn count when pmtui last saw that pane BUSY, with
+  the hook's count as the arbiter — no turn recorded since then means the turn we saw is still
+  running. Busy is the ONLY arming condition (a changed transcript cannot tell a turn starting from a
+  human scrolling), it is a VETO that downgrades `IdleConfirmed` to `IdleUnconfirmed` and NEVER
+  asserts work by itself, and it is dropped on a human attach (they end turns it did not witness), on
+  a pane that is gone, and after `ACTIVITY_ANCHOR_MAX_S` — pmtui's OWN number, never pmd's
+  `DEFAULT_STALL_BUSY_S`, because tuning a scheduler's escalation must not change what `●` means.
+  `state::turn_count` is the ONE reader of that file for all five callers: four of them stat'ed it
+  themselves, and four answers to "what does a missing file mean?" is how a diagnostic describes a
+  different fault from the one a gate acted on.
 - Chrome takes every colour from the active theme, and RGB enters it only through
   `src/theme.rs`. Add a ROLE there rather than a colour at a render site, and keep
   severity carried by glyph, word and badge as well as hue. EVERY CELL is the theme's:
