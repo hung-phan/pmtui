@@ -256,6 +256,22 @@ pub fn codex_draft_in_box(styled: &str) -> bool {
     if draft.starts_with("[Pasted Content ") {
         return true;
     }
+    // A ROW WITH NO STYLE AT ALL ANSWERS NOTHING, so it is not a draft.
+    //
+    // Measured, by the real-tmux dispatch acceptance: it drives a STUB agent that prints a plain
+    // `› Ready`, and with this read as a draft every `s` to that pane was refused with "the agent's
+    // input box has unsent text". That is not a retryable refusal — the pane never changes, so
+    // `pmtui message` answers 3 ("ask again under the SAME arguments") forever. Failing open here
+    // only skips the doubling guard on a pane that is not a real codex composer; failing closed
+    // cost the message outright. Production always passes `capture_tail_styled`, where codex's
+    // placeholder is dim and typed text is not, so the case this exists for is unaffected.
+    if lines[at]
+        .spans
+        .iter()
+        .all(|span| span.style == Style::default())
+    {
+        return false;
+    }
     if placeholder_drawn(&lines[at]) {
         return false;
     }

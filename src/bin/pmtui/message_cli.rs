@@ -531,14 +531,25 @@ pub(crate) fn run_message(cli: &MessageCli, deps: &MessageDeps<'_>) -> MessageOu
             from,
             hop: hops.count,
         },
-        // The write path's own refusals (the lock was busy, a client attached, the pane changed
-        // while we waited) are all transient by construction.
-        Err(error) => MessageOutput {
-            status: Status::Refused,
-            detail: format!("{error:#}"),
-            to,
-            from,
-            hop: hops.count,
-        },
+        // The write path's refusals are transient by construction — the lock was busy, a client
+        // attached, the pane changed while we waited — with ONE exception, and it is the one that
+        // matters most. A failed SUBMIT PROOF means the bytes were pasted and every Enter left them
+        // in the composer: another attempt cannot clear them, only a person can. Answering 3 there
+        // would be telling the sender to "ask again under the SAME arguments" forever, so it is 1,
+        // and the detail names what a human has to do.
+        Err(error) => {
+            let detail = format!("{error:#}");
+            MessageOutput {
+                status: if detail.contains(tmux::SUBMIT_UNPROVEN) {
+                    Status::Failed
+                } else {
+                    Status::Refused
+                },
+                detail,
+                to,
+                from,
+                hop: hops.count,
+            }
+        }
     }
 }

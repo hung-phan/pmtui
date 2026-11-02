@@ -149,19 +149,29 @@ fn codex_placeholder_is_not_a_draft() {
     assert!(!codex_draft_in_box(styled));
 }
 
-/// AN UNSTYLED CAPTURE READS AS A DRAFT, and that is the safe direction for a PRE-SEND gate:
-/// refusing a send costs a retry, appending to somebody's unsent text costs their message.
+/// AN UNSTYLED CAPTURE IS NOT A DRAFT, and "fail closed" was the wrong instinct here — the
+/// real-tmux dispatch acceptance proved it.
 ///
-/// This is the one place this predicate differs from `real::codex_draft_visible`, which stays
-/// sound on an unstyled capture because it compares against the text it sent
-/// (`a_literal_codex_draft_is_pending_only_while_the_composer_holds_the_whole_message`). The
-/// pre-send gate has no such text — it runs before there is one — so with the placeholder's dim
-/// style stripped there is nothing left to tell chrome from typing. Production always passes
-/// `capture_tail_styled`; a driver that cannot style is the case this pins.
+/// The reasoning that failed: refusing a send costs a retry, appending to somebody's unsent text
+/// costs their message, so refuse. But a refusal on PANE CONTENT is not retryable. The pane does
+/// not change, so `pmtui message` answers 3 — "ask again under the SAME arguments" — forever. The
+/// acceptance drives a stub agent printing a plain `› Ready` and every `s` to it was refused; the
+/// unit suite was green, because a fixture cannot show a retry that never succeeds.
+///
+/// So with no style there is nothing to tell chrome from typing, and the honest answer is "no
+/// draft". Production always passes `capture_tail_styled`, where codex's placeholder is dim and
+/// typed text is not, so the doubling case this predicate exists for still reads true
+/// ([`codex_typed_text_is_an_unsent_draft`]). `real::codex_draft_visible` needs none of this: it
+/// compares against the text it sent, so it stays sound unstyled.
 #[test]
-fn an_unstyled_codex_composer_fails_closed() {
-    assert!(codex_draft_in_box(FIXTURE_CODEX_IDLE));
-    assert!(codex_draft_in_box(FIXTURE_CODEX_IDLE_AFTER_TURN));
+fn an_unstyled_codex_composer_is_not_a_draft() {
+    assert!(!codex_draft_in_box(FIXTURE_CODEX_IDLE));
+    assert!(!codex_draft_in_box(FIXTURE_CODEX_IDLE_AFTER_TURN));
+    // The stub-agent frame from the acceptance, verbatim in shape: a `›` row with no SGR at all.
+    assert!(!codex_draft_in_box("› Ready\n"));
+    // A `[Pasted Content ` label is still a draft without a style, because the WORDS are the
+    // evidence there and nothing else draws them.
+    assert!(codex_draft_in_box("› [Pasted Content 801 chars]\n"));
 }
 
 /// A dialog's `› 1. Yes, proceed` row is a CHOICE, not a composer awaiting text. The dialog arm of

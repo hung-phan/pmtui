@@ -176,6 +176,10 @@ struct PaneInner {
     sends: std::sync::Mutex<Vec<(String, String)>>,
     /// When set, `send_keys` returns `Err` (the failure `s` must report verbatim).
     fail_send: bool,
+    /// What `fail_send` bails WITH, when the default "no such session" is not the failure under
+    /// test. The submit-proof failure has to be told apart from every other send error, because it
+    /// is the one that is not transient.
+    send_error: Option<String>,
     /// Every `(session, cwd, argv)` handed to `launch_interactive`, in call order — the only way
     /// to prove a create STARTED an agent, in the right tree, with the right posture.
     launches: std::sync::Mutex<Vec<(String, String, Vec<String>)>>,
@@ -291,6 +295,19 @@ impl FakePane {
                 .into_iter()
                 .collect(),
             fail_send: true,
+            ..Default::default()
+        }))
+    }
+    /// A driver reporting `session` alive with `tail`, whose `send_keys` fails with `why` — for
+    /// telling one send failure from another.
+    fn live_send_fails_with(session: &str, tail: &str, why: &str) -> Self {
+        Self(std::sync::Arc::new(PaneInner {
+            alive: std::sync::Mutex::new([session.to_string()].into_iter().collect()),
+            tails: [(session.to_string(), tail.to_string())]
+                .into_iter()
+                .collect(),
+            fail_send: true,
+            send_error: Some(why.to_string()),
             ..Default::default()
         }))
     }
@@ -498,7 +515,13 @@ impl Driver for FakePane {
             .unwrap()
             .push((session.to_string(), text.to_string()));
         if self.0.fail_send {
-            anyhow::bail!("send-keys: no such session");
+            anyhow::bail!(
+                "{}",
+                self.0
+                    .send_error
+                    .clone()
+                    .unwrap_or_else(|| "send-keys: no such session".to_string())
+            );
         }
         Ok(())
     }

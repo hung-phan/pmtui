@@ -104,11 +104,17 @@ server and daemon when the test ends.
   answering "is MY text still showing?" with its own predicate because each draws different chrome.
   That is why the lock spans the recheck loop and not just the keystrokes, and why pmd now holds it
   longer per nudge: ONE 300ms guard on a send that lands and three on one that never does, where
-  codex alone used to pay any of them. A
-  PRE-SEND gate asks a different question — "is ANY unsent text showing?", with no text to compare
-  against — so it fails CLOSED on an unstyled capture, and it reads BOTH composers: a failed send
-  becomes exit 3 "ask again under the SAME arguments", and a retry that could not see the other
-  engine's stuck draft would paste onto it.
+  codex alone used to pay any of them. A failed proof is the ONE write failure that is not
+  transient: the bytes are in the box and only a person can clear them, so `pmtui message` answers
+  1, keyed on `tmux::SUBMIT_UNPROVEN` — the const the bail is built from — because 3 means "ask
+  again under the SAME arguments" and here that is a loop with no exit.
+  The PRE-SEND gate asks a DIFFERENT question — "is ANY unsent text showing?", with no text to
+  compare against — and it reads BOTH composers, because a refused send is retried under the same
+  arguments and a retry blind to the other engine's stuck draft would paste onto it. On an UNSTYLED
+  capture it answers "no draft", and failing closed there was measured wrong: a refusal on pane
+  CONTENT is not retryable, the pane does not change, and the real-tmux dispatch acceptance (a stub
+  agent printing a plain `› Ready`) was refused forever while the unit suite stayed green. Only a
+  styled capture can tell codex's dim placeholder from typing, and production always passes one.
 - Clickable preview titles, create rows, and keybar chips never bypass keyboard
   preconditions, confirmations, or lifecycle routing.
 - Quick-switch results commit by stable session id, and composer input always keeps
@@ -321,14 +327,22 @@ pmtui message --list [--json] [--registry <path>]
 |---|---|
 | 0 | delivered — it arrives as the peer's next turn |
 | 3 | the pane cannot take it right now (a human is attached, a dialog is up, an unsent draft, another input mid-delivery) — ask again under the SAME arguments |
-| 1 | no such session, no agent that anything will start, or the hop limit |
+| 1 | no such session, no agent that anything will start, the hop limit, or a SEND THAT STUCK |
 | 2 | usage error |
 
 It creates NO state that outlives the send, which is why there is no broker: spawn needs the
 dashboard because only the dashboard may turn a request into a registry row, whereas a message
 writes no ledger, no `answers.json` and no row — so the command delivers it itself, through the
 same `send_decision` gate and the same `input.lock` as the dashboard's `s`, and no dashboard need
-be running. `--list` exits 0 whenever the registry could be read.
+be running. `--list` exits 0 whenever the registry could be read, and prints its JSON document on a
+nonzero exit too.
+
+A SEND THAT STUCK IS THE ONE WRITE FAILURE IN THE 1 FAMILY. Every other refusal from the write path
+is transient by construction — the lock was busy, a client attached, the pane changed while we
+waited — but a failed submit proof means the bytes were pasted and every Enter left them in the
+composer. Only a person can clear them, so 3 would be an invitation to loop forever. The
+classification keys on `tmux::SUBMIT_UNPROVEN`, the const the driver's own bail is built from, so a
+reword cannot quietly turn it back into a 3.
 
 Nothing in `ManagedEnv` changed for it: `PMTUI_SESSION` is the sender, `PMTUI_STATE_DIR` houses the
 hop ledger, and `$TMUX` names the socket. The registry is the one thing not in the environment —

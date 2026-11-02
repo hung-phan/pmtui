@@ -480,6 +480,41 @@ fn a_pane_write_that_fails_is_reported_and_retryable() {
     assert!(!out.detail.is_empty(), "the failure is reported verbatim");
 }
 
+/// A SEND THAT STUCK IS THE ONE WRITE FAILURE THAT IS NOT RETRYABLE. `send_keys` pasted the bytes
+/// and every Enter it is allowed left them in the composer, so only a person can clear them.
+/// Answering 3 would tell the sender to "ask again under the SAME arguments" forever, which is the
+/// loop the submit proof itself created when it started failing sends that used to be reported as
+/// delivered. The classification keys on `tmux::SUBMIT_UNPROVEN`, the const the bail is built from,
+/// so a reword cannot quietly turn this back into a 3.
+#[test]
+fn a_send_the_composer_never_took_is_final_not_retryable() {
+    let fx = Fx::new(&[("peer", "peer")]);
+    let session = fx.session_of("peer");
+    let pane = FakePane::live_send_fails_with(
+        &session,
+        COMPOSER,
+        &format!(
+            "{} after 3 Enter presses for session {session}",
+            tmux::SUBMIT_UNPROVEN
+        ),
+    );
+    let handle = pane.clone();
+
+    let out = fx.run_with(
+        &fx.cli("peer", "hi"),
+        "me",
+        &|_| Some(Box::new(handle.clone()) as Box<dyn tmux::Driver>),
+        NOW,
+    );
+
+    assert_eq!(out.status, Status::Failed, "{out:?}");
+    assert_eq!(exit_code(&out), 1);
+    assert!(
+        out.detail.contains(tmux::SUBMIT_UNPROVEN),
+        "the detail names what a human has to clear: {out:?}"
+    );
+}
+
 /// A HUMAN IN THAT PANE OWNS IT. Their half-typed draft is invisible to us, so our text would be
 /// glued onto theirs and submitted — and they will stop being attached, so it is a retry.
 #[test]

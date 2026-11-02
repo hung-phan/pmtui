@@ -109,6 +109,15 @@ pub(crate) fn shq(s: &str) -> String {
 /// directory repeats it.
 pub const LAUNCH_COMMAND_MAX_BYTES: usize = 12 * 1024;
 
+/// How [`Driver::send_keys`] says its submit proof failed: the text was pasted and every Enter it
+/// is allowed left it sitting in the composer.
+///
+/// A CONST because a caller must be able to tell this failure from every other one, and it is the
+/// one send error that is NOT transient. The bytes are in the box; another attempt cannot clear
+/// them, only a person can. `pmtui message` reads it to answer 1 rather than 3 — 3 means "ask again
+/// under the SAME arguments", which here is an invitation to loop forever.
+pub const SUBMIT_UNPROVEN: &str = "the composer still held the message";
+
 /// The shell command [`TmuxDriver`] runs for an interactive `argv`: every argument
 /// single-quoted ([`shq`]) and space-joined. [`LAUNCH_COMMAND_MAX_BYTES`] bounds its length.
 pub fn launch_command(argv: &[String]) -> String {
@@ -1011,7 +1020,7 @@ impl Driver for TmuxDriver {
             }
             if attempt + 1 == SUBMIT_ATTEMPTS {
                 bail!(
-                    "the composer still held the message after {SUBMIT_ATTEMPTS} Enter presses for session {session}"
+                    "{SUBMIT_UNPROVEN} after {SUBMIT_ATTEMPTS} Enter presses for session {session}"
                 );
             }
         }
