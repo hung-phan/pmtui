@@ -103,7 +103,8 @@ server and daemon when the test ends.
   composer back between tries FOR BOTH ENGINES and fails a send it cannot prove, each engine
   answering "is MY text still showing?" with its own predicate because each draws different chrome.
   That is why the lock spans the recheck loop and not just the keystrokes, and why pmd now holds it
-  ~10× longer per nudge (three 300ms guards worst case, where codex alone used to pay it). A
+  longer per nudge: ONE 300ms guard on a send that lands and three on one that never does, where
+  codex alone used to pay any of them. A
   PRE-SEND gate asks a different question — "is ANY unsent text showing?", with no text to compare
   against — so it fails CLOSED on an unstyled capture, and it reads BOTH composers: a failed send
   becomes exit 3 "ask again under the SAME arguments", and a retry that could not see the other
