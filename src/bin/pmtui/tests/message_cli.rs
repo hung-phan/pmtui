@@ -741,6 +741,26 @@ fn the_command_line_renders_a_listing_both_ways_and_reports_an_unreadable_one() 
     assert_eq!(code, 1, "{out}{err}");
     assert!(err.contains("message --list:"), "{err:?}");
     assert!(err.contains("cannot read the registry at"), "{err:?}");
+
+    // UNDER --json the same failure prints its DOCUMENT, on stdout, with the exit code inside it.
+    // `docs/SPEC.md` tells an agent to read the document rather than the code; before this it
+    // parsed an empty string. Same four keys a send's envelope carries, so one reader handles both.
+    let (code, out, err) = dispatch_message(
+        &["message", "--list", "--json", "--registry", &reg],
+        &fx,
+        None,
+    );
+    assert_eq!((code, err.as_str()), (1, ""));
+    let json: serde_json::Value = serde_json::from_str(&out).expect("one JSON document");
+    assert_eq!(json["status"], "failed");
+    assert_eq!(json["exit_code"], 1);
+    assert_eq!(json["ok"], false);
+    assert!(
+        json["detail"]
+            .as_str()
+            .is_some_and(|d| d.contains("cannot read the registry at")),
+        "the document carries the reason: {out}"
+    );
 }
 
 #[test]

@@ -79,6 +79,28 @@ pub(crate) fn status_word(state: ReceiptState) -> &'static str {
 
 /// One line per child: `<state> <id> "<title>" — <summary>`, newest last. Says so plainly when there are
 /// none, rather than printing nothing and leaving a parent to wonder whether the command worked.
+/// The document a FAILED listing prints under `--json`, on stdout, alongside its exit 1.
+///
+/// `docs/SPEC.md` requires that a command which prints JSON prints it on a nonzero exit too, and
+/// tells an agent to read the document rather than the code. A bare stderr line is not a document:
+/// an agent that asked for JSON and parsed stdout got an empty string and no reason.
+///
+/// [`run_status`] has exactly one error source — [`crate::spawn_cli::session_env`] — so the code is
+/// always `not_in_a_session`, and it is the real [`spawn::ErrorCode`] rather than a literal, so the
+/// wire name cannot drift from the one every other spawn document uses.
+pub(crate) fn render_status_error_json(message: &str) -> String {
+    serde_json::to_string_pretty(&serde_json::json!({
+        "schema_version": spawn::SCHEMA_VERSION,
+        "state": "failed",
+        "exit_code": 1,
+        "error": spawn::SpawnError {
+            code: spawn::ErrorCode::NotInASession,
+            message: message.to_string(),
+        },
+    }))
+    .unwrap_or_default()
+}
+
 pub(crate) fn render_status_plain(children: &[ChildStatus]) -> String {
     if children.is_empty() {
         return "no children: this session has not spawned any".to_string();

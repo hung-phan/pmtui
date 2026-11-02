@@ -12,6 +12,7 @@ use agent_manager::spawn::{
     self, ErrorCode, NextAction, NextActionKind, ReceiptSession, ReceiptState, SpawnArgs,
     SpawnError, SpawnReceipt, SpawnRequest,
 };
+use agent_manager::tmux::ENV_SESSION;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::os::unix::fs::PermissionsExt as _;
@@ -1601,4 +1602,69 @@ fn a_conflict_prints_the_existing_receipt() {
     );
     assert_eq!(out.error.unwrap().code, ErrorCode::RequestConflict);
     assert_eq!(out.receipt, None);
+}
+
+/// `docs/SPEC.md`: a command that prints JSON prints it on a nonzero exit too, and an agent MUST
+/// read that document rather than the exit code alone. `--status` exited 1 with a bare stderr line,
+/// so an agent that asked for JSON and parsed stdout got an empty string and no reason at all.
+#[test]
+fn a_failed_status_listing_still_prints_its_json_document() {
+    let session = Session::new().without(ENV_SESSION);
+
+    let (code, out, err) =
+        session.dispatch(&["spawn", "--status", "--json"], &mut FakeWaiter::new());
+    assert_eq!(code, 1);
+    assert_eq!(err, "", "the document is on stdout, where --json is parsed");
+    let doc = json(&out);
+    assert_eq!(doc["state"], "failed");
+    assert_eq!(doc["exit_code"], 1);
+    assert_eq!(doc["schema_version"], 1);
+    // The real `ErrorCode`, so this wire name cannot drift from the one every other spawn
+    // document uses for the same condition.
+    assert_eq!(doc["error"]["code"], "not_in_a_session");
+    assert!(
+        doc["error"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains(ENV_SESSION)),
+        "the message names what is missing: {out}"
+    );
+
+    // WITHOUT --json the stderr line stays: a human reading a terminal is not parsing stdout.
+    let (code, out, err) = session.dispatch(&["spawn", "--status"], &mut FakeWaiter::new());
+    assert_eq!((code, out.as_str()), (1, ""));
+    assert!(err.contains("spawn --status:"), "{err}");
+}
+
+/// Exit 0 means the TASK IS OVER, and `ready` can never produce it. `answered` returns false for
+/// `ready` and `outcome_unknown`, so neither ever ends the wait — which is why HELP no longer
+/// advertises them. An agent that read "0 ready or done" and branched on `state == "ready"` wrote
+/// dead code at best, and at worst learned that a started run counts as a finished one.
+#[test]
+fn help_promises_no_exit_code_for_a_state_no_form_produces() {
+    let help = crate::spawn_cli::HELP;
+    assert!(
+        !help.contains("0 ready or done"),
+        "the old promise is gone: {help}"
+    );
+    assert!(help.contains("0  done"), "exit 0 is `done` alone: {help}");
+    assert!(
+        help.contains("`ready` is NOT one of them"),
+        "it says why `ready` is absent: {help}"
+    );
+    for unreachable in [ReceiptState::Ready, ReceiptState::OutcomeUnknown] {
+        assert!(
+            !answered(unreachable),
+            "{unreachable:?} must not end the wait, or the help text is wrong again"
+        );
+    }
+    // Every state that CAN reach a caller is one the help text names, so the two cannot drift.
+    for state in ReceiptState::ALL.into_iter().filter(|s| answered(*s)) {
+        // serde's wire name, which equals what the command prints for every ANSWERED state.
+        let printed = serde_json::to_value(state).unwrap();
+        let printed = printed.as_str().unwrap();
+        assert!(
+            help.contains(printed),
+            "the help text never mentions {printed}, which a caller can see"
+        );
+    }
 }

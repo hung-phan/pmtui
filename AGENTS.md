@@ -277,17 +277,34 @@ pmtui spawn --cancel --request-id ID      # ask once; asking twice is asking onc
 Exit codes are the contract an agent branches on. `--json` still prints a result document on a
 nonzero exit, so read the document rather than trusting the code alone. From `exit_code`:
 
+ONE TABLE PER FORM, because the forms do not share a vocabulary. The dispatch and `--cancel` forms
+report an OUTCOME; `--status` reports a LISTING and its words mean different things.
+
+Dispatch (`--message`) and `--cancel`:
+
 | Code | States |
 |---|---|
-| 0 | `ready`, `done` — "the thing you asked for happened" |
+| 0 | `done` — the child ran and reported |
 | 3 | `queued`, `in_progress`, `cancel_requested`, `needs_attention`, `needs_human`, and a receipt still `claimed`/`staged`/`launching` — ask again under the SAME request id |
-| 1 | `failed`, `outcome_unknown`, `ended_without_result`, `cancelled` |
+| 1 | `failed`, `ended_without_result`, `cancelled` — read `error.code` |
 | 2 | usage error |
 
+`--status`: always 0 whenever it could read its own directory, because a listing is not an outcome.
+Its `state` field carries any `ReceiptState`, and `ready` there means the job is STILL RUNNING.
+
+`ready` AND `outcome_unknown` ARE ABSENT FROM THE TABLE ON PURPOSE, and they are reachable in
+neither form: `answered` returns false for both, so neither ends the wait, and `--cancel` returns
+early only on `is_job_terminal`, which excludes both. The table used to promise `ready` at 0 under
+the heading "the thing you asked for happened" — for a job that is "the run started", and treating
+a launch as an answer is the single mistake this whole surface is shaped to prevent. `exit_code`
+keeps its arms for them (the match is exhaustive over the enum) and a test holds the help text to
+the predicate.
+
 `needs_human` sits in the 3 family for the same reason as `needs_attention`: the receipt names the
-next action. `--status` exits 0 whenever it could read its own directory, because a listing is not
-an outcome. Every form reads only `PMTUI_SESSION`/`PMTUI_STATE_DIR`/`PMTUI_BIN` plus its own state
-directory, so it works where `$HOME` is read-only.
+next action. Every form reads only `PMTUI_SESSION`/`PMTUI_STATE_DIR`/`PMTUI_BIN` plus its own state
+directory, so it works where `$HOME` is read-only. A FAILED LISTING STILL PRINTS ITS DOCUMENT —
+`spawn --status --json` and `message --list --json` both exited 1 with a bare stderr line, so an
+agent that asked for JSON parsed an empty string and learned nothing.
 
 ## Message Command Surface
 
