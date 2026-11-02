@@ -274,16 +274,6 @@ pub(crate) struct App {
     /// Rebuilt fresh each refresh (a row not seen this tick is simply not re-inserted), so it cannot
     /// leak entries for closed sessions.
     pub(crate) idle_gate: std::collections::HashMap<String, (u64, u32)>,
-    /// The TURN ANCHOR for each row whose pane this dashboard has seen busy, keyed by session id →
-    /// `(turn count then, wall clock then)`. Separate from `idle_gate` because it is armed on the
-    /// Busy arm and read on the Idle one, so the two are never written on the same tick.
-    ///
-    /// It exists because a STANDARD row has no pmd ledger to supply `hook_working`, and claude
-    /// leaves its bare composer on screen through a silent tool call: two byte-stable captures of a
-    /// pane that is mid-turn then confirmed idle and drew `○` on a working agent. The hook's own
-    /// count settles it — no new turn since we saw the pane busy ⇒ the turn we saw is still running.
-    /// Rebuilt fresh each refresh, like `idle_gate`.
-    pub(crate) turn_anchor: std::collections::HashMap<String, (u64, i64)>,
     /// Override for claude's config home, so [`App::start_undriven_session`]'s
     /// resume-vs-create probe ([`job_engine::claude_conversation_exists`]) can be pointed at
     /// a scratch `projects/` in a unit test instead of the real `$HOME/.claude`. `None` in
@@ -451,7 +441,6 @@ impl App {
             panes: std::cell::Cell::new(PaneRects::default()),
             agent_pane_fit: std::cell::RefCell::new(None),
             idle_gate: std::collections::HashMap::new(),
-            turn_anchor: std::collections::HashMap::new(),
             claude_home: None,
             pmtui_bin: tmux::pmtui_bin_for_current_process(),
             decisions_seen: std::collections::HashMap::new(),

@@ -407,7 +407,9 @@ impl JobScheduler {
     /// only the content-stability fingerprint can confirm the latter safely.
     fn turn_in_progress(&self) -> bool {
         match (
-            crate::state::turn_count(&self.paths.turn_signal()),
+            std::fs::metadata(self.paths.turn_signal())
+                .map(|m| m.len())
+                .ok(),
             self.turns_at_nudge,
         ) {
             (Some(now), Some(base)) => now <= base,
@@ -423,7 +425,9 @@ impl JobScheduler {
     /// `report_debt_backstop` for what bounds that hold.
     fn turn_finished_since_nudge(&self) -> bool {
         match (
-            crate::state::turn_count(&self.paths.turn_signal()),
+            std::fs::metadata(self.paths.turn_signal())
+                .map(|m| m.len())
+                .ok(),
             self.turns_at_nudge,
         ) {
             (Some(now), Some(base)) => now > base,

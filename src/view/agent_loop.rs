@@ -205,7 +205,9 @@ fn agent_loop_working(l: &AgentLoopState, paths: &ProjectPaths) -> Option<bool> 
         return Some(false);
     }
     let baseline = l.turn_count_at_nudge?;
-    let size = crate::state::turn_count(&paths.turn_signal())?;
+    let size = std::fs::metadata(paths.turn_signal())
+        .map(|m| m.len())
+        .ok()?;
     Some(size <= baseline)
 }
 

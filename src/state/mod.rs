@@ -40,7 +40,7 @@ pub use records::{
     Tier, append_answer, read_control, stop_product_text, synthesized_stop_text, write_control,
     write_driver,
 };
-pub use turn_signal::{TURN_SIGNAL_LAG_MAX, TurnSignalHealth, turn_count, turn_signal_health};
+pub use turn_signal::{TURN_SIGNAL_LAG_MAX, TurnSignalHealth, turn_signal_health};
 
 #[cfg(test)]
 mod tests;

@@ -157,7 +157,6 @@ mod stops;
 mod switcher;
 mod takeover;
 mod theming;
-mod turn_anchor;
 mod undriven_activity;
 mod update;
 mod wake;
@@ -743,7 +742,6 @@ fn app_with_driver(projects: Vec<ProjectView>, mode: UiMode, agent_tmux: Box<dyn
         panes: std::cell::Cell::new(PaneRects::default()),
         agent_pane_fit: std::cell::RefCell::new(None),
         idle_gate: std::collections::HashMap::new(),
-        turn_anchor: std::collections::HashMap::new(),
         decisions_seen: std::collections::HashMap::new(),
         row_hits: std::cell::RefCell::new(Vec::new()),
         settings_hits: std::cell::RefCell::new(Vec::new()),
@@ -1165,7 +1163,6 @@ fn creating_loop_app(
         panes: std::cell::Cell::new(PaneRects::default()),
         agent_pane_fit: std::cell::RefCell::new(None),
         idle_gate: std::collections::HashMap::new(),
-        turn_anchor: std::collections::HashMap::new(),
         decisions_seen: std::collections::HashMap::new(),
         row_hits: std::cell::RefCell::new(Vec::new()),
         settings_hits: std::cell::RefCell::new(Vec::new()),

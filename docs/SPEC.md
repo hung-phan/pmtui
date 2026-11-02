@@ -703,14 +703,6 @@ A live process is not proof of work. The product separates these states:
 The product treats terminal activity that is not clear as work. It MUST NOT treat the last frame of a dead
 terminal as an idle prompt.
 
-An idle-looking frame is not proof of an ended turn either. One engine leaves its empty composer on screen
-through a tool call, so a frame that does not change is not evidence that the turn stopped. The product
-MUST remember the turn count when it last saw the terminal working. While the turn-end signal records no
-turn after that moment, a stable idle frame MUST NOT make the session read idle. This rule can only delay
-an idle reading. It MUST NOT make a session read as working on its own, and it MUST expire, because a
-signal that never arrives would hold the state forever. It MUST also go away when a person attaches,
-because that person drives the same process and ends turns this rule did not see.
-
 An accepted monitoring report means that the worker gave up that wake. The dashboard MUST show the next
 check after the terminal is stably idle, even if an optional turn-end signal did not arrive. The
 supervisor MUST then clear the baseline of that wake, so that a missing signal cannot make an idle session
