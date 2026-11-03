@@ -256,6 +256,64 @@ pub(crate) fn pane_window(capture: &str, want: usize, back: usize) -> (Vec<Line<
     (lines[start..end].to_vec(), max)
 }
 
+/// Columns the transcript keeps clear on EACH SIDE of a row: the two-space gutter every log
+/// source already prepends, mirrored on the right.
+///
+/// THE RIGHT HALF IS A FIX FOR AN OVERFLOW, not a decoration. `fit_agent_pane` sizes the agent's
+/// own terminal to the preview's INNER width, and the gutter is then INSERTED at the front of
+/// each captured row — so every full-width row was `inner_w + 2` columns wide and its last two
+/// fell off the border with no gap at all. The agent is now told the TEXT width instead, so it
+/// wraps where the text actually ends and both margins are real.
+const PREVIEW_GUTTER: usize = 2;
+
+/// The columns a transcript row has for TEXT, inside a preview pane of INNER width `inner_w`.
+///
+/// ONE function because two callers must not disagree: the rows are fitted to it, and the
+/// AGENT'S OWN TERMINAL is resized to it. A drift between those two is exactly the overflow
+/// above — a row wrapped for one width and drawn at another.
+pub(crate) fn preview_text_cols(inner_w: u16) -> u16 {
+    inner_w.saturating_sub(u16::try_from(PREVIEW_GUTTER * 2).unwrap_or(u16::MAX))
+}
+
+/// `line` cut to at most `budget` columns, each span keeping its own style, with a dim `…`
+/// where something was dropped.
+///
+/// A BACKSTOP, not the mechanism. A detached pane is sized to the budget, so its rows already
+/// fit and this changes nothing. It earns its place for the pane that CANNOT be resized: while
+/// a human is attached their client owns the size, so a 200-column row arrives for a 70-column
+/// region. Clipping that at the border is what read as a broken pane; cutting it at the margin
+/// keeps the two sides consistent and marks what was dropped.
+///
+/// Span-aware on purpose: a transcript row carries the agent's own colours (the capture came
+/// from `capture-pane -e`), so only the span that straddles the budget is rebuilt — the rest
+/// still borrow the capture.
+fn clamp_line_cols(mut line: Line<'_>, budget: usize) -> Line<'_> {
+    let mut used = 0usize;
+    let mut keep = 0usize;
+    let mut cut: Option<Span<'_>> = None;
+    for span in &line.spans {
+        let w = text_cols(&span.content);
+        if used + w <= budget {
+            used += w;
+            keep += 1;
+            continue;
+        }
+        let room = budget.saturating_sub(used);
+        if room > 1 {
+            cut = Some(Span::styled(truncate(&span.content, room), span.style));
+        }
+        break;
+    }
+    if keep == line.spans.len() {
+        return line;
+    }
+    line.spans.truncate(keep);
+    if let Some(span) = cut {
+        line.spans.push(span);
+    }
+    line
+}
+
 /// The `Log` section's rows: its rule, then the last `tail_h` rows of whichever source
 /// [`preview_log_source`] picked. `tail_h` is measured from the region the layout actually
 /// granted, so the caller passes it in rather than this deciding how much room it has.
@@ -285,7 +343,12 @@ pub(crate) fn preview_log_lines<'a>(
             if tail.is_empty() {
                 log.push(Line::styled("  —", dim));
             } else {
-                for mut l in tail {
+                let text_w = usize::from(preview_text_cols(inner_w));
+                for l in tail {
+                    // Clamp before the gutter goes on, so a row that could not be fitted (a
+                    // human is attached, so their client owns the pane size) lands inside the
+                    // same two margins as one that could.
+                    let mut l = clamp_line_cols(l, text_w);
                     // The two-space gutter the other Log sources use, prepended as its
                     // OWN unstyled span so the agent's spans are never restyled or
                     // re-allocated (they still borrow the capture).
@@ -312,8 +375,9 @@ pub(crate) fn preview_log_lines<'a>(
                 log.push(Line::styled("  —", dim));
             } else {
                 let start = rendered.len().saturating_sub(tail_h);
+                let text_w = usize::from(preview_text_cols(inner_w));
                 for l in &rendered[start..] {
-                    log.push(Line::raw(format!("  {l}")));
+                    log.push(Line::raw(format!("  {}", truncate(l, text_w))));
                 }
             }
         }

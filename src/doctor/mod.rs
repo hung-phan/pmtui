@@ -205,6 +205,28 @@ pub(crate) trait RuntimeProbe {
     /// or `None` when nothing does. Named rather than a bare `bool` so the report can say which fact
     /// it is standing on — and so "no desktop here" is a sentence rather than a shrug.
     fn desktop_session(&self) -> Option<&'static str>;
+    /// Does anything on the session bus actually SERVE notifications — `Some(true)` a daemon owns
+    /// `org.freedesktop.Notifications`, `Some(false)` nothing does, `None` the question could not
+    /// be asked (no `gdbus`, or it answered something unparseable).
+    ///
+    /// The fourth answer exists because THREE WERE NOT ENOUGH, measured: a bus address can be set
+    /// with no notification daemon on the bus, and the env reading alone then reports a PASS while
+    /// every delivery fails with `ServiceUnknown`. "Could not ask" is a fact, not a verdict, and
+    /// must never be reported as either a working or a broken transport.
+    fn notification_daemon(&self) -> Option<bool>;
+}
+
+/// `gdbus`'s answer to `NameHasOwner`, which is `(true,)` or `(false,)` and nothing else.
+///
+/// Pure, so both answers and every malformed one are testable without a session bus. Anything
+/// unrecognised is `None` rather than a guess: this is the reading that decides whether the
+/// doctor claims notifications work.
+fn name_has_owner(stdout: &str) -> Option<bool> {
+    match stdout.trim() {
+        "(true,)" => Some(true),
+        "(false,)" => Some(false),
+        _ => None,
+    }
 }
 
 /// Which variable, if any, says a desktop session is reachable from this process.
@@ -239,6 +261,12 @@ pub(crate) struct NativeProbe {
     /// Captured at construction, like `path`: the check reads it through the probe seam rather than
     /// the environment, which is what lets a test state "there is no desktop here".
     desktop: Option<&'static str>,
+    /// The program that asks the session bus who owns a name. A FIELD for the same reason `tmux`
+    /// is one: the real reading shells out, and a test that could only exercise it on a machine
+    /// that happens to have `gdbus` is a test whose coverage depends on the host. That is not
+    /// hypothetical — it passed locally and failed CI, where `gdbus` is absent and every line
+    /// below the PATH check went unexecuted.
+    gdbus: PathBuf,
 }
 
 impl Default for NativeProbe {
@@ -251,6 +279,7 @@ impl Default for NativeProbe {
                 std::env::var_os("WAYLAND_DISPLAY").as_deref(),
                 std::env::var_os("DISPLAY").as_deref(),
             ),
+            gdbus: PathBuf::from("gdbus"),
         }
     }
 }
@@ -263,6 +292,14 @@ impl NativeProbe {
             ..Self::default()
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn with_gdbus(gdbus: PathBuf) -> Self {
+        Self {
+            gdbus,
+            ..Self::default()
+        }
+    }
 }
 
 impl RuntimeProbe for NativeProbe {
@@ -272,6 +309,33 @@ impl RuntimeProbe for NativeProbe {
 
     fn desktop_session(&self) -> Option<&'static str> {
         self.desktop
+    }
+
+    fn notification_daemon(&self) -> Option<bool> {
+        // READ-ONLY on purpose: asking the bus who owns the name sends no notification, so a
+        // human who asked for a diagnosis does not get a toast for it.
+        //
+        // No PATH pre-check: `output()` already reports a missing program as an error, and a
+        // second answer to "is it there?" only adds a branch — the one CI could never execute,
+        // because its runner has no `gdbus`.
+        let output = Command::new(&self.gdbus)
+            .args([
+                "call",
+                "--session",
+                "--dest",
+                "org.freedesktop.DBus",
+                "--object-path",
+                "/org/freedesktop/DBus",
+                "--method",
+                "org.freedesktop.DBus.NameHasOwner",
+                "org.freedesktop.Notifications",
+            ])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        name_has_owner(&String::from_utf8_lossy(&output.stdout))
     }
 
     fn tmux_version(&self) -> Result<String, String> {

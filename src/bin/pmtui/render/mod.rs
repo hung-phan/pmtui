@@ -224,20 +224,14 @@ pub(crate) fn render(f: &mut Frame, app: &App) {
     // agent-deck layout: a 1-line status bar, the body (SESSIONS list, plus the
     // PREVIEW when the terminal is wide enough for one), and a 1-line keybar.
     // `Min(0)` on the body means the two fixed 1-row bars can never starve it.
-    // A one-line VERDICT above the body, naming WHICH sessions need you — shown ONLY when
-    // something does. Silence is the default state: an all-clear fleet spends no row on it, so the
-    // dashboard is unchanged until an escalation exists. The status bar already carries the COUNT
-    // (` ✕ 2 need you `); this line carries the identities the count cannot, right where the eye
-    // lands first. Below `NARROW_W` it still shows — knowing which session needs you matters at
-    // every width — and it clips at the right edge like the status bar rather than wrapping.
-    let (needs, _running, _idle, stuck) = counts(app);
-    let show_verdict = needs + stuck > 0;
-    let areas = dashboard_areas(area, show_verdict);
+    // NO VERDICT ROW. One used to sit above the body naming WHICH sessions need you, on the
+    // theory that the status bar carries the COUNT and the names are what the count cannot. They
+    // are not: the `NEEDS YOU (n)` group two rows below lists exactly those sessions, sorted the
+    // same way, so the row spent a screen row restating its own neighbour. With a single needy
+    // session it read as the same fact three times — the chip, the row, and the group.
+    let areas = dashboard_areas(area);
 
     render_status_bar(f, app, areas.status);
-    if let Some(v) = areas.verdict {
-        render_verdict_line(f, app, v);
-    }
     // The body is the list and the preview, all of it. A ` STATUS ` pane used to take the bottom rows
     // of it to show the status log; the log is a file now (`status_log`), so those rows go back to the
     // sessions it was covering and the keybar is the one surface carrying the transient line.
@@ -332,34 +326,23 @@ fn render_board_overlay_keybar(f: &mut Frame, app: &App, area: Rect) {
 
 struct DashboardAreas {
     status: Rect,
-    verdict: Option<Rect>,
     body: Rect,
     keybar: Rect,
 }
 
-fn dashboard_areas(area: Rect, verdict: bool) -> DashboardAreas {
-    let mut constraints = vec![Constraint::Length(1)];
-    if verdict {
-        constraints.push(Constraint::Length(1));
-    }
-    constraints.push(Constraint::Min(0));
-    constraints.push(Constraint::Length(1));
-    let chunks = Layout::vertical(constraints).split(area);
-    let mut index = 0;
-    let status = chunks[index];
-    index += 1;
-    let verdict = verdict.then(|| {
-        let result = chunks[index];
-        index += 1;
-        result
-    });
-    let body = chunks[index];
-    index += 1;
+/// Two fixed 1-row bars and the body between them. `Min(0)` on the body means the bars
+/// can never starve it.
+fn dashboard_areas(area: Rect) -> DashboardAreas {
+    let [status, body, keybar] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(0),
+        Constraint::Length(1),
+    ])
+    .areas(area);
     DashboardAreas {
         status,
-        verdict,
         body,
-        keybar: chunks[index],
+        keybar,
     }
 }
 

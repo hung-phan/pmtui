@@ -604,9 +604,12 @@ fn preview_fits_the_agent_pane_to_the_panel_and_dedupes_across_frames() {
     // A second IDENTICAL frame must not resize again — same size, so the dedupe suppresses it.
     terminal.draw(|f| render(f, &app)).expect("render 2");
 
-    // The pane's content width is the bordered block's inner width (`area.width - 2`). The preview
-    // carries NO block-level padding (it is a content pane — see `render_preview`), just the border.
-    let inner_w = app.panes.get().detail.width.saturating_sub(2);
+    // The pane's content width is the TEXT width inside the bordered block: the border takes a
+    // column each side (`area.width - 2`), and the transcript keeps a two-column margin inside
+    // that (`preview_text_cols`). Fitting to the inner width instead was an OVERFLOW — the
+    // renderer inserts the left gutter in front of a row already that wide, so every full-width
+    // row was pushed two columns past the border.
+    let inner_w = preview_text_cols(app.panes.get().detail.width.saturating_sub(2));
     let loop_resizes = |d: &FakePane| -> Vec<(String, u16, u16)> {
         d.resizes()
             .into_iter()
@@ -623,7 +626,7 @@ fn preview_fits_the_agent_pane_to_the_panel_and_dedupes_across_frames() {
     let (_, cols, rows) = &after_two[0];
     assert_eq!(
         *cols, inner_w,
-        "the pane must be fit to the preview's inner width ({inner_w}), got {cols}"
+        "the pane must be fit to the preview's TEXT width ({inner_w}), got {cols}"
     );
     // The pane is fit above the preview viewport so an alternate-screen TUI has rows above the
     // visible tail. A fixed 50-row pane becomes unscrollable on a tall dashboard.
@@ -1362,4 +1365,96 @@ fn a_staged_rows_empty_preview_and_shelf_name_the_spawn_request_not_m_or_message
     for refused in ["m switches autopilot", "message this session"] {
         assert!(!staged.contains(refused), "names {refused}: {staged}");
     }
+}
+
+/// A transcript row sits between TWO EQUAL MARGINS, measured on the rendered buffer.
+///
+/// It used to have one. `fit_agent_pane` sized the agent's terminal to the preview's INNER
+/// width, and the renderer then INSERTS a two-column gutter in front of each captured row — so
+/// a full-width row was `inner_w + 2` wide and its last two columns fell off the border with
+/// nothing between the text and the rule, which reads as a broken pane rather than a narrow one.
+#[test]
+fn a_transcript_row_keeps_the_same_margin_on_both_sides() {
+    // Rows far wider than any preview region, as an unfitted pane (a human attached) delivers.
+    let wide = "x".repeat(400);
+    let capture = format!("{wide}\n{wide}\n{wide}\n");
+    let dir = tempfile::tempdir().unwrap();
+    let (reg_path, root) = reg_with_agent_loop(dir.path(), "bot");
+    let pane = session_name("bot", &root);
+    let mut app = app_with_driver(
+        vec![agent_loop_view("bot")],
+        UiMode::Normal,
+        Box::new(FakePane::live(&pane, &capture)),
+    );
+    app.registry_path = reg_path;
+
+    for (w, h) in [(120u16, 32u16), (100, 28), (80, 24)] {
+        let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
+        t.draw(|f| render(f, &app)).unwrap();
+        let rows = screen_rows(&t);
+        let row = rows
+            .iter()
+            .map(|(text, _)| text.as_str())
+            .find(|text| text.contains("xxx"))
+            .unwrap_or_else(|| panic!("{w}x{h}: no transcript row rendered: {rows:#?}"));
+
+        // The row spans the WHOLE dashboard — `│ sessions… ││  xxx…  │` — so the preview's own
+        // borders are the LAST TWO, not the first one found. Measuring from the first was this
+        // test's own first bug: it reported the empty sessions pane as a 42-column margin.
+        let bars: Vec<usize> = row
+            .char_indices()
+            .filter(|(_, c)| *c == '│')
+            .map(|(i, _)| i)
+            .collect();
+        let (&left_border, &right_border) = (
+            bars.get(bars.len().wrapping_sub(2))
+                .expect("preview left border"),
+            bars.last().expect("preview right border"),
+        );
+        let inner = &row[left_border + '│'.len_utf8()..right_border];
+        let lead = inner.len() - inner.trim_start().len();
+        let trail = inner.len() - inner.trim_end().len();
+        assert!(
+            trail > 0,
+            "{w}x{h}: the row is flush against the right border: {row:?}"
+        );
+        assert_eq!(
+            lead, trail,
+            "{w}x{h}: margins disagree (left {lead}, right {trail}): {row:?}"
+        );
+    }
+}
+
+/// AND NO ELLIPSIS once the agent has been told the width. The clamp is a backstop for a pane
+/// nobody could resize; a fitted pane's rows already end where the text ends, so marking them
+/// as cut would be a lie about content that is all there.
+#[test]
+fn a_fitted_pane_is_displayed_whole_rather_than_truncated() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reg_path, root) = reg_with_agent_loop(dir.path(), "bot");
+    let pane = session_name("bot", &root);
+    let mut app = app_with_driver(
+        vec![agent_loop_view("bot")],
+        UiMode::Normal,
+        // A row exactly as wide as the agent would wrap it, given the fit below.
+        Box::new(FakePane::live(&pane, "ready for the next instruction\n")),
+    );
+    app.registry_path = reg_path;
+
+    let mut t = Terminal::new(TestBackend::new(120, 32)).unwrap();
+    t.draw(|f| render(f, &app)).unwrap();
+
+    // The width the agent was actually asked for is the width the rows are fitted to, so a row
+    // within it is never marked as cut.
+    let inner_w = preview_text_cols(app.panes.get().detail.width.saturating_sub(2));
+    assert!(inner_w > 0, "the preview must have a text budget");
+    let row = screen_rows(&t)
+        .into_iter()
+        .map(|(text, _)| text)
+        .find(|text| text.contains("ready for the next instruction"))
+        .expect("the transcript row");
+    assert!(
+        !row.contains('…'),
+        "a row inside the fitted width must not be marked as truncated: {row:?}"
+    );
 }

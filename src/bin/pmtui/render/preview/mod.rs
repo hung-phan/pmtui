@@ -163,7 +163,10 @@ pub(crate) fn render_preview(f: &mut Frame, app: &App, area: Rect) {
             &v.id,
             session,
             chat,
-            area.width.saturating_sub(2),
+            // THE TEXT width, not the inner width. Sized to `inner_w`, every full-width row
+            // was pushed two columns past the border by the gutter the renderer inserts in
+            // front of it; the agent has to wrap where the text ends.
+            preview_text_cols(area.width.saturating_sub(2)),
             preview_pane_fit_rows(area.height.saturating_sub(2), app.detail_scroll),
         );
     }

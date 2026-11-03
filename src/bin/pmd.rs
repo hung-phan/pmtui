@@ -1,10 +1,12 @@
 //! `pmd` — the project-manager daemon. Loads a registry of projects, drives
 //! each one's step loop via a private tmux server, and routes escalations to
-//! the log + desktop notifications. The TUI (`pmtui`, Milestone 3) attaches to
+//! the log + whichever notification transports `--notify` names. The TUI (`pmtui`,
+//! Milestone 3) attaches to
 //! it; for now this binary is the driver.
 //!
 //! Usage:
 //!   pmd [--registry <path>] [--socket <name>] [--tick-ms <n>] [--once]
+//!       [--notify <list>]
 //!   pmd checkpoint <path>
 //!
 //! The daemon holds no authoritative state: every project's truth is on disk in
@@ -19,7 +21,7 @@ use anyhow::{Context, Result};
 
 use agent_manager::clock::SystemClock;
 use agent_manager::daemon::Daemon;
-use agent_manager::escalation::{Composite, DesktopNotifier, LogNotifier, Notifier};
+use agent_manager::escalation::{Composite, DEFAULT_TRANSPORTS, Severity, Transport};
 use agent_manager::registry::Registry;
 use agent_manager::tmux::{Driver, TmuxDriver};
 
@@ -33,6 +35,10 @@ struct Args {
     socket: String,
     tick_ms: u64,
     once: bool,
+    /// Which notification transports to deliver escalations over, in order.
+    /// Defaults to [`DEFAULT_TRANSPORTS`] — see its doc for why that is not every
+    /// transport.
+    notify: Vec<Transport>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -74,6 +80,7 @@ struct RunControl<D> {
 
 const HELP: &str = "pmd — project-manager daemon\n\n\
 Usage: pmd [--registry <path>] [--socket <name>] [--tick-ms <n>] [--once]\n\
+           [--notify <list>]\n\
        pmd doctor [--registry <path>] [--socket <name>] [--json]\n\
        pmd checkpoint <path>\n\
        pmd --version\n\n\
@@ -83,6 +90,8 @@ checkpoint <path>  print a bounded validated checkpoint as untrusted JSON data\n
 --socket <name>    private tmux server socket (default: pmd)\n\
 --tick-ms <n>      loop interval in milliseconds (default: 500)\n\
 --once             run a single sweep and exit (for testing)\n\
+--notify <list>    comma-separated notification transports (default: log,notify-send)\n\
+                   one or more of: log, notify-send, cmux, osc\n\
 --json             emit the versioned doctor report as JSON\n\
 --version          print the pmd version and exit\n\n\
 Doctor warnings still exit 0; failures exit 1; usage errors exit 2.\n";
@@ -113,6 +122,7 @@ fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<CliAction> {
         socket: "pmd".to_string(),
         tick_ms: 500,
         once: false,
+        notify: DEFAULT_TRANSPORTS.to_vec(),
     };
     let mut i = 0;
     while i < argv.len() {
@@ -127,6 +137,11 @@ fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<CliAction> {
                 a.tick_ms = next(&argv, &mut i, "--tick-ms")?
                     .parse()
                     .context("--tick-ms must be a number")?;
+            }
+            "--notify" => {
+                let list = next(&argv, &mut i, "--notify")?;
+                a.notify = Transport::parse_list(&list)
+                    .map_err(|bad| anyhow::anyhow!("--notify: unknown transport `{bad}`"))?;
             }
             "--once" => {
                 a.once = true;
@@ -365,11 +380,17 @@ where
         sweep_orphan_loops,
     } = control;
     let clock = SystemClock;
+    // Each transport decides for itself whether it can deliver, so the set needs no
+    // probing: a headless box has no D-Bus notification server, a box without cmux
+    // has no `cmux` on PATH, and a pmd with redirected output has no terminal for
+    // OSC. Each warns at most once and then costs nothing, `Composite` swallows an
+    // individual failure, and `log` records the escalation regardless.
     let notifier = Composite {
-        notifiers: vec![
-            Box::new(LogNotifier) as Box<dyn Notifier>,
-            Box::new(DesktopNotifier::default()),
-        ],
+        notifiers: args
+            .notify
+            .iter()
+            .map(|t| t.notifier(Severity::Warn))
+            .collect(),
     };
 
     eprintln!(

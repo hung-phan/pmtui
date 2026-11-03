@@ -4,7 +4,9 @@ use std::path::Path;
 
 use tempfile::TempDir;
 
-use super::super::{Check, CheckStatus, DoctorOptions, OverallStatus, RuntimeProbe, inspect_with};
+use super::super::{
+    Check, CheckStatus, DoctorOptions, NativeProbe, OverallStatus, RuntimeProbe, inspect_with,
+};
 use crate::job::{
     AgentLoopState, DeciderOutcome, DeciderPolicy, DeciderRun, DeciderTarget, ParkedAdvice,
 };
@@ -23,6 +25,9 @@ struct FakeProbe {
     /// rather than read from the environment so "there is no desktop" is a test input — edition 2024
     /// forbids `set_var`, and a test that mutated the environment would steer its neighbours anyway.
     desktop: Option<&'static str>,
+    /// Whether anything owns `org.freedesktop.Notifications`, or `None` for "could not ask".
+    /// A test input for the same reason `desktop` is: the real reading shells out to `gdbus`.
+    notification_daemon: Option<bool>,
 }
 
 impl FakeProbe {
@@ -37,6 +42,7 @@ impl FakeProbe {
             dead_sessions: BTreeSet::new(),
             pane_error: None,
             desktop: Some("DBUS_SESSION_BUS_ADDRESS"),
+            notification_daemon: Some(true),
         }
     }
 }
@@ -48,6 +54,10 @@ impl RuntimeProbe for FakeProbe {
 
     fn desktop_session(&self) -> Option<&'static str> {
         self.desktop
+    }
+
+    fn notification_daemon(&self) -> Option<bool> {
+        self.notification_daemon
     }
 
     fn tmux_version(&self) -> Result<String, String> {
@@ -257,6 +267,7 @@ fn disabled_projects_do_not_require_worker_or_decider_executables() {
         dead_sessions: BTreeSet::new(),
         pane_error: None,
         desktop: Some("DBUS_SESSION_BUS_ADDRESS"),
+        notification_daemon: Some(true),
     };
 
     let report = inspect_with(&options(&dir), &probe);
@@ -433,6 +444,7 @@ fn missing_worker_fails_but_optional_capabilities_warn() {
         dead_sessions: BTreeSet::new(),
         pane_error: None,
         desktop: Some("DBUS_SESSION_BUS_ADDRESS"),
+        notification_daemon: Some(true),
     };
 
     let report = inspect_with(&options(&dir), &probe);
@@ -1039,6 +1051,7 @@ fn tmux_list_failure_is_a_failure_without_session_guesses() {
         dead_sessions: BTreeSet::new(),
         pane_error: None,
         desktop: Some("DBUS_SESSION_BUS_ADDRESS"),
+        notification_daemon: Some(true),
     };
 
     let report = inspect_with(&options(&dir), &probe);
@@ -1065,6 +1078,7 @@ fn empty_tmux_socket_fails_without_running_tmux() {
         dead_sessions: BTreeSet::new(),
         pane_error: None,
         desktop: Some("DBUS_SESSION_BUS_ADDRESS"),
+        notification_daemon: Some(true),
     };
     let mut doctor_options = options(&dir);
     doctor_options.socket.clear();
@@ -1338,4 +1352,155 @@ fn a_session_with_no_turns_yet_is_not_warned_about_its_hook() {
     let fresh = check(&report.checks, "project.0.turn_signal");
     assert_eq!(fresh.status, CheckStatus::Pass, "{}", fresh.summary);
     assert!(fresh.summary.contains("no turn-end signal yet"));
+}
+
+/// FOUR ANSWERS, and the one that matters is the third: a session bus with NOTHING SERVING
+/// NOTIFICATIONS. Measured on the machine this was written on — the env reading alone reported a
+/// PASS, and `notify-send` failed with `ServiceUnknown` one command later.
+#[test]
+fn a_session_bus_with_no_notification_daemon_warns_instead_of_passing() {
+    let dir = TempDir::new().unwrap();
+    let cases = [
+        (
+            "a daemon owns the name",
+            Some(true),
+            CheckStatus::Pass,
+            "owns org.freedesktop.Notifications",
+        ),
+        (
+            "a bus with nothing on it",
+            Some(false),
+            CheckStatus::Warn,
+            "nothing owns org.freedesktop.Notifications",
+        ),
+        (
+            "the question could not be asked",
+            None,
+            CheckStatus::Pass,
+            "delivery is unverified",
+        ),
+    ];
+    for (label, daemon, want_status, want_text) in cases {
+        let probe = FakeProbe {
+            notification_daemon: daemon,
+            ..FakeProbe::healthy(Vec::new())
+        };
+        let report = inspect_with(&options(&dir), &probe);
+        let found = check(&report.checks, "notification.notify-send");
+        assert_eq!(found.status, want_status, "{label}: {}", found.summary);
+        assert!(
+            found.summary.contains(want_text),
+            "{label}: summary must say {want_text:?}: {}",
+            found.summary
+        );
+    }
+}
+
+/// "Could not ask" must never read as either verdict — the same rule the installer's four answers
+/// follow, where an unreachable GitHub is never "up to date".
+#[test]
+fn an_unaskable_bus_is_never_reported_as_working_or_broken() {
+    let dir = TempDir::new().unwrap();
+    let probe = FakeProbe {
+        notification_daemon: None,
+        ..FakeProbe::healthy(Vec::new())
+    };
+    let summary = check(
+        &inspect_with(&options(&dir), &probe).checks,
+        "notification.notify-send",
+    )
+    .summary
+    .clone();
+    assert!(
+        !summary.contains("owns org.freedesktop.Notifications"),
+        "{summary}"
+    );
+    assert!(!summary.contains("will fail"), "{summary}");
+}
+
+/// A doctor that can see only one of two program transports cannot answer "will an escalation
+/// reach me". Absent `cmux` is not a failure: `pmd --notify` must name it before it is used.
+#[test]
+fn the_cmux_transport_is_reported_whether_or_not_it_is_installed() {
+    let dir = TempDir::new().unwrap();
+    let without = FakeProbe::healthy(Vec::new());
+    let with_cmux = FakeProbe {
+        binaries: ["claude", "codex", "notify-send", "cmux"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        ..FakeProbe::healthy(Vec::new())
+    };
+
+    let without_report = inspect_with(&options(&dir), &without);
+    let absent = check(&without_report.checks, "notification.cmux");
+    assert_eq!(absent.status, CheckStatus::Pass);
+    assert!(absent.summary.contains("not on PATH"), "{}", absent.summary);
+
+    let with_report = inspect_with(&options(&dir), &with_cmux);
+    let present = check(&with_report.checks, "notification.cmux");
+    assert_eq!(present.status, CheckStatus::Pass);
+    assert!(
+        present.summary.contains("--notify"),
+        "a pass must say how to turn it on: {}",
+        present.summary
+    );
+}
+
+/// The `gdbus` reading itself: two answers and nothing else. Anything unrecognised is "could not
+/// ask", never a guess, because this reading decides whether the doctor claims delivery works.
+#[test]
+fn name_has_owner_accepts_only_the_two_answers_gdbus_gives() {
+    use crate::doctor::name_has_owner;
+
+    assert_eq!(name_has_owner("(true,)\n"), Some(true));
+    assert_eq!(name_has_owner("(false,)\n"), Some(false));
+    assert_eq!(name_has_owner("  (true,)  "), Some(true));
+    for junk in ["", "true", "(true)", "(true,) extra", "Error: no bus", "()"] {
+        assert_eq!(name_has_owner(junk), None, "{junk:?} must not be a verdict");
+    }
+}
+
+/// The real bus reading, driven through a FAKE `gdbus` so every line runs on any machine.
+///
+/// This test exists because the first version of it did not: the probe shelled out to whatever
+/// `gdbus` was on PATH, so it passed locally and the coverage gate failed in CI, where there is
+/// no `gdbus` and nothing below the PATH check ever executed.
+#[test]
+fn the_bus_reading_handles_both_answers_a_refusal_and_a_missing_program() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new().unwrap();
+    let fake = |name: &str, body: &str| -> std::path::PathBuf {
+        let path = dir.path().join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    };
+
+    let owned = fake("gdbus-true", "printf '(true,)\\n'");
+    assert_eq!(
+        NativeProbe::with_gdbus(owned).notification_daemon(),
+        Some(true)
+    );
+
+    let unowned = fake("gdbus-false", "printf '(false,)\\n'");
+    assert_eq!(
+        NativeProbe::with_gdbus(unowned).notification_daemon(),
+        Some(false)
+    );
+
+    // Ran and refused — no bus to ask, so neither verdict is earned.
+    let refused = fake("gdbus-err", "echo 'Error: no bus' >&2; exit 1");
+    assert_eq!(NativeProbe::with_gdbus(refused).notification_daemon(), None);
+
+    // Answered something unrecognised: still not a verdict.
+    let babble = fake("gdbus-junk", "printf 'maybe\\n'");
+    assert_eq!(NativeProbe::with_gdbus(babble).notification_daemon(), None);
+
+    // Not a program at all, which is the CI runner's case and needs no PATH pre-check to answer.
+    assert_eq!(
+        NativeProbe::with_gdbus(dir.path().join("definitely-not-here")).notification_daemon(),
+        None
+    );
 }

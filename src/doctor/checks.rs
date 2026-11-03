@@ -1036,12 +1036,19 @@ pub(super) fn tmux(
 
 /// Can a desktop escalation actually reach the human?
 ///
-/// TWO FACTS, NOT ONE. The program being installed was reported as a PASS on its own, which is wrong in
-/// the case that matters: over SSH or in a container `notify-send` exists and every delivery fails with
-/// the D-Bus `ServiceUnknown` error. `escalation::transport` already knows that failure — it warns once
-/// and latches the transport off after three — so the doctor was the only part of the tool claiming
-/// escalations were fine while they silently went nowhere. And escalation is HOW a human learns a
-/// session is waiting for them, so a false pass there costs more than most.
+/// FOUR ANSWERS, NOT TWO, and each earlier count was wrong in the case that mattered. The program
+/// being installed was reported as a PASS on its own, which is false over SSH or in a container
+/// where `notify-send` exists and every delivery fails with the D-Bus `ServiceUnknown` error. Then
+/// the env reading was added — and that is ALSO false on a box where `DBUS_SESSION_BUS_ADDRESS` is
+/// set but NOTHING ON THE BUS SERVES NOTIFICATIONS, which was measured on exactly the machine this
+/// was written on: a PASS, and `notify-send` failing with `ServiceUnknown` one command later.
+///
+/// So the last reading asks the bus who owns the name, and keeps its "could not ask" apart from
+/// both verdicts — the same shape as the installer's four answers, where an unreachable GitHub is
+/// never "up to date". `escalation::transport` already knows this failure (it warns once and
+/// latches the transport off), so the doctor was the only part of the tool claiming escalations
+/// were fine while they silently went nowhere. Escalation is HOW a human learns a session is
+/// waiting for them, so a false pass here costs more than most.
 pub(super) fn notifications(probe: &dyn RuntimeProbe, checks: &mut Vec<Check>) {
     if !probe.binary_on_path("notify-send") {
         checks.push(
@@ -1055,12 +1062,30 @@ pub(super) fn notifications(probe: &dyn RuntimeProbe, checks: &mut Vec<Check>) {
         );
         return;
     }
-    checks.push(match probe.desktop_session() {
-        Some(named) => Check::pass(
+    checks.push(match (probe.desktop_session(), probe.notification_daemon()) {
+        // A bus with nothing on it. THE CASE THE ENV READING ALONE GETS WRONG.
+        (Some(named), Some(false)) => Check::warn(
             "notification.notify-send",
-            format!("notify-send is available and {named} names a session to deliver to (no notification was sent)"),
+            format!(
+                "{named} names a session but nothing owns org.freedesktop.Notifications, so \
+                 every delivery will fail with ServiceUnknown; ledger escalations still work"
+            ),
+        )
+        .with_remediation(
+            "start a notification daemon on this session bus, or read escalations in pmtui and \
+             the session ledger",
         ),
-        None => Check::warn(
+        (Some(named), Some(true)) => Check::pass(
+            "notification.notify-send",
+            format!("notify-send is available and a daemon on {named} owns org.freedesktop.Notifications (no notification was sent)"),
+        ),
+        // COULD NOT ASK is a fact, not a verdict: it passes, and says so, rather than
+        // claiming either that notifications work or that they are broken.
+        (Some(named), None) => Check::pass(
+            "notification.notify-send",
+            format!("notify-send is available and {named} names a session to deliver to; delivery is unverified (gdbus is absent, and no notification was sent)"),
+        ),
+        (None, _) => Check::warn(
             "notification.notify-send",
             "notify-send is installed but no desktop session is reachable \
              (DBUS_SESSION_BUS_ADDRESS, WAYLAND_DISPLAY and DISPLAY are all unset), so every \
@@ -1070,5 +1095,19 @@ pub(super) fn notifications(probe: &dyn RuntimeProbe, checks: &mut Vec<Check>) {
             "read escalations in pmtui or the session ledger over SSH; desktop toasts need a \
              logged-in desktop session",
         ),
+    });
+    // The OTHER program transport. Not a failure when absent — `pmd --notify` has to name it
+    // before it is used at all — but a doctor that can only see one of two transports cannot
+    // answer "will an escalation reach me".
+    checks.push(if probe.binary_on_path("cmux") {
+        Check::pass(
+            "notification.cmux",
+            "cmux is on PATH; `pmd --notify log,notify-send,cmux` delivers through it",
+        )
+    } else {
+        Check::pass(
+            "notification.cmux",
+            "cmux is not on PATH; the cmux transport is unavailable and off by default",
+        )
     });
 }

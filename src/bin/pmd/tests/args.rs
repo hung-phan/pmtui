@@ -114,3 +114,45 @@ fn help_text_documents_the_complete_cli_contract() {
     }
     assert!(HELP.ends_with('\n'));
 }
+
+#[test]
+fn the_notification_transports_default_to_the_documented_set() {
+    assert_eq!(parsed_args(&[]).notify, DEFAULT_TRANSPORTS);
+}
+
+#[test]
+fn a_notify_list_replaces_the_default_set_in_order() {
+    assert_eq!(
+        parsed_args(&["--notify", "log,cmux,osc"]).notify,
+        [
+            Transport::Log,
+            Transport::Program(agent_manager::escalation::Wire::Cmux),
+            Transport::Osc
+        ]
+    );
+}
+
+/// Naming an unknown transport is a usage error that says WHICH name was unknown —
+/// a silently dropped transport would make every missing notification look like that
+/// transport failing.
+#[test]
+fn an_unknown_transport_is_a_usage_error_naming_itself() {
+    let error = parse_args(argv(&["--notify", "log,bogus"])).unwrap_err();
+    assert!(
+        format!("{error:#}").contains("--notify: unknown transport `bogus`"),
+        "unexpected error: {error:#}"
+    );
+}
+
+/// Every name the help text offers must parse, or the help lies.
+#[test]
+fn every_transport_the_help_text_lists_is_accepted() {
+    for transport in Transport::ALL {
+        let name = transport.name();
+        assert!(
+            HELP.contains(name),
+            "`{name}` is a transport the help text never mentions"
+        );
+        assert_eq!(parsed_args(&["--notify", name]).notify, [*transport]);
+    }
+}

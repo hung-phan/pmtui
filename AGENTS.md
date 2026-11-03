@@ -177,6 +177,24 @@ server and daemon when the test ends.
   input; workers reload it only through `pmd checkpoint <path>`, and the default
   UI does not expose activity handles or output references.
 - The status glyph means working, not merely alive.
+- The preview sizes THE AGENT'S OWN TERMINAL to the width it will draw the transcript at
+  (`fit_agent_pane`, deduped per `(row, cols, rows)`), so the agent wraps its own lines where the
+  text ends and nothing has to be cut. That width is the TEXT width (`preview_text_cols`), not the
+  pane's inner width: the renderer INSERTS a two-column gutter in front of each captured row, so
+  fitting to `inner_w` made every full-width row `inner_w + 2` and pushed its last two columns past
+  the border with no gap — which reads as a broken pane rather than a narrow one. One function owns
+  that number because two callers must not disagree; a row wrapped for one width and drawn at
+  another is the same overflow again. `clamp_line_cols` stays as a BACKSTOP, not the mechanism: a
+  pane cannot be resized while a human is attached (their client owns the size), so a 200-column
+  row still arrives for a 70-column region and is cut at the margin rather than at the rule.
+  `resize_window` flips tmux to `window-size manual` — measured, a window resized to 70 stayed 70
+  under a 180-column client — so every attach path calls `set_window_size_auto` FIRST, and the run
+  loop forgets the fit afterwards so the next frame re-fits.
+- No VERDICT row. One used to sit above the body naming which sessions need you, on the theory that
+  the status bar carries the count and the names are what a count cannot. They are not: the
+  `NEEDS YOU (n)` group inside the SESSIONS pane lists exactly those sessions, sorted the same way,
+  so the row restated its own neighbour — and with a single needy session the same fact appeared
+  three times, in the chip, the row and the group.
 - Chrome takes every colour from the active theme, and RGB enters it only through
   `src/theme.rs`. Add a ROLE there rather than a colour at a render site, and keep
   severity carried by glyph, word and badge as well as hue. EVERY CELL is the theme's:
@@ -355,6 +373,34 @@ empty one, so an empty answer NAMES the file it read rather than blaming the id.
 - `src/advise/`: read-only decider consult and reply validation.
 - `src/daemon/`: registry reconciliation, ownership, escalation, and cleanup.
 - `src/doctor/`: read-only registry, state, executable, skill, and tmux diagnostics.
+- `src/escalation/`: how an escalation leaves the process. A notification joins one of TWO
+  FAMILIES, decided by its mechanism and never by its vendor: it RUNS A PROGRAM
+  (`ProgramNotifier`, where a transport is one `Wire` arm naming an argv) or it WRITES BYTES
+  TO A TERMINAL (`OscNotifier`). The program family shares one body of delivery code because
+  the hard part belongs to none of them — every notifier program can block, each for its own
+  reason (`notify-send` on a synchronous D-Bus call, `cmux` on a per-attach TCP relay that
+  keeps accepting connections while refusing to answer its auth challenge), the daemon loop is
+  single-threaded, so each delivery is a detached thread whose outcome LATCHES THE TRANSPORT
+  OFF rather than being dropped. That latch is what lets `pmd` register every transport
+  unconditionally: a program the machine does not have is a spawn error, which is not
+  transient, so it warns once and then costs nothing — a PATH probe would only duplicate a
+  decision already made correctly. The terminal family carries none of it, because a write
+  lands or fails at once. OSC 777 is the sequence, MEASURED against cmux: OSC 9 and OSC 99
+  were emitted the same way and produced nothing. It must be emitted BY A PROCESS IN THE
+  SURFACE to its own tty — the same bytes written into another process's pts were silently
+  dropped — which is why `OscNotifier` writes its own stderr and only when that is a terminal.
+  A transport is asked for BY NAME (`Transport`, `pmd --notify log,cmux,osc`) and
+  `DEFAULT_TRANSPORTS` is deliberately NOT all of them: `cmux` and `osc` have effects outside
+  the process, and THE INTEGRATION SUITE LAUNCHES THE REAL `pmd` BINARY, so on by default
+  every test that drove a session to an escalation fired a real notification into the
+  developer's own terminal and spawned a `cmux` that can hang 15s on its relay. Opt-in costs
+  one flag; a flag on every pmd launch site in the suite costs more and missing one is silent.
+  An unknown name is a usage error naming itself, because a transport that was asked for and
+  silently skipped makes every missing notification look like that transport failing.
+  Agent-authored text is escaped where it enters the sequence, locally rather than through
+  `advise::sanitize_control_bytes`, whose doc restricts it to harness-quoted worker text for a
+  different reason: a `0x07` would terminate the sequence early, a `0x1b` would start another,
+  and a `;` would shift the body out of its slot.
 - `src/selfexec.rs`: noticing that this process's own binary was replaced, and becoming it. The
   one place both pmtui's post-update restart and every pmd's self-refresh read from.
 - `src/theme.rs`: the opaline seam — the dashboard's colour ROLES and the one place RGB
