@@ -19,7 +19,7 @@ use super::{JobScheduler, JobTick};
 
 /// Consecutive supervisor invocations that produced no usable result (non-zero exit,
 /// orphan, timeout) after which the feature LATCHES OFF for this session and future
-/// decisions escalate without a model. Mirrors `DesktopNotifier`'s `DESKTOP_DEAD_AFTER`:
+/// decisions escalate without a model. Mirrors `ProgramNotifier`'s `DEAD_AFTER`:
 /// one failure could be a blip, three in a row with no success between is a broken
 /// transport. A hard SPAWN error latches immediately (nothing transient about "could not
 /// start it"), exactly as the notifier treats a spawn error.
@@ -32,7 +32,7 @@ pub(super) const SUPERVISOR_MAX_REFUSALS: u32 = 3;
 
 /// Delivery health of this session's supervisor — the latch that stops retrying a broken
 /// transport. Policy-eligible decisions then escalate rather than being auto-approved.
-/// Mirrors `escalation::DesktopHealth`, minus the atomics (a `JobScheduler` is owned by
+/// Mirrors `escalation::DeliveryHealth`, minus the atomics (a `JobScheduler` is owned by
 /// one sweep thread, so plain fields suffice).
 #[derive(Debug, Default)]
 pub(super) struct AdviseHealth {

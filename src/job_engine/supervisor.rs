@@ -563,7 +563,7 @@ impl JobScheduler {
                 // human rather than papered over — and it latches the feature off
                 // immediately, so the next eligible report escalates without another spawn. Same
                 // split as
-                // `DesktopNotifier`: a spawn error has nothing transient about it.
+                // `ProgramNotifier`: a spawn error has nothing transient about it.
                 self.advise_health.latch_off(
                     &self.project_id,
                     &format!("a consult could not be spawned ({e})"),

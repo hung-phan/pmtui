@@ -1,7 +1,8 @@
 //! Routing escalations to transports (design §9). The scheduler decides *when*
 //! to escalate — exactly once per stop, via its `RunState` — so this module has
 //! no dedup logic; it decides *how loud* (severity from the loudest stop) and
-//! delivers: an always-on log line plus an optional desktop notification.
+//! delivers: an always-on log line plus whichever notification transports the caller
+//! asked for (see [`Transport`] and [`DEFAULT_TRANSPORTS`]).
 //!
 //! Split along that "how loud" / "how delivered" seam: `message` is what the human is
 //! told (the severity ladder, the severity a report of stops adds up to, and the words
@@ -21,4 +22,7 @@ pub mod test_support;
 mod tests;
 
 pub use message::{Escalation, Severity, severity_for_stops};
-pub use transport::{Composite, DesktopNotifier, LogNotifier, Notifier};
+pub use transport::{
+    Composite, DEFAULT_TRANSPORTS, LogNotifier, Notifier, OscNotifier, ProgramNotifier, Transport,
+    Wire,
+};

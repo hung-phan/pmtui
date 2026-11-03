@@ -1,11 +1,11 @@
 use std::os::unix::fs::PermissionsExt;
 
 use super::*;
-use crate::escalation::transport::{DESKTOP_DEAD_AFTER, first_line, urgency_for};
+use crate::escalation::transport::{DEAD_AFTER, Wire, first_line, urgency_for};
 
 #[test]
-fn desktop_notifier_gates_below_min_severity() {
-    let n = DesktopNotifier::default(); // min = Warn
+fn program_notifier_gates_below_min_severity() {
+    let n = ProgramNotifier::default(); // min = Warn
     assert!(!n.will_send(&Escalation::for_stops(
         "p",
         &[stop("s", "ambiguity", RiskClass::Low)] // Info < Warn
@@ -14,14 +14,14 @@ fn desktop_notifier_gates_below_min_severity() {
 }
 
 #[test]
-fn desktop_urgency_matches_the_notification_protocol() {
+fn program_urgency_matches_the_notification_protocol() {
     assert_eq!(urgency_for(Severity::Info), "low");
     assert_eq!(urgency_for(Severity::Warn), "normal");
     assert_eq!(urgency_for(Severity::Urgent), "critical");
 }
 
 #[test]
-fn desktop_failure_detail_uses_the_first_nonempty_line_and_caps_unicode_safely() {
+fn program_failure_detail_uses_the_first_nonempty_line_and_caps_unicode_safely() {
     assert_eq!(first_line(b"\n  \n real cause \n ignored"), "real cause");
     assert_eq!(first_line(b""), "no stderr");
 
@@ -33,7 +33,7 @@ fn desktop_failure_detail_uses_the_first_nonempty_line_and_caps_unicode_safely()
 }
 
 #[test]
-fn desktop_delivery_passes_urgency_and_message_to_the_child() {
+fn program_delivery_passes_urgency_and_message_to_the_child() {
     let dir = tempfile::tempdir().unwrap();
     let bin = dir.path().join("record-notification");
     let args = dir.path().join("record-notification.args");
@@ -42,7 +42,8 @@ fn desktop_delivery_passes_urgency_and_message_to_the_child() {
     permissions.set_mode(0o755);
     std::fs::set_permissions(&bin, permissions).unwrap();
 
-    let notifier = DesktopNotifier::new(bin.to_string_lossy(), Severity::Info);
+    let notifier =
+        ProgramNotifier::with_bin(bin.to_string_lossy(), Severity::Info, Wire::default());
     let escalation = Escalation {
         project: "proj".into(),
         title: "decision needed".into(),
@@ -64,8 +65,8 @@ fn desktop_delivery_passes_urgency_and_message_to_the_child() {
 }
 
 #[test]
-fn desktop_nonzero_exit_is_recorded_and_warns_only_once() {
-    let n = desktop("false");
+fn program_nonzero_exit_is_recorded_and_warns_only_once() {
+    let n = program("false");
     let gdbus = "GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: not activatable";
 
     record(&n, exited(1, gdbus));
@@ -80,9 +81,9 @@ fn desktop_nonzero_exit_is_recorded_and_warns_only_once() {
 }
 
 #[test]
-fn desktop_latches_off_after_consecutive_nonzero_exits() {
-    let n = desktop("false");
-    for _ in 0..DESKTOP_DEAD_AFTER {
+fn program_latches_off_after_consecutive_nonzero_exits() {
+    let n = program("false");
+    for _ in 0..DEAD_AFTER {
         record(&n, exited(1, "still broken"));
     }
     assert!(n.is_unavailable(), "consistent non-zero => transport dead");
@@ -95,10 +96,10 @@ fn desktop_latches_off_after_consecutive_nonzero_exits() {
 }
 
 #[test]
-fn desktop_success_clears_the_failure_streak() {
+fn program_success_clears_the_failure_streak() {
     // A transient failure must not permanently disable a working notifier.
-    let n = desktop("notify-send");
-    for _ in 0..DESKTOP_DEAD_AFTER - 1 {
+    let n = program("notify-send");
+    for _ in 0..DEAD_AFTER - 1 {
         record(&n, exited(1, "server restarting"));
     }
     record(&n, exited(0, ""));
@@ -110,8 +111,8 @@ fn desktop_success_clears_the_failure_streak() {
 }
 
 #[test]
-fn desktop_spawn_error_latches_off_immediately() {
-    let n = desktop("pmd-no-such-notifier-binary");
+fn program_spawn_error_latches_off_immediately() {
+    let n = program("pmd-no-such-notifier-binary");
     record(&n, unspawnable());
     assert_eq!(n.failure_count(), 1);
     assert_eq!(n.warning_count(), 1);
@@ -119,17 +120,17 @@ fn desktop_spawn_error_latches_off_immediately() {
 }
 
 #[test]
-fn desktop_notify_returns_ok_when_the_transport_is_unavailable() {
+fn program_notify_returns_ok_when_the_transport_is_unavailable() {
     // The daemon must never fail a sweep because a toast failed.
-    let n = desktop("pmd-no-such-notifier-binary");
+    let n = program("pmd-no-such-notifier-binary");
     record(&n, unspawnable());
     assert!(n.is_unavailable());
     n.notify(&Escalation::stuck("p", "boom")).unwrap();
 }
 
 #[test]
-fn desktop_suppressed_escalation_spawns_nothing() {
-    let n = desktop("false"); // min = Warn
+fn program_suppressed_escalation_spawns_nothing() {
+    let n = program("false"); // min = Warn
     let quiet = Escalation::for_stops("p", &[stop("s", "ambiguity", RiskClass::Low)]);
     assert!(!n.will_send(&quiet), "Info < Warn");
     assert!(
@@ -151,18 +152,18 @@ fn desktop_suppressed_escalation_spawns_nothing() {
 /// `daemon::tests` lease test see "already driven by another process" and fail.
 #[test]
 #[ignore]
-fn desktop_transport_failure_against_real_binaries() {
+fn program_transport_failure_against_real_binaries() {
     let urgent = Escalation::stuck("p", "boom");
 
     // `false` rather than `notify-send`, so the assertions hold on a machine
     // that does have a working notification daemon.
-    let n = desktop("false");
+    let n = program("false");
     n.notify(&urgent).unwrap(); // returns Ok even though delivery fails
     n.spawn_delivery(&urgent).unwrap().join().unwrap();
     assert!(n.failure_count() >= 1, "non-zero exit observed");
     assert_eq!(n.warning_count(), 1, "warned once");
 
-    let missing = desktop("pmd-no-such-notifier-binary");
+    let missing = program("pmd-no-such-notifier-binary");
     missing.notify(&urgent).unwrap();
     missing.spawn_delivery(&urgent).unwrap().join().unwrap();
     assert!(missing.is_unavailable(), "spawn error latches it off");

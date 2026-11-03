@@ -12,9 +12,9 @@ impl Notifier for Shared {
 }
 
 #[test]
-fn composite_still_delivers_when_the_desktop_transport_is_broken() {
-    // A latched-off desktop transport: no fork, and Ok() to its caller.
-    let dead = desktop("pmd-no-such-notifier-binary");
+fn composite_still_delivers_when_a_program_transport_is_broken() {
+    // A latched-off program transport: no fork, and Ok() to its caller.
+    let dead = program("pmd-no-such-notifier-binary");
     record(&dead, unspawnable());
     let cap = Arc::new(CaptureNotifier::new());
     let composite = Composite {

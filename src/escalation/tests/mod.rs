@@ -5,9 +5,12 @@
 use super::*;
 use crate::state::{RiskClass, Stop};
 
-mod desktop;
 mod fanout;
 mod message;
+mod osc;
+mod program;
+mod transport_set;
+mod wire;
 
 fn stop(id: &str, kind: &str, rc: RiskClass) -> Stop {
     Stop {
@@ -21,8 +24,10 @@ fn stop(id: &str, kind: &str, rc: RiskClass) -> Stop {
     }
 }
 
-fn desktop(bin: &str) -> DesktopNotifier {
-    DesktopNotifier::new(bin, Severity::Warn)
+/// A program transport aimed at `bin` instead of the program its wire names, so a
+/// test can point it at a fake that succeeds, refuses, or does not exist.
+fn program(bin: &str) -> ProgramNotifier {
+    ProgramNotifier::with_bin(bin, Severity::Warn, Wire::default())
 }
 
 fn exited(code: i32, stderr: &str) -> std::io::Result<std::process::Output> {
@@ -43,6 +48,6 @@ fn unspawnable() -> std::io::Result<std::process::Output> {
     ))
 }
 
-fn record(n: &DesktopNotifier, out: std::io::Result<std::process::Output>) {
+fn record(n: &ProgramNotifier, out: std::io::Result<std::process::Output>) {
     n.health.record(&n.bin, out);
 }

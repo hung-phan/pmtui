@@ -86,6 +86,9 @@ fn args(registry: PathBuf, socket: &TestSocket, once: bool) -> Args {
         socket: socket.name().to_string(),
         tick_ms: 1,
         once,
+        // `log` only: a test must not deliver a notification anywhere a person can
+        // see it, and the transports that could are opt-in for that reason.
+        notify: vec![Transport::Log],
     }
 }
 
