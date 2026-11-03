@@ -348,6 +348,9 @@ fn target_of(entry: &agent_manager::registry::ProjectEntry) -> SendTarget {
         // REPL instead reads as "no agent running" rather than being reached there; upgrade by
         // mirroring `App::resolve_send_pane` if messaging a paused-with-open-chat session matters.
         in_chat: false,
+        // The row's own engine. The gate's codex question is meaningless on any other pane and
+        // refused every send there while it was asked blind.
+        engine: entry.engine,
     }
 }
 

@@ -799,6 +799,7 @@ fn terminal_request_drain_handles_every_request_type() {
             agent_loop: true,
             driven: false,
             in_chat: true,
+            engine: Some(Engine::Claude),
         },
         seed: "message".into(),
         cursor: (0, 7),

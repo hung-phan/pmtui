@@ -1272,6 +1272,7 @@ fn task_origin_overlays_render_over_the_task_view() {
             agent_loop: true,
             driven: true,
             in_chat: false,
+            engine: Some(Engine::Claude),
         },
         input: Composer::from_text("message".into()),
     };

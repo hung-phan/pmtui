@@ -21,6 +21,23 @@ const CLAUDE_DRAFT_PANE: &str = concat!(
     "\x1b[39m  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n",
 );
 
+/// THE PANE THAT BROKE SENDING ON CLAUDE. A perfectly ordinary claude session whose
+/// TRANSCRIPT happens to carry a line beginning `›` — a markdown blockquote, a quoted prompt,
+/// a file the agent printed. The box itself is empty and the composer is right there.
+///
+/// `is_codex_composer` matches any such line that is not a numbered option, anywhere in the
+/// window, so while the gate asked codex's question engine-blind this read as an unsent draft and
+/// refused every send with "the agent's input box has unsent text". A transcript does not change,
+/// so the refusal never cleared and the human could not send at all.
+const CLAUDE_PANE_WITH_QUOTED_LINE: &str = concat!(
+    "\x1b[39m⏺ Here is what the guide says:\n",
+    "\x1b[39m› keep the fixture canonical\n",
+    "\x1b[38;5;244m────────────────────────────────\n",
+    "\x1b[39m❯\u{a0}\n",
+    "\x1b[38;5;244m────────────────────────────────\n",
+    "\x1b[39m  ⏵⏵ auto mode on (shift+tab to cycle)\n",
+);
+
 /// Claude's inline survey, which draws the input box but takes digit keys as answers.
 const CLAUDE_SURVEY_PANE: &str = concat!(
     "● Done.\n",
@@ -86,6 +103,51 @@ fn s_refuses_a_claude_box_holding_someone_elses_draft() {
         "status: {:?}",
         app.status
     );
+}
+
+/// THE REGRESSION. v0.1.15 asked codex's draft question on every pane, so a quoted line in a
+/// claude transcript refused every send, permanently. The send must go through.
+#[test]
+fn s_sends_to_a_claude_pane_whose_transcript_quotes_a_composer_glyph() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut app, pane, _, _) = send_app(dir.path(), CLAUDE_PANE_WITH_QUOTED_LINE);
+    send_via_keys(&mut app, "run the tests");
+
+    assert_eq!(
+        pane.sends().len(),
+        1,
+        "the send was refused by a transcript line: status {:?}",
+        app.status
+    );
+    assert!(
+        !app.status.contains("unsent text"),
+        "status: {:?}",
+        app.status
+    );
+}
+
+/// And the arm it replaced still earns its place ON CODEX, where that line IS the composer:
+/// `send_keys` bails on an unsubmittable draft, `pmtui message` maps that to the retry family,
+/// and a retry blind to the stranded text would paste onto it.
+#[test]
+fn pane_refusal_asks_the_codex_question_only_of_codex() {
+    let codex_draft = concat!(
+        "\x1b[38;5;244m────────────────────────────────\n",
+        "\x1b[39m› half typed\n",
+        "\x1b[38;5;244m────────────────────────────────\n",
+        "\x1b[39m  model footer\n",
+    );
+    assert!(
+        pane_refusal(codex_draft, Some(Engine::Codex))
+            .is_some_and(|why| why.contains("unsent text")),
+        "a codex composer holding text must still refuse"
+    );
+    for blind in [None, Some(Engine::Claude)] {
+        assert!(
+            pane_refusal(codex_draft, blind).is_none(),
+            "the codex question must not be asked of {blind:?}"
+        );
+    }
 }
 
 #[test]
@@ -175,6 +237,7 @@ fn parking_an_empty_task_message_returns_to_tasks_without_a_draft() {
             agent_loop: true,
             driven: false,
             in_chat: false,
+            engine: Some(Engine::Claude),
         },
         input: msg_buf(""),
     };
@@ -304,6 +367,7 @@ fn stop_guard_is_keyed_to_the_composer_target_not_the_current_selection() {
         agent_loop: true,
         driven: true,
         in_chat: false,
+        engine: Some(Engine::Claude),
     };
     let mut bot = agent_loop_view("bot");
     bot.stops = vec![stop("s1", "ambiguity", RiskClass::Medium)];
@@ -557,6 +621,7 @@ fn send_refuses_during_the_chat_attach_intent_window() {
         agent_loop: true,
         driven: true,
         in_chat: false,
+        engine: Some(Engine::Claude),
     };
     let mut app = app_with(vec![], UiMode::Normal);
 
@@ -577,6 +642,7 @@ fn final_send_recheck_rejects_control_only_dead_attached_and_changed_panes() {
         agent_loop: true,
         driven: true,
         in_chat: false,
+        engine: Some(Engine::Claude),
     };
 
     let dir = tempfile::tempdir().unwrap();

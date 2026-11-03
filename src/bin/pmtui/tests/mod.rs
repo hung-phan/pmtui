@@ -1513,6 +1513,7 @@ fn send_target(driven: bool) -> SendTarget {
         agent_loop: true,
         driven,
         in_chat: false,
+        engine: Some(Engine::Claude),
     }
 }
 
