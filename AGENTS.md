@@ -111,12 +111,20 @@ server and daemon when the test ends.
   the bail is built from — because 3 means "ask again under the SAME arguments" and here that is a
   loop with no exit.
   The PRE-SEND gate asks a DIFFERENT question — "is ANY unsent text showing?", with no text to
-  compare against — and it reads BOTH composers, because a refused send is retried under the same
-  arguments and a retry blind to codex's stranded draft would paste onto it. On an UNSTYLED capture
-  it answers "no draft", and failing closed there was measured wrong: a refusal on pane CONTENT is
-  not retryable, the pane does not change, and the real-tmux dispatch acceptance (a stub agent
-  printing a plain `› Ready`) was refused forever while the unit suite stayed green. Only a styled
-  capture can tell codex's dim placeholder from typing, and production always passes one.
+  compare against — because a refused send is retried under the same arguments and a retry blind to
+  codex's stranded draft would paste onto it. IT IS ASKED ONLY OF THE ROW'S OWN ENGINE, and
+  `SendTarget::engine` exists for that one reason. Asked blind it BROKE SENDING ON CLAUDE in
+  v0.1.15: `is_codex_composer` matches any line beginning `›` that is not a numbered option,
+  anywhere in the 40-line window, so a blockquote or a quoted prompt in claude's own transcript
+  read as an unsent draft — and a transcript does not change, so "the agent's input box has unsent
+  text" never cleared and the human could not send at all. Claude's box is found STRUCTURALLY
+  (`claude_draft_in_box`, between two rules); codex's is found by a GLYPH, which is only a composer
+  on a codex pane. A glyph predicate is engine-scoped or it is a false positive.
+  On an UNSTYLED capture the codex question answers "no draft", and failing closed there was
+  measured wrong for the same family of reason: a refusal on pane CONTENT is not retryable, the pane
+  does not change, and the real-tmux dispatch acceptance (a stub agent printing a plain `› Ready`)
+  was refused forever while the unit suite stayed green. Only a styled capture can tell codex's dim
+  placeholder from typing, and production always passes one.
 - Clickable preview titles, create rows, and keybar chips never bypass keyboard
   preconditions, confirmations, or lifecycle routing.
 - Quick-switch results commit by stable session id, and composer input always keeps

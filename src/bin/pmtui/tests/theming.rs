@@ -71,6 +71,7 @@ fn every_view() -> Vec<ViewCase> {
                 agent_loop: true,
                 driven: false,
                 in_chat: false,
+                engine: Some(Engine::Claude),
             },
             input: Composer::from_text("status?".into()),
         }),

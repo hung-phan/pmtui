@@ -321,6 +321,7 @@ fn inline_composer_names_its_target() {
         agent_loop: false,
         driven: false,
         in_chat: false,
+        engine: Some(Engine::Claude),
     };
     let app = app_with(
         vec![view("bot", Posture::Working, vec![])],
@@ -346,6 +347,7 @@ fn message_composer_wraps_and_scrolls_to_keep_the_caret_visible() {
         agent_loop: true,
         driven: false,
         in_chat: false,
+        engine: Some(Engine::Claude),
     };
     let input = Composer::from_text("0123456789".repeat(20));
     let app = app_with(
@@ -381,6 +383,7 @@ fn the_composer_draws_at_every_size_with_its_caret_on_screen() {
         agent_loop: true,
         driven: false,
         in_chat: false,
+        engine: Some(Engine::Claude),
     };
     let value = "abé🎉0123456789\nsecond line\nthird";
     let steps = value.chars().count();

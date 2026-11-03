@@ -60,6 +60,7 @@ fn a_detail_composer_refusal_is_visible_while_the_field_stays_open() {
             agent_loop: true,
             driven: false,
             in_chat: false,
+            engine: Some(Engine::Claude),
         },
         input: Composer::from_text("status please".into()),
     };

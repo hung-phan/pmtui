@@ -39,6 +39,16 @@ pub(crate) struct SendTarget {
     /// interlock is not a refusal (we ARE typing there), and `deliver` must not claim that
     /// interlock, because releasing it afterwards would clear the real chat's own marker.
     pub(crate) in_chat: bool,
+    /// WHICH ENGINE draws this pane, because one of the gate's questions is only meaningful
+    /// for one of them. `None` = the row names no engine, which is read as "not codex".
+    ///
+    /// It exists because the Codex arm of [`pane_refusal`] shipped engine-BLIND and broke
+    /// sending on claude: `is_codex_composer` matches any line beginning `›` that is not a
+    /// numbered option, anywhere in a 40-line window, so a markdown blockquote or a quoted
+    /// prompt in claude's own transcript read as an unsent draft. On a claude pane there is
+    /// no codex composer, so every match there is a false positive — and because a
+    /// transcript does not change, the refusal never cleared.
+    pub(crate) engine: Option<Engine>,
 }
 
 /// What one press of `s` observed about the target pane. Every field is what a probe
@@ -158,7 +168,7 @@ pub(crate) fn send_decision(t: &SendTarget, p: &SendProbe) -> SendPlan {
     let Some(styled) = p.capture.as_deref() else {
         return SendPlan::Refuse("can't read the pane — nothing sent".into());
     };
-    if let Some(refusal) = pane_refusal(styled) {
+    if let Some(refusal) = pane_refusal(styled, t.engine) {
         return SendPlan::Refuse(refusal.into());
     }
     // Mid-response is FINE and is sent, not refused: the composer accepts it and it
@@ -220,7 +230,7 @@ pub(crate) fn write_to_pane(d: &dyn tmux::Driver, t: &SendTarget, text: &str) ->
     let capture = d
         .capture_tail_styled(&t.session, SEND_GATE_LINES)
         .context("re-read pane before send")?;
-    if let Some(why) = pane_refusal(&capture) {
+    if let Some(why) = pane_refusal(&capture, t.engine) {
         anyhow::bail!("the pane changed while the message was waiting: {why}");
     }
     d.send_keys(&t.session, &payload)
@@ -240,7 +250,16 @@ pub(crate) fn write_to_pane(d: &dyn tmux::Driver, t: &SendTarget, text: &str) ->
 /// still holds the message after its Enter presses, and `pmtui message` maps that to exit 3,
 /// documented as "ask again under the SAME arguments" — so without this arm the retry pastes onto
 /// the text already stuck in that box.
-pub(crate) fn pane_refusal(styled: &str) -> Option<&'static str> {
+///
+/// IT IS ASKED ONLY ON CODEX, and that gate is the fix for a bug this function shipped with.
+/// `is_codex_composer` matches ANY line beginning `›` that is not a numbered option, anywhere in
+/// the 40-line window. On a codex pane the last such line is the composer. On a claude pane there
+/// is no composer to find, so the match is always something else — a blockquote, a quoted prompt,
+/// a file the agent printed — and reading it as a draft refused every send with "the agent's input
+/// box has unsent text". A transcript does not change, so the refusal never cleared: the human
+/// could not send at all. `engine` is therefore not a nicety; without it this question has no
+/// meaning. Claude's own box is read by `claude_draft_in_box`, which locates it structurally.
+pub(crate) fn pane_refusal(styled: &str, engine: Option<Engine>) -> Option<&'static str> {
     let cap = tmux::unstyled(styled);
     if tmux::classify_dialog(&cap).is_some() {
         return Some("dialog up — press Enter and answer it there");
@@ -251,7 +270,8 @@ pub(crate) fn pane_refusal(styled: &str) -> Option<&'static str> {
     if !tmux::has_composer_in_tail(&cap, SEND_GATE_LINES) {
         return Some("no prompt on screen — press Enter to look");
     }
-    if tmux::claude_draft_in_box(styled) || tmux::codex_draft_in_box(styled) {
+    let codex_draft = engine == Some(Engine::Codex) && tmux::codex_draft_in_box(styled);
+    if tmux::claude_draft_in_box(styled) || codex_draft {
         return Some(
             "the agent's input box has unsent text — press Enter, then submit or clear it",
         );

@@ -202,6 +202,7 @@ fn composing_wheel_scrolls_text_panes_but_never_moves_the_session_selection() {
                 agent_loop: true,
                 driven: false,
                 in_chat: false,
+                engine: Some(Engine::Claude),
             },
             input: Composer::from_text("reply for one".into()),
         },
@@ -1005,6 +1006,7 @@ fn send_editor_requests_report_empty_error_and_submit_saved_text() {
         agent_loop: true,
         driven: false,
         in_chat: false,
+        engine: Some(Engine::Claude),
     };
     let mut app = app_with(vec![agent_loop_view("bot")], UiMode::Normal);
 

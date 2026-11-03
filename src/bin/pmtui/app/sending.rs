@@ -39,6 +39,7 @@ impl App {
                 driven: daemon::pmd_drives_row(mode, tier),
                 // Resolved at SUBMIT, not here: a chat can open or close while the human types.
                 in_chat: false,
+                engine: e.engine,
             },
             input,
         };
