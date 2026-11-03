@@ -177,6 +177,24 @@ server and daemon when the test ends.
   input; workers reload it only through `pmd checkpoint <path>`, and the default
   UI does not expose activity handles or output references.
 - The status glyph means working, not merely alive.
+- The preview sizes THE AGENT'S OWN TERMINAL to the width it will draw the transcript at
+  (`fit_agent_pane`, deduped per `(row, cols, rows)`), so the agent wraps its own lines where the
+  text ends and nothing has to be cut. That width is the TEXT width (`preview_text_cols`), not the
+  pane's inner width: the renderer INSERTS a two-column gutter in front of each captured row, so
+  fitting to `inner_w` made every full-width row `inner_w + 2` and pushed its last two columns past
+  the border with no gap — which reads as a broken pane rather than a narrow one. One function owns
+  that number because two callers must not disagree; a row wrapped for one width and drawn at
+  another is the same overflow again. `clamp_line_cols` stays as a BACKSTOP, not the mechanism: a
+  pane cannot be resized while a human is attached (their client owns the size), so a 200-column
+  row still arrives for a 70-column region and is cut at the margin rather than at the rule.
+  `resize_window` flips tmux to `window-size manual` — measured, a window resized to 70 stayed 70
+  under a 180-column client — so every attach path calls `set_window_size_auto` FIRST, and the run
+  loop forgets the fit afterwards so the next frame re-fits.
+- No VERDICT row. One used to sit above the body naming which sessions need you, on the theory that
+  the status bar carries the count and the names are what a count cannot. They are not: the
+  `NEEDS YOU (n)` group inside the SESSIONS pane lists exactly those sessions, sorted the same way,
+  so the row restated its own neighbour — and with a single needy session the same fact appeared
+  three times, in the chip, the row and the group.
 - Chrome takes every colour from the active theme, and RGB enters it only through
   `src/theme.rs`. Add a ROLE there rather than a colour at a render site, and keep
   severity carried by glyph, word and badge as well as hue. EVERY CELL is the theme's:

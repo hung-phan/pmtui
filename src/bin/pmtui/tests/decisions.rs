@@ -675,81 +675,47 @@ fn opening_the_lane_without_a_selection_explains_the_required_action() {
 }
 
 #[test]
-fn the_verdict_line_names_the_needy_sessions_and_spares_the_calm() {
-    let stuck = {
-        let mut v = autopilot_loop_view("infra");
-        v.posture = Posture::Stuck;
-        v
-    };
+fn the_body_starts_directly_under_the_status_bar_however_needy_the_fleet_is() {
+    // NO VERDICT ROW, whatever the fleet is doing. One used to sit here naming which sessions
+    // need you, on the theory that the status bar carries the COUNT and the names are what the
+    // count cannot carry. They are not: the `NEEDS YOU (n)` group inside the SESSIONS pane lists
+    // exactly those sessions, sorted the same way — so the row restated its own neighbour, and
+    // with a single needy session the same fact appeared three times (chip, row, group).
+    //
+    // Asserted across the whole range of fleet states the row used to distinguish, because the
+    // property is that NONE of them buys a row: calm, needy, stuck, and the paused-but-Blocked
+    // case the row needed a special filter for.
+    let calm = autopilot_loop_view("jokes"); // Working
     let needy = {
         let mut v = autopilot_loop_view("api");
         v.posture = Posture::NeedsYou;
         v
     };
-    let working = autopilot_loop_view("jokes"); // Working — calm
-    let app = app_with(vec![working, needy, stuck], UiMode::Normal);
-    let mut t = Terminal::new(TestBackend::new(100, 20)).unwrap();
-    t.draw(|f| render(f, &app)).unwrap();
-    let rows = screen_rows(&t);
-    let verdict = &rows[1].0; // status bar is row 0; the verdict sits directly beneath it
-    assert!(
-        verdict.contains("infra") && verdict.contains("api"),
-        "the verdict names the needy sessions: {verdict:?}"
-    );
-    assert!(
-        !verdict.contains("jokes"),
-        "the calm session is not on the verdict line: {verdict:?}"
-    );
-    assert!(
-        rows[2].0.contains("SESSIONS"),
-        "the SESSIONS pane follows the verdict line: {:?}",
-        rows[2].0
-    );
-}
-
-#[test]
-fn the_verdict_line_skips_paused_sessions_even_when_their_ledger_is_blocked() {
-    // A paused row (enabled=false) can still hold a NeedsYou/Stuck posture from a Blocked ledger,
-    // but `status_category` buckets any paused row as idle, so it never enters the need-you COUNT
-    // or the CTA chip. The verdict line must agree with that count — name only the enabled needy
-    // session, never the paused one (which would otherwise draw with the idle glyph on a
-    // "who needs you" line). Regression guard for the enabled-filter bug.
-    let live = {
-        let mut v = autopilot_loop_view("api");
-        v.posture = Posture::NeedsYou;
+    let stuck = {
+        let mut v = autopilot_loop_view("infra");
+        v.posture = Posture::Stuck;
         v
     };
-    let paused = {
-        let mut v = autopilot_loop_view("infra");
+    let paused_but_blocked = {
+        let mut v = autopilot_loop_view("frozen");
         v.posture = Posture::Stuck; // ledger still Blocked...
         v.enabled = false; // ...but the human paused it
         v
     };
-    let app = app_with(vec![live, paused], UiMode::Normal);
-    let mut t = Terminal::new(TestBackend::new(100, 20)).unwrap();
-    t.draw(|f| render(f, &app)).unwrap();
-    let rows = screen_rows(&t);
-    let verdict = &rows[1].0; // the enabled needy row makes the verdict render
-    assert!(
-        verdict.contains("api"),
-        "the enabled needy session is named: {verdict:?}"
-    );
-    assert!(
-        !verdict.contains("infra"),
-        "a paused session is NOT surfaced on the verdict line: {verdict:?}"
-    );
-}
-
-#[test]
-fn the_verdict_line_is_absent_when_all_is_calm() {
-    let app = app_with(vec![autopilot_loop_view("jokes")], UiMode::Normal); // Working, nobody needy
-    let mut t = Terminal::new(TestBackend::new(100, 20)).unwrap();
-    t.draw(|f| render(f, &app)).unwrap();
-    let rows = screen_rows(&t);
-    // No verdict row: the body (the SESSIONS pane) starts immediately under the status bar.
-    assert!(
-        rows[1].0.contains("SESSIONS"),
-        "an all-clear fleet spends no row on a verdict: {:?}",
-        rows[1].0
-    );
+    for (label, projects) in [
+        ("calm", vec![calm.clone()]),
+        ("one needy", vec![calm.clone(), needy.clone()]),
+        ("needy and stuck", vec![calm.clone(), needy, stuck]),
+        ("paused but blocked", vec![calm, paused_but_blocked]),
+    ] {
+        let app = app_with(projects, UiMode::Normal);
+        let mut t = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        t.draw(|f| render(f, &app)).unwrap();
+        let rows = screen_rows(&t);
+        assert!(
+            rows[1].0.contains("SESSIONS"),
+            "{label}: the body must start on row 1, directly under the status bar: {:?}",
+            rows[1].0
+        );
+    }
 }
