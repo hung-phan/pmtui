@@ -4,7 +4,9 @@ use std::path::Path;
 
 use tempfile::TempDir;
 
-use super::super::{Check, CheckStatus, DoctorOptions, OverallStatus, RuntimeProbe, inspect_with};
+use super::super::{
+    Check, CheckStatus, DoctorOptions, NativeProbe, OverallStatus, RuntimeProbe, inspect_with,
+};
 use crate::job::{
     AgentLoopState, DeciderOutcome, DeciderPolicy, DeciderRun, DeciderTarget, ParkedAdvice,
 };
@@ -1457,4 +1459,48 @@ fn name_has_owner_accepts_only_the_two_answers_gdbus_gives() {
     for junk in ["", "true", "(true)", "(true,) extra", "Error: no bus", "()"] {
         assert_eq!(name_has_owner(junk), None, "{junk:?} must not be a verdict");
     }
+}
+
+/// The real bus reading, driven through a FAKE `gdbus` so every line runs on any machine.
+///
+/// This test exists because the first version of it did not: the probe shelled out to whatever
+/// `gdbus` was on PATH, so it passed locally and the coverage gate failed in CI, where there is
+/// no `gdbus` and nothing below the PATH check ever executed.
+#[test]
+fn the_bus_reading_handles_both_answers_a_refusal_and_a_missing_program() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new().unwrap();
+    let fake = |name: &str, body: &str| -> std::path::PathBuf {
+        let path = dir.path().join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    };
+
+    let owned = fake("gdbus-true", "printf '(true,)\\n'");
+    assert_eq!(
+        NativeProbe::with_gdbus(owned).notification_daemon(),
+        Some(true)
+    );
+
+    let unowned = fake("gdbus-false", "printf '(false,)\\n'");
+    assert_eq!(
+        NativeProbe::with_gdbus(unowned).notification_daemon(),
+        Some(false)
+    );
+
+    // Ran and refused — no bus to ask, so neither verdict is earned.
+    let refused = fake("gdbus-err", "echo 'Error: no bus' >&2; exit 1");
+    assert_eq!(NativeProbe::with_gdbus(refused).notification_daemon(), None);
+
+    // Answered something unrecognised: still not a verdict.
+    let babble = fake("gdbus-junk", "printf 'maybe\\n'");
+    assert_eq!(NativeProbe::with_gdbus(babble).notification_daemon(), None);
+
+    // Not a program at all, which is the CI runner's case and needs no PATH pre-check to answer.
+    assert_eq!(
+        NativeProbe::with_gdbus(dir.path().join("definitely-not-here")).notification_daemon(),
+        None
+    );
 }

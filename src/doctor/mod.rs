@@ -261,6 +261,12 @@ pub(crate) struct NativeProbe {
     /// Captured at construction, like `path`: the check reads it through the probe seam rather than
     /// the environment, which is what lets a test state "there is no desktop here".
     desktop: Option<&'static str>,
+    /// The program that asks the session bus who owns a name. A FIELD for the same reason `tmux`
+    /// is one: the real reading shells out, and a test that could only exercise it on a machine
+    /// that happens to have `gdbus` is a test whose coverage depends on the host. That is not
+    /// hypothetical — it passed locally and failed CI, where `gdbus` is absent and every line
+    /// below the PATH check went unexecuted.
+    gdbus: PathBuf,
 }
 
 impl Default for NativeProbe {
@@ -273,6 +279,7 @@ impl Default for NativeProbe {
                 std::env::var_os("WAYLAND_DISPLAY").as_deref(),
                 std::env::var_os("DISPLAY").as_deref(),
             ),
+            gdbus: PathBuf::from("gdbus"),
         }
     }
 }
@@ -282,6 +289,14 @@ impl NativeProbe {
     pub(crate) fn with_tmux(tmux: PathBuf) -> Self {
         Self {
             tmux,
+            ..Self::default()
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_gdbus(gdbus: PathBuf) -> Self {
+        Self {
+            gdbus,
             ..Self::default()
         }
     }
@@ -299,10 +314,11 @@ impl RuntimeProbe for NativeProbe {
     fn notification_daemon(&self) -> Option<bool> {
         // READ-ONLY on purpose: asking the bus who owns the name sends no notification, so a
         // human who asked for a diagnosis does not get a toast for it.
-        if !self.binary_on_path("gdbus") {
-            return None;
-        }
-        let output = Command::new("gdbus")
+        //
+        // No PATH pre-check: `output()` already reports a missing program as an error, and a
+        // second answer to "is it there?" only adds a branch — the one CI could never execute,
+        // because its runner has no `gdbus`.
+        let output = Command::new(&self.gdbus)
             .args([
                 "call",
                 "--session",
