@@ -497,12 +497,12 @@ impl App {
         let mut reg = Registry::load(&self.registry_path).unwrap_or_default();
         let before = reg.projects.len();
         // Capture the root + mode before dropping the entry so we can clear its
-        // pmtui-owned markers below, and whether it was a JOB, whose state goes with it.
+        // pmtui-owned markers and its own state below.
         let removed = reg
             .projects
             .iter()
             .find(|p| p.id == id)
-            .map(|p| (p.root.clone(), p.mode, p.is_job(), job_worktree(p)));
+            .map(|p| (p.root.clone(), p.mode, job_worktree(p)));
         // A JOB's parent is waiting on a receipt. Removing the row by hand IS a cancellation, so say so
         // before the row is gone — otherwise an agent polls `ready` for a child that no longer exists.
         if let Some(row) = reg.projects.iter().find(|p| p.id == id).cloned() {
@@ -522,18 +522,20 @@ impl App {
         // same path would find the stale marker and resume this deleted
         // conversation instead of starting fresh. The rest of `.project-state/`
         // and the source tree are left untouched.
-        if let Some((root, mode, was_job, worktree)) = removed {
+        if let Some((root, mode, worktree)) = removed {
             let _ = std::fs::remove_file(ProjectPaths::new(&root).session());
             // Clear attach intent so a reused id at the same root never inherits it.
             if mode == Mode::AgentLoop {
                 chat_lock::clear(&ProjectPaths::for_session(&root, id));
             }
-            // A JOB'S STATE LIVES EXACTLY AS LONG AS ITS ROW. A job is one finished run, and what it
-            // achieved is in the parent's receipt — summary, detail and error — so once the row is gone
-            // its `.project-state/sessions/<seg>/` is a stale copy of a conversation nobody can resume.
-            // Only the child's own subtree: the parent's state, the project ledger and the source tree
-            // are untouched, and the guard for that lives in `purge_session_state` itself. A human's
-            // session is NEVER purged this way — no machine decides a human's work is finished.
+            // A SESSION'S STATE LIVES EXACTLY AS LONG AS ITS ROW, whoever owned the row. Once it is
+            // gone its `.project-state/sessions/<seg>/` is unreachable: the dashboard lists registry
+            // rows, so nothing can open that ledger, answer that question or resume that conversation
+            // again. For a job what it achieved is in the parent's receipt; for a human the row leaving
+            // the list IS the human deciding, which is why this is not a machine declaring their work
+            // finished — `d` asks first, and the confirmation names what it deletes.
+            // Only the session's own subtree: the project ledger, any sibling session and the source
+            // tree are untouched, and the guard for that lives in `purge_session_state` itself.
             // THE WORKTREE GOES THROUGH GIT, and only when it holds nothing but commits. `git worktree
             // remove` is what makes the repository forget it; a plain delete would leave admin files
             // behind. A worktree with uncommitted changes REFUSES, and then the state purge is skipped
@@ -549,8 +551,7 @@ impl App {
                     worktree.branch
                 ));
             }
-            if was_job
-                && !keep_state
+            if !keep_state
                 && let Err(error) =
                     agent_manager::state::purge_session_state(&ProjectPaths::for_session(&root, id))
             {

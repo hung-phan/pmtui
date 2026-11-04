@@ -504,10 +504,12 @@ fn begin_delete_on_agent_loop_enters_confirming() {
 }
 
 #[test]
-fn confirming_close_of_agent_loop_removes_row_but_keeps_session_state() {
-    // Confirming the close drops the registry row (the only "done") but MUST
-    // retain the per-session `sessions/<id>/` state (ledger/config/brief) per
-    // the design — the human closes the session, not the on-disk history.
+fn confirming_close_of_agent_loop_takes_the_row_and_its_session_state() {
+    // Confirming the close drops the registry row AND the per-session
+    // `sessions/<id>/` state (ledger/config/brief). It used to retain them, on the rule
+    // that the human closes the session rather than the on-disk history — but nothing
+    // can reach that history once the row is gone, and confirming the close IS the
+    // human choosing. The confirmation names what it deletes.
     let dir = tempfile::tempdir().unwrap();
     let (reg_path, root) = reg_with_agent_loop(dir.path(), "bot");
     let session_paths = ProjectPaths::for_session(&root, "bot");
@@ -535,17 +537,11 @@ fn confirming_close_of_agent_loop_removes_row_but_keeps_session_state() {
         "the registry row is dropped on confirm"
     );
     assert!(
-        session_paths.pmstate().exists(),
-        "per-session ledger is retained on close"
+        !session_paths.state_dir().exists(),
+        "the session's whole state subtree goes with the row: {}",
+        session_paths.state_dir().display()
     );
-    assert!(
-        session_paths.config().exists(),
-        "per-session config is retained on close"
-    );
-    assert!(
-        session_paths.brief().exists(),
-        "per-session brief is retained on close"
-    );
+    assert!(root.is_dir(), "the source tree is untouched");
 }
 
 #[test]
@@ -1099,4 +1095,46 @@ fn enter_on_a_paused_row_with_a_ghost_conversation_id_creates_it_instead_of_resu
         launches[0].2
     );
     drop(held);
+}
+
+/// A HUMAN'S SESSION STATE GOES WITH ITS ROW, same as a job's. It used to be kept, on the rule
+/// that no machine decides a human's work is finished — but the row leaving the list is the
+/// human deciding, and what stayed behind was unreachable: the dashboard lists registry rows, so
+/// nothing could open that ledger or resume that conversation again.
+#[test]
+fn removing_a_human_session_takes_its_own_state_and_leaves_its_neighbour() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reg_path, root) = reg_with_agent_loop(dir.path(), "mine");
+    let gone = ProjectPaths::for_session(&root, "mine");
+    let neighbour = ProjectPaths::for_session(&root, "other");
+    for paths in [&gone, &neighbour] {
+        std::fs::create_dir_all(paths.state_dir()).unwrap();
+        std::fs::write(paths.brief(), "the goal").unwrap();
+    }
+    // Project-level state, which belongs to the folder rather than to either session.
+    let project = ProjectPaths::new(&root);
+    std::fs::write(project.state_dir().join("registry-ish.json"), "{}").unwrap();
+
+    let mut app = app_with_driver(
+        vec![agent_loop_view("mine")],
+        UiMode::Normal,
+        Box::new(FakePane::default()),
+    );
+    app.registry_path = reg_path;
+    app.remove_project("mine", &session_name("mine", &root));
+
+    assert!(
+        !gone.state_dir().exists(),
+        "the removed session's state is gone: {}",
+        gone.state_dir().display()
+    );
+    assert!(
+        neighbour.brief().is_file(),
+        "a sibling session in the same folder is untouched"
+    );
+    assert!(
+        project.state_dir().join("registry-ish.json").is_file(),
+        "project-level state is untouched"
+    );
+    assert!(root.is_dir(), "the source tree is untouched");
 }

@@ -148,9 +148,17 @@ server and daemon when the test ends.
   and its result is the harness's own final payload, not a file the agent must remember to write. A
   `done` job is retired automatically — unless it left uncommitted work; any other outcome keeps its row
   for a human. A job is given
-  no spawn procedure and no `ManagedEnv`, so it cannot spawn. Its state lives exactly as long as its
-  row: removing a job row deletes that session's own `.project-state/sessions/<seg>/` and nothing
-  else, because the parent's receipt is what outlives it. A human's session is never purged.
+  no spawn procedure and no `ManagedEnv`, so it cannot spawn.
+- A SESSION'S STATE LIVES EXACTLY AS LONG AS ITS ROW, whoever owned the row. Removing a row deletes
+  that session's own `.project-state/sessions/<seg>/` and nothing else — the project ledger, every
+  sibling session and the source tree are untouched, and the guard for that is in
+  `purge_session_state` rather than at the call site. Once the row is gone the subtree is
+  UNREACHABLE: the dashboard lists registry rows, so nothing can open that ledger, answer that
+  question or resume that conversation again. For a job what it achieved is in the parent's receipt.
+  For a human the row leaving the list IS the human deciding, so this is not a machine declaring
+  their work finished — `d` confirms first, and the confirmation NAMES what it deletes, because it
+  is the only warning (it used to promise `.project-state` was kept, which would now be a lie).
+  A purge that fails never blocks the removal, and a dirty worktree cancels it outright.
 - A job in a git repository works in its OWN WORKTREE, on its own branch, and is told to commit there.
   Isolation is the dashboard's job; INTEGRATION IS THE HUMAN'S — `a` cherry-picks one child's commit onto
   their checkout, confirmed, refused while their tree is dirty, and aborted on a conflict. Uncommitted work
