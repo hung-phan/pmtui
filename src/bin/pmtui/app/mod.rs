@@ -385,9 +385,32 @@ impl App {
         // gets a scratch log and scratch preferences.
         let status_log = status_log::log_path(&registry_path);
         let settings_path = crate::settings::settings_path(&registry_path);
-        // A preferences file that will not parse must not cost the human their dashboard: the theme
-        // it holds is applied by `main` (which can report the failure), and the default stands here.
-        let settings = crate::settings::load(&settings_path).unwrap_or_default();
+        // A preferences file that will not parse must not cost the human their dashboard: the
+        // default stands. But the failure is REPORTED HERE rather than left to `main`'s theme
+        // report, which cannot see it — an unparseable file yields no theme id to refuse, so the
+        // default theme applies cleanly and the error reached nobody. Measured: a truncated
+        // `pmtui.json` silently lost every setting it held, with nothing on screen and nothing in
+        // Settings, which is exactly what `settings::load`'s doc says must not happen.
+        //
+        // DEFAULTING IS SAFE ONLY WHILE THIS FILE IS COSMETIC. Every field here changes how the
+        // dashboard LOOKS, and refusing to start would mean a human cannot see which agent is
+        // blocked because a colour preference has a stray comma — with no dashboard left to tell
+        // them which file to fix. The same reasoning as `Registry::load` reading a missing registry
+        // as an empty one. A setting that changes what pmtui DOES rather than how it looks (an
+        // autopilot default, a cadence, a model, anything destructive) inverts this: a default
+        // would then be a wrong ACTION, not a wrong colour, and such a field must make this a hard
+        // failure instead. Nothing overwrites the broken file meanwhile — `settings::save` has one
+        // caller, `commit_setting`, which runs only on an explicit human pick.
+        let (settings, settings_error) = match crate::settings::load(&settings_path) {
+            Ok(settings) => (settings, String::new()),
+            // "could not" is load-bearing, not prose: `status_is_failure` keys on it, and a status
+            // it does not match is drawn GREEN — the colour of success. The error itself names the
+            // path and the position.
+            Err(error) => (
+                crate::settings::Settings::default(),
+                format!("could not read your settings: {error:#}"),
+            ),
+        };
         let mut a = App {
             registry_path,
             socket,
@@ -411,7 +434,7 @@ impl App {
             return_to_board_after_switch: false,
             return_to_board_after_action: false,
             answering_stop_id: None,
-            status: String::new(),
+            status: settings_error,
             status_log,
             last_logged: None,
             settings_path,
