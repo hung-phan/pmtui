@@ -66,6 +66,40 @@ fn preferences_default_when_absent_round_trip_when_written_and_report_when_broke
     assert!(load(&path).is_err(), "a broken file must be reported");
 }
 
+/// A broken file being an `Err` is not the same as a human LEARNING it is broken. Measured before
+/// this test existed: pmtui started clean on a truncated `pmtui.json`, with nothing on screen and
+/// nothing in Settings, so every setting the file held was silently lost. The error cannot be left
+/// to `main`'s theme report — an unparseable file yields no theme id to refuse, so the default
+/// theme applies cleanly and the failure reaches nobody.
+#[test]
+fn a_broken_preferences_file_reaches_the_human_as_a_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let reg_path = dir.path().join("registry.json");
+    std::fs::write(&reg_path, r#"{"projects":[]}"#).unwrap();
+    std::fs::write(dir.path().join("pmtui.json"), "{ \"theme\": ").unwrap();
+
+    let app = App::new(reg_path, "pm-test".into());
+    assert!(
+        !app.status.is_empty(),
+        "a preferences file that will not parse must be named, not swallowed"
+    );
+    assert!(
+        app.status.contains("pmtui.json"),
+        "the status must name the file the human has to fix: {}",
+        app.status
+    );
+    // A FAILURE IS NOT GREEN. The keybar colours by `status_is_failure`, so a status this
+    // predicate misses is drawn in the colour of success — measured on a real pane before the
+    // wording was fixed.
+    assert!(
+        crate::status_is_failure(&app.status),
+        "a broken settings file must read as a failure, not a success: {}",
+        app.status
+    );
+    // The default still stands: a broken file costs the settings, never the dashboard.
+    assert_eq!(app.settings, Settings::default());
+}
+
 /// A file missing the field still parses: an older pmtui's preferences must not cost the human their
 /// dashboard.
 #[test]

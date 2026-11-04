@@ -256,7 +256,10 @@ Settings view names the exact path at the bottom of its frame):
 
 A scratch `--registry` gets its own preferences, so a throwaway dashboard cannot change how your
 real one looks. If you hand-edit the file and name a theme that does not exist, pmtui starts on the
-default and the status line says which id it refused.
+default and the status line says which id it refused. If the file will not parse at all — a
+truncated write, a stray comma — pmtui still starts on the defaults, and the status line names the
+file and the position it gave up at, so a lost setting never looks like a forgotten one. That line
+also goes to `pmtui.log` beside the file, in case you press a key before reading it.
 
 The theme paints everything: background, borders, and all the text, including the plain text that
 has no colour of its own. pmtui fills the whole frame with the theme's background rather than letting
