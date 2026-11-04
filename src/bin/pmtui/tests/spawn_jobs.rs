@@ -1033,17 +1033,24 @@ fn a_state_directory_that_cannot_be_purged_still_lets_the_row_go() {
     assert!(state.is_symlink(), "and the link itself was not followed");
 }
 
-/// A HUMAN'S OWN SESSION IS NEVER PURGED. Only a job's state goes with its row: no machine decides a
-/// person's work is finished, so a chat child removed by hand keeps everything under `.project-state/`.
+/// A CHAT CHILD'S STATE GOES WITH ITS ROW TOO. It used to be kept, on the rule that only a job's
+/// state follows its row — but a chat child owns its own `sessions/<seg>/` subtree, and once the row
+/// is removed nothing can read that transcript again. Removing the row by hand is the human choosing.
 #[test]
-fn removing_a_chat_child_keeps_its_state() {
+fn removing_a_chat_child_takes_its_state() {
     let fx = fixture(LaunchKind::Chat, "a human's transcript", None, None);
     let mut app = app_for(&fx, FakePane::live_quiet(&fx.child_session));
     app.remove_project("kid", &fx.child_session);
     assert_eq!(rows(&fx), vec!["parent"], "the row is gone");
     assert!(
-        fx.child_paths.job_log().is_file(),
-        "but its state is not ours to delete"
+        !fx.child_paths.state_dir().exists(),
+        "and its own subtree with it: {}",
+        fx.child_paths.state_dir().display()
+    );
+    // The PARENT is a different session in the same folder and keeps everything.
+    assert!(
+        fx.parent_requests.is_dir(),
+        "the parent's own state is untouched"
     );
 }
 

@@ -34,8 +34,12 @@ pub(crate) fn render_confirm(f: &mut Frame, area: Rect, id: &str, what: Confirma
                     .add_modifier(Modifier::BOLD),
             ),
             Line::raw("The agent is still live \u{2014} this kills its tmux session."),
+            // IT NAMES WHAT IT DELETES, because this is the only warning. It used to read
+            // "(.project-state kept…)" and that is no longer true: the session's own subtree —
+            // its goal, answers, decision record and transcript — goes with the row, and no
+            // screen can reach any of it afterwards. 53 columns against the 60 this body gets.
             Line::styled(
-                "(.project-state kept; source files untouched)",
+                "(deletes this session's state; source files untouched)",
                 Style::default().add_modifier(Modifier::DIM),
             ),
         ],

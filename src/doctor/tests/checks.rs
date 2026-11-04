@@ -1461,46 +1461,33 @@ fn name_has_owner_accepts_only_the_two_answers_gdbus_gives() {
     }
 }
 
-/// The real bus reading, driven through a FAKE `gdbus` so every line runs on any machine.
+/// The real bus reading's own branches, driven through programs that ALREADY EXIST.
 ///
-/// This test exists because the first version of it did not: the probe shelled out to whatever
-/// `gdbus` was on PATH, so it passed locally and the coverage gate failed in CI, where there is
-/// no `gdbus` and nothing below the PATH check ever executed.
+/// Two earlier shapes of this test were wrong in ways worth recording. It first shelled out to
+/// whatever `gdbus` was on PATH, so it passed here and the coverage gate failed in CI, where there
+/// is none. Its replacement wrote a fake `gdbus` to a temp dir and exec'd it — which flaked about
+/// one run in ten under the parallel suite, because exec'ing a file the test just created races
+/// sibling threads that fork.
+///
+/// So nothing is written: `echo` exits 0 with output that is not an answer, `false` exits non-zero,
+/// and a path that does not exist cannot be spawned. The two real answers need no program at all —
+/// [`name_has_owner`] is pure and is tested directly.
 #[test]
-fn the_bus_reading_handles_both_answers_a_refusal_and_a_missing_program() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let dir = TempDir::new().unwrap();
-    let fake = |name: &str, body: &str| -> std::path::PathBuf {
-        let path = dir.path().join(name);
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        path
-    };
-
-    let owned = fake("gdbus-true", "printf '(true,)\\n'");
+fn the_bus_reading_handles_unparseable_output_a_refusal_and_a_missing_program() {
+    // Exits 0 and prints the arguments, which are not `(true,)` or `(false,)`.
     assert_eq!(
-        NativeProbe::with_gdbus(owned).notification_daemon(),
-        Some(true)
+        NativeProbe::with_gdbus("echo".into()).notification_daemon(),
+        None
     );
-
-    let unowned = fake("gdbus-false", "printf '(false,)\\n'");
+    // Ran and refused: no bus to ask, so neither verdict is earned.
     assert_eq!(
-        NativeProbe::with_gdbus(unowned).notification_daemon(),
-        Some(false)
+        NativeProbe::with_gdbus("false".into()).notification_daemon(),
+        None
     );
-
-    // Ran and refused — no bus to ask, so neither verdict is earned.
-    let refused = fake("gdbus-err", "echo 'Error: no bus' >&2; exit 1");
-    assert_eq!(NativeProbe::with_gdbus(refused).notification_daemon(), None);
-
-    // Answered something unrecognised: still not a verdict.
-    let babble = fake("gdbus-junk", "printf 'maybe\\n'");
-    assert_eq!(NativeProbe::with_gdbus(babble).notification_daemon(), None);
-
-    // Not a program at all, which is the CI runner's case and needs no PATH pre-check to answer.
+    // Not a program at all — the CI runner's case, and the reason there is no PATH pre-check.
     assert_eq!(
-        NativeProbe::with_gdbus(dir.path().join("definitely-not-here")).notification_daemon(),
+        NativeProbe::with_gdbus(TempDir::new().unwrap().path().join("not-here"))
+            .notification_daemon(),
         None
     );
 }
