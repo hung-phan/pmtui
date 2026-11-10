@@ -129,21 +129,31 @@ jobs:
             asset_os: darwin
             asset_arch: amd64
             macos_min: '10.12'
-          # `macos-15`, NOT `macos-14`: GitHub retired the macOS 14 image between 2026-11-04 and
-          # 2026-11-10, and a retired label is not an error you can read. Measured across the two
-          # releases, same `labels=macos-14` both times: v0.1.19 was assigned
-          # `runner=GitHub Actions 1000001372` and built in 61s; v0.1.20 got NO runner at all and
-          # the job was cancelled at the instant it started — `started_at == completed_at`, zero
-          # steps. `fail-fast: false` does not help, because the leg was cancelled rather than
-          # failed, and one cancelled job cancels the run, which SKIPS the `release` job: three
-          # platform tarballs built green and nothing was published. Two reruns produced the same
-          # result, so a rerun is not the answer to this class.
+          # FLOATING, DELIBERATELY, and the only floating label in this matrix. GitHub retired the
+          # macOS 14 arm64 runner between 2026-11-04 and 2026-11-10 and the release simply stopped:
+          # same `labels=macos-14` both times, but v0.1.19 was assigned
+          # `runner=GitHub Actions 1000001372` and built in 61s, while v0.1.20 got NO runner and the
+          # job was cancelled at the instant it started — `started_at == completed_at`, zero steps.
+          # `fail-fast: false` does not help, because the leg was CANCELLED rather than failed, and
+          # one cancelled job cancels the run, which SKIPS `release`: three tarballs built green and
+          # nothing was published. Two reruns behaved identically, so a rerun does not clear this
+          # class (unlike the v0.1.17 darwin artifact timeout, which it did).
           #
-          # PINNED rather than `macos-latest`, matching `macos-15-intel` above: a floating label
-          # moves this failure to a day nobody is looking, and the whole point of the asset matrix
-          # is that what ships is what was built. When this image is retired in turn, the signal is
-          # a darwin leg with no runner and no steps — look here first.
-          - os: macos-15
+          # A PIN WAS TRIED HERE FIRST AND THE ARGUMENT FOR IT DOES NOT SURVIVE: the reason to pin
+          # is that a drifting image changes what ships, but the reason not to is that a retirement
+          # is UNDIAGNOSABLE from anything a script can read. The cause —
+          # `The configuration 'macos-14-arm64-us-default' is not supported` — appears only in the
+          # web UI. The job log is empty (no steps ran), `/actions/jobs/<id>/annotations` answers
+          # 404, and the check-run's `output` is null. A human reading the page is the only detector
+          # this failure has, so the label that cannot be retired out from under the release is the
+          # correct trade.
+          #
+          # What ships is pinned by `macos_min` instead, which is what actually sets compatibility
+          # and is independent of the image that builds it. `macos-15-intel` below stays pinned
+          # because there is no floating Intel label — that leg WILL break the same way, and the
+          # signal is this one: a darwin leg with no runner and no steps, with the real message
+          # visible only in the UI.
+          - os: macos-latest
             target: aarch64-apple-darwin
             asset_os: darwin
             asset_arch: arm64
