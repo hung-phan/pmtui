@@ -129,31 +129,30 @@ jobs:
             asset_os: darwin
             asset_arch: amd64
             macos_min: '10.12'
-          # FLOATING, DELIBERATELY, and the only floating label in this matrix. GitHub retired the
-          # macOS 14 arm64 runner between 2026-11-04 and 2026-11-10 and the release simply stopped:
-          # same `labels=macos-14` both times, but v0.1.19 was assigned
-          # `runner=GitHub Actions 1000001372` and built in 61s, while v0.1.20 got NO runner and the
-          # job was cancelled at the instant it started — `started_at == completed_at`, zero steps.
-          # `fail-fast: false` does not help, because the leg was CANCELLED rather than failed, and
-          # one cancelled job cancels the run, which SKIPS `release`: three tarballs built green and
-          # nothing was published. Two reruns behaved identically, so a rerun does not clear this
-          # class (unlike the v0.1.17 darwin artifact timeout, which it did).
+          # `macos-15`, PAIRED WITH `macos-15-intel` ABOVE, so both darwin tarballs in one release
+          # come from one macOS generation. This was `macos-14`, which GitHub retired on
+          # 2026-11-02 (changelog 2026-10-01, with brownout windows through October); its listed
+          # arm64 destinations are `macos-latest` (= macos-26), `macos-15`, and their -xlarge
+          # variants. `macos-latest` is therefore a DIFFERENT OS GENERATION from the Intel leg, and
+          # floating it would ship one darwin asset built on macOS 26 and the other on macOS 15.
           #
-          # A PIN WAS TRIED HERE FIRST AND THE ARGUMENT FOR IT DOES NOT SURVIVE: the reason to pin
-          # is that a drifting image changes what ships, but the reason not to is that a retirement
-          # is UNDIAGNOSABLE from anything a script can read. The cause —
-          # `The configuration 'macos-14-arm64-us-default' is not supported` — appears only in the
-          # web UI. The job log is empty (no steps ran), `/actions/jobs/<id>/annotations` answers
-          # 404, and the check-run's `output` is null. A human reading the page is the only detector
-          # this failure has, so the label that cannot be retired out from under the release is the
-          # correct trade.
+          # HOW IT FAILED, because the shape is worth recognising rather than the label: v0.1.19
+          # was assigned `runner=GitHub Actions 1000001372` and built in 61s; v0.1.20, same
+          # `labels=macos-14`, got NO runner and was cancelled at the instant it started —
+          # `started_at == completed_at`, zero steps. `fail-fast: false` does not help, because the
+          # leg was CANCELLED rather than failed, and one cancelled job cancels the run, which SKIPS
+          # `release`: three tarballs built green and nothing was published. Two reruns behaved
+          # identically, so a rerun does not clear this class (unlike the v0.1.17 darwin artifact
+          # timeout, which it did).
           #
-          # What ships is pinned by `macos_min` instead, which is what actually sets compatibility
-          # and is independent of the image that builds it. `macos-15-intel` below stays pinned
-          # because there is no floating Intel label — that leg WILL break the same way, and the
-          # signal is this one: a darwin leg with no runner and no steps, with the real message
-          # visible only in the UI.
-          - os: macos-latest
+          # The cause is readable in ONE PLACE ONLY — the web UI: `The configuration
+          # 'macos-14-arm64-us-default' is not supported`. The job log is empty (no steps ran),
+          # `/actions/jobs/<id>/annotations` answers 404, and the check-run's `output` is null.
+          # Floating the label was tried here to dodge that, and is the wrong trade: these
+          # retirements are ANNOUNCED on the changelog with brownouts months ahead, so the signal
+          # exists and nobody was reading it — whereas a floating label changes the image that
+          # builds a shipped artifact with no notice at all. Watch the changelog; pin the build.
+          - os: macos-15
             target: aarch64-apple-darwin
             asset_os: darwin
             asset_arch: arm64
