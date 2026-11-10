@@ -56,7 +56,7 @@ not a session you talk to. You cannot message it, and it cannot ask you anything
        command with the original arguments and the same `--request-id` to check on it. Never make
        a new id for the same task.
      - `request_unwritable`: rerun the same command, with the same `--request-id`, later.
-     - `nested_spawn_refused`, `child_limit_reached` or `dir_not_allowed`: stop and ask the human.
+     - `nested_spawn_refused` or `dir_not_allowed`: stop and ask the human.
      - `invalid_argument`, `dir_not_found`, `message_too_long` or `invalid_request`: nothing ran.
        Fix the argument, then retry with a new id.
      - `job_failed`: the child ran, and it reports that the task failed. Read `result.summary`,
@@ -82,4 +82,4 @@ not a session you talk to. You cannot message it, and it cannot ask you anything
 
    The command reports `cancel_requested`. Keep checking as in step 5, until the receipt reads
    `cancelled`.
-7. A job cannot spawn. Five children run at one time. Ask for more, and they wait their turn.
+7. A job cannot spawn. Ask for the children the work needs.

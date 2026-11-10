@@ -175,9 +175,17 @@ fn it_forbids_the_shapes_that_have_no_governor() {
         prose.contains("Work goes out from you, and results come back to you"),
         "children messaging each other has nothing limiting it at the hub"
     );
+    // THERE IS NO PER-PARENT CAP to hold back for. The skill used to say a request over the limit
+    // "waits its turn"; the cap it referred to counted ROWS, so dead siblings blocked a parent
+    // forever. Pacing is `spawn::MAX_UNFINISHED_PER_PARENT` at discovery, which an agent never
+    // sees and must never ration against.
     assert!(
-        prose.contains("waits its turn"),
-        "the concurrency limit is not an answer to act on"
+        prose.contains("Ask for the children the work needs"),
+        "a coordinator must not ration its own fan-out"
+    );
+    assert!(
+        !prose.contains("waits its turn"),
+        "no cap is left for a coordinator to wait on"
     );
     assert!(
         prose.contains("One decision at a time"),

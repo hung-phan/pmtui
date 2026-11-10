@@ -100,8 +100,7 @@ it, put it in `next` like any other work. When you decline it, say so. See `pmtu
 
 - **Let children message each other.** Work goes out from you, and results come back to you.
   Nothing limits a conversation between children.
-- **Treat the concurrency limit as a decision.** Ask for the children the work needs. A request
-  over the limit waits its turn, and it starts when a slot is free.
+- **Hold back children to stay under a limit.** Ask for the children the work needs.
 - **Keep a child alive out of politeness.** Cancel a child that is no longer worth the wait.
 - **Escalate several decisions together.** One decision at a time, through your marker, in the
   human's words.

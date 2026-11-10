@@ -79,8 +79,18 @@ impl Engine {
     }
 }
 
-/// Most rows (spawned children plus their forks) that may name one parent in `spawned_by`.
-pub const MAX_CHILDREN_PER_PARENT: usize = 5;
+// THERE IS NO PER-PARENT ROW CAP. `MAX_CHILDREN_PER_PARENT = 5` used to live here, and its own doc
+// called it what it was — "most ROWS … that may name one parent" — while every message it produced
+// claimed five children were RUNNING. They were not: `children_of` counted every row with that
+// `spawned_by`, and `finish_job_row` keeps the row for a job that failed, was cancelled, ended
+// without a result, or finished with uncommitted work. Five such corpses and the parent could never
+// dispatch again, answered with `PlanRefusal::NotYet` — not an error — so the agent waited for a
+// slot that would never free, and the one code that would have reached a human
+// (`ErrorCode::ChildLimitReached`) had no constructor anywhere in the tree.
+//
+// Removing it loses nothing, because it was the SECOND limit: `spawn::MAX_UNFINISHED_PER_PARENT`
+// (16) is enforced at discovery and bounds how many requests a parent has in flight at all. That is
+// the higher backstop against a looping coordinator, and it was always the one doing the work.
 
 /// How far the spawn broker got with a row's one launch. Persisted before each side effect, so
 /// a dashboard that dies mid-spawn leaves enough for its successor to finish without ever
@@ -261,14 +271,6 @@ impl Registry {
     /// The enabled projects the daemon should drive.
     pub fn enabled(&self) -> impl Iterator<Item = &ProjectEntry> {
         self.projects.iter().filter(|p| p.enabled)
-    }
-
-    /// Rows (enabled or not) whose `spawned_by` is `parent`.
-    pub fn children_of(&self, parent: &str) -> usize {
-        self.projects
-            .iter()
-            .filter(|p| p.spawned_by.as_deref() == Some(parent))
-            .count()
     }
 }
 
