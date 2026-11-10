@@ -129,7 +129,21 @@ jobs:
             asset_os: darwin
             asset_arch: amd64
             macos_min: '10.12'
-          - os: macos-14
+          # `macos-15`, NOT `macos-14`: GitHub retired the macOS 14 image between 2026-11-04 and
+          # 2026-11-10, and a retired label is not an error you can read. Measured across the two
+          # releases, same `labels=macos-14` both times: v0.1.19 was assigned
+          # `runner=GitHub Actions 1000001372` and built in 61s; v0.1.20 got NO runner at all and
+          # the job was cancelled at the instant it started — `started_at == completed_at`, zero
+          # steps. `fail-fast: false` does not help, because the leg was cancelled rather than
+          # failed, and one cancelled job cancels the run, which SKIPS the `release` job: three
+          # platform tarballs built green and nothing was published. Two reruns produced the same
+          # result, so a rerun is not the answer to this class.
+          #
+          # PINNED rather than `macos-latest`, matching `macos-15-intel` above: a floating label
+          # moves this failure to a day nobody is looking, and the whole point of the asset matrix
+          # is that what ships is what was built. When this image is retired in turn, the signal is
+          # a darwin leg with no runner and no steps — look here first.
+          - os: macos-15
             target: aarch64-apple-darwin
             asset_os: darwin
             asset_arch: arm64
