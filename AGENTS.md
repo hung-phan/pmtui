@@ -164,8 +164,23 @@ server and daemon when the test ends.
   their checkout, confirmed, refused while their tree is dirty, and aborted on a conflict. Uncommitted work
   is never deleted to tidy up: a dirty worktree keeps its row, its state and its branch, whatever the
   outcome was and whoever ended it. A human's own `d` is still theirs to press.
-- Five children run AT ONCE; a sixth request waits and stages when a slot frees. The limit is concurrency,
-  never an answer an agent has to act on.
+- NO PER-PARENT CHILD CAP. `MAX_CHILDREN_PER_PARENT = 5` is gone, and its own doc called it what it
+  was — "most ROWS … that may name one parent" — while every message it produced claimed five
+  children were RUNNING. They were not: `children_of` counted every row with that `spawned_by`, and
+  `finish_job_row` keeps the row for a job that failed, was cancelled, ended without a result, or
+  finished with uncommitted work. Five such corpses and the parent could never dispatch again,
+  answered with `PlanRefusal::NotYet` — not an error — so the agent waited for a slot that would
+  never free, while the one code that would have reached a human (`ErrorCode::ChildLimitReached`)
+  had no constructor anywhere in the tree. `children_of` and that code are deleted too; a code
+  nothing can construct is worse than none, because the skill told agents to act on it.
+  NOTHING NOW BOUNDS HOW MANY CHILDREN A PARENT RUNS, and that is the chosen trade rather than an
+  oversight. `spawn::MAX_UNFINISHED_PER_PARENT` (16) reads like the remaining ceiling and is not
+  one: MEASURED, a job leaves `spawn.jobs` the moment it has LAUNCHED, which frees window room at
+  once, so seventeen requests produce seventeen running children in a single pass with an empty
+  queue. The window paces concurrent LAUNCHES; it caps nothing. The guards that remain are the
+  engine's own rate limits and a human watching rows appear. A real ceiling, if one is ever wanted,
+  must count LIVE CHILDREN — the defect here was a cap counting the wrong thing, never the idea of
+  a cap, and a row-count cap cannot be made correct because a corpse holds a place.
 - A job is ANSWERED ONCE, and one harvest runs at a time. The recorded answer beats anything a later pass
   can reconstruct from a directory retirement already deleted.
 - Stopping pmd never kills project terminals. Pause, restart, and remove are

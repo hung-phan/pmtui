@@ -227,28 +227,6 @@ fn absent_spawn_fields_are_not_serialized() {
 }
 
 #[test]
-fn children_of_counts_enabled_and_disabled_rows() {
-    let row = |id: &str, enabled: bool, parent: Option<&str>| {
-        let mut e = entry(id, enabled);
-        e.spawned_by = parent.map(str::to_string);
-        e
-    };
-    let reg = Registry {
-        projects: vec![
-            row("p", true, None),
-            row("c1", true, Some("p")),
-            row("c2", false, Some("p")),
-            row("c2-fork", true, Some("p")),
-            row("other", true, Some("q")),
-        ],
-    };
-    assert_eq!(reg.children_of("p"), 3);
-    assert_eq!(reg.children_of("q"), 1);
-    assert_eq!(reg.children_of("c1"), 0);
-    assert_eq!(MAX_CHILDREN_PER_PARENT, 5);
-}
-
-#[test]
 fn only_a_disabled_row_mid_spawn_is_staged() {
     for (state, enabled, staged) in [
         (LaunchState::Pending, false, true),

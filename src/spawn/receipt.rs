@@ -95,7 +95,6 @@ pub enum ErrorCode {
     RequestUnwritable,
     ParentNotFound,
     NestedSpawnRefused,
-    ChildLimitReached,
     DirNotFound,
     /// The directory exists but is neither inside the parent's root nor another session's root.
     DirNotAllowed,
@@ -115,14 +114,13 @@ impl ErrorCode {
     /// pair list is the same length, so a new code cannot ship with an untested name — which is
     /// what happened to [`Self::JobFailed`], the one code the spawn skill tells an agent to branch
     /// on by name.
-    pub const ALL: [ErrorCode; 15] = [
+    pub const ALL: [ErrorCode; 14] = [
         Self::NotInASession,
         Self::InvalidArgument,
         Self::RequestConflict,
         Self::RequestUnwritable,
         Self::ParentNotFound,
         Self::NestedSpawnRefused,
-        Self::ChildLimitReached,
         Self::DirNotFound,
         Self::DirNotAllowed,
         Self::MessageTooLong,

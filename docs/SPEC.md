@@ -281,11 +281,20 @@ MUST NOT use the code alone.
 
 ### Concurrency
 
-Five children run at the same time. A sixth request waits.
+A parent asks for the children the work needs. The product sets no limit on how many children one
+parent may have, and no limit on how many run at the same time.
 
-This limit is on concurrency. It is not a limit on how many children a parent can ask for. A request that
-waits reports that it is in progress. It starts at the first opportunity after a sibling ends. The product
-MUST NOT write anything that an agent must then act on.
+The dashboard paces only how many requests it reads for one parent in one pass. A request read on a
+later pass reports that it is in progress. The product MUST NOT write anything that an agent must
+then act on.
+
+The limits that remain are outside the product: the rate limits of the agent engine, and a person
+who can see every child as a row.
+
+A per-parent limit of five used to apply here. It counted ROWS rather than running children, so a
+child that failed, was cancelled, or ended with work left uncommitted held a place for as long as
+its row did — and a parent with five such rows could never ask for another. Removing it took away
+nothing that bounded the work.
 
 ### To Stop a Child
 

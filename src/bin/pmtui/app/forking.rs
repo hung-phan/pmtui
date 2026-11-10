@@ -1,5 +1,4 @@
 use crate::*;
-use agent_manager::registry::MAX_CHILDREN_PER_PARENT;
 
 const FORK_IDENTITY_ATTEMPTS: usize = 150;
 
@@ -126,14 +125,6 @@ impl App {
         };
         // The same rule every start path applies: a row still mid-spawn has no conversation yet.
         if self.refuse_unstartable(&source) {
-            return;
-        }
-        // The fork inherits `spawned_by`, so it would count as one more child of that parent.
-        if let Some(parent) = source.spawned_by.as_deref()
-            && registry.children_of(parent) >= MAX_CHILDREN_PER_PARENT
-        {
-            self.status =
-                format!("parent {parent} already has {MAX_CHILDREN_PER_PARENT} spawned sessions");
             return;
         }
         let source_paths = entry_state_paths(&source);

@@ -632,8 +632,8 @@ fn status_renders_a_receipt_with_no_session_or_result() {
         &SpawnReceipt {
             session: None,
             error: Some(SpawnError {
-                code: ErrorCode::ChildLimitReached,
-                message: "bot already has five children".into(),
+                code: ErrorCode::LaunchFailed,
+                message: "tmux never ran the argv".into(),
             }),
             result: None,
             ..receipt(REQUEST_ID, ReceiptState::Failed)
@@ -646,7 +646,7 @@ fn status_renders_a_receipt_with_no_session_or_result() {
     assert_eq!(code, 0);
     assert_eq!(
         out.trim(),
-        format!("failed {REQUEST_ID} \u{2014} bot already has five children"),
+        format!("failed {REQUEST_ID} \u{2014} tmux never ran the argv"),
         "the error stands in for a result the child never reported"
     );
 
@@ -654,7 +654,7 @@ fn status_renders_a_receipt_with_no_session_or_result() {
     let (_, out, _) = session.dispatch(&["spawn", "--status", "--json"], &mut FakeWaiter::new());
     let child = &json(&out)["children"][0];
     assert!(child["id"].is_null() && child["title"].is_null(), "{out}");
-    assert_eq!(child["summary"], "bot already has five children");
+    assert_eq!(child["summary"], "tmux never ran the argv");
 }
 
 /// `--cancel` NAMES A CHILD and nothing else: it needs the request id, and refuses the flags that
@@ -922,8 +922,8 @@ fn returns_the_receipt_written_during_the_wait_exit_0_for_done() {
     let mut failed = receipt(REQUEST_ID, ReceiptState::Failed);
     failed.session = None;
     failed.error = Some(SpawnError {
-        code: ErrorCode::ChildLimitReached,
-        message: "service already has 5 spawned sessions".into(),
+        code: ErrorCode::LaunchFailed,
+        message: "tmux never ran the argv".into(),
     });
     let mut waiter = FakeWaiter::with(|_| spawn::write_receipt(&requests, &failed).unwrap());
     let out = session.run(
@@ -932,7 +932,7 @@ fn returns_the_receipt_written_during_the_wait_exit_0_for_done() {
     );
     assert_eq!(out.state, CliState::Receipt(ReceiptState::Failed));
     assert_eq!(exit_code(&out), 1);
-    assert_eq!(out.error.unwrap().code, ErrorCode::ChildLimitReached);
+    assert_eq!(out.error.unwrap().code, ErrorCode::LaunchFailed);
     assert_eq!(waiter.sleeps.len(), 1);
 }
 

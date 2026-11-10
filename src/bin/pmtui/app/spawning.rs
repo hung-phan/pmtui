@@ -32,7 +32,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use agent_manager::registry::{LaunchRecord, LaunchState, MAX_CHILDREN_PER_PARENT};
+use agent_manager::registry::{LaunchRecord, LaunchState};
 use agent_manager::spawn::{
     self, ErrorCode, Listed, ReceiptSession, ReceiptState, SpawnArgs, SpawnError, SpawnReceipt,
     SpawnRequest,
@@ -597,15 +597,14 @@ impl App {
     }
 }
 
-/// Why a request cannot be staged right now: because it never can, or because the parent is full.
+/// Why a request cannot be staged: because it never can.
+///
+/// There was a second arm, `NotYet`, for a parent at a five-child cap. The cap is gone and so is
+/// the arm: fan-out is bounded by [`spawn::MAX_UNFINISHED_PER_PARENT`] at discovery, which is a
+/// higher ceiling and the one that was actually doing the job.
 pub(super) enum PlanRefusal {
     /// Answer the parent with this error. Nothing will change by waiting.
     Refused(SpawnError),
-    /// THE PARENT IS AT ITS CONCURRENCY LIMIT, so this request WAITS. The limit is how many children run
-    /// at once, not how many a parent may ever ask for: refusing the sixth made an agent choose between
-    /// doing that work itself and bothering a human, when the honest answer is "shortly". Queue depth is
-    /// bounded by [`spawn::MAX_UNFINISHED_PER_PARENT`], which discovery already enforces.
-    NotYet,
 }
 
 impl From<SpawnError> for PlanRefusal {
@@ -639,9 +638,6 @@ pub(super) fn plan_child(reg: &Registry, request: &SpawnRequest) -> Result<Child
             ),
         )
         .into());
-    }
-    if reg.children_of(&parent.id) >= MAX_CHILDREN_PER_PARENT {
-        return Err(PlanRefusal::NotYet);
     }
     let dir = resolve_dir(args.dir.as_deref(), &parent.root, reg)?;
     let parent_engine = parent.engine.unwrap_or(Engine::Claude);

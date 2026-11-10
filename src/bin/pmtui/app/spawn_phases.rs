@@ -9,9 +9,7 @@
 //! Every method stays an inherent method of `App` at the same visibility, so nothing that calls one
 //! changed.
 
-use agent_manager::registry::{
-    LaunchKind, LaunchRecord, LaunchState, MAX_CHILDREN_PER_PARENT, SpawnOutcome,
-};
+use agent_manager::registry::{LaunchKind, LaunchRecord, LaunchState, SpawnOutcome};
 use agent_manager::spawn::{
     self, ErrorCode, NextAction, NextActionKind, ReceiptState, SpawnError, SpawnReceipt,
 };
@@ -175,20 +173,6 @@ impl App {
             Ok(plan) => plan,
             Err(PlanRefusal::Refused(refusal)) => {
                 return self.fail(job, refusal.code, refusal.message);
-            }
-            // WAITS, rather than being answered. Its `claimed` receipt reads as `in_progress` to the
-            // parent — `queued` is what the command says when there is NO receipt at all — so the next
-            // frame after a sibling retires stages it with nothing to re-ask.
-            Err(PlanRefusal::NotYet) => {
-                self.note_once(
-                    format!("queued:{}", job.id()),
-                    format!(
-                        "spawn: {} already has {MAX_CHILDREN_PER_PARENT} children running; {} is queued",
-                        job.request.parent_session,
-                        job.id()
-                    ),
-                );
-                return SpawnPhase::Claimed;
             }
         };
         let seed = NewSession {

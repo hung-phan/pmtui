@@ -123,11 +123,7 @@ fn spawn_skill_body_names_the_command_request_id_and_every_state() {
             "rerun the same command, with the same `--request-id`, later.",
         ),
         (
-            &[
-                "`nested_spawn_refused`",
-                "`child_limit_reached`",
-                "`dir_not_allowed`",
-            ][..],
+            &["`nested_spawn_refused`", "`dir_not_allowed`"][..],
             "stop and ask the human.",
         ),
         (
@@ -164,15 +160,18 @@ fn spawn_skill_body_names_the_command_request_id_and_every_state() {
         );
     }
     assert!(prose.contains("A job cannot spawn."));
-    // THE LIMIT IS CONCURRENCY, not a cap on asking: over it, a request waits. Telling an agent to stop
-    // and ask a human made it choose between doing that work itself and interrupting someone.
+    // THERE IS NO CAP ON ASKING, and now none on running either. The skill used to say extra
+    // children "wait their turn", under a per-parent cap of five that counted ROWS — so a sibling
+    // that failed or was cancelled held its place and five of them blocked a parent for good. The
+    // cap is gone; pacing is `spawn::MAX_UNFINISHED_PER_PARENT` at discovery, which an agent never
+    // sees. It must not ration, and it must not be sent to a human over a number.
     assert!(
-        prose.contains("wait their turn"),
-        "the skill must say that extra children queue"
+        prose.contains("Ask for the children the work needs"),
+        "the skill must not have an agent ration its own fan-out"
     );
     assert!(
-        !prose.contains("stop and ask the human.\n"),
-        "and must not still send an agent to a human at the fifth child"
+        !prose.contains("wait their turn") && !prose.contains("child_limit_reached"),
+        "no cap, and no code for one that an agent could never receive"
     );
     // A WORKTREE IS WHERE THE WORK IS. A parent that does not know its child committed elsewhere reports
     // "done" and leaves a human looking at an unchanged checkout.

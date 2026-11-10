@@ -6,7 +6,7 @@
 //! resumes it from the row's launch state instead of launching again.
 
 use super::*;
-use agent_manager::registry::{LaunchRecord, LaunchState, MAX_CHILDREN_PER_PARENT, SpawnOutcome};
+use agent_manager::registry::{LaunchRecord, LaunchState, SpawnOutcome};
 use agent_manager::spawn::{
     self, ErrorCode, NextActionKind, ReceiptState, SpawnArgs, SpawnReceipt, SpawnRequest,
 };
@@ -1196,7 +1196,7 @@ fn pmd_holding_driver_lock_defers_launch_to_a_later_step() {
 }
 
 #[test]
-fn sixteen_unfinished_requests_per_parent_are_processed_and_the_rest_wait() {
+fn sixteen_requests_are_read_per_pass_and_every_one_of_them_runs() {
     let mut b = broker();
     for n in 1..=17 {
         b.publish(&req_id(n), args(&format!("task {n}")));
@@ -1209,8 +1209,8 @@ fn sixteen_unfinished_requests_per_parent_are_processed_and_the_rest_wait() {
     }
     assert_eq!(b.state(&req_id(17)), None, "the seventeenth waits");
 
-    // Not `settle`: the ones over the concurrency limit stay in flight on purpose, so there is nothing
-    // to settle to while five children are alive.
+    // Not `settle`: the ones over the per-pass window stay in flight on purpose, so there is
+    // nothing to settle to while the discovered ones are alive.
     for _ in 0..30 {
         b.step();
     }
@@ -1221,14 +1221,17 @@ fn sixteen_unfinished_requests_per_parent_are_processed_and_the_rest_wait() {
     let ready = (1..=17)
         .filter(|n| b.state(&req_id(*n)) == Some(ReceiptState::Ready))
         .count();
-    assert_eq!(ready, MAX_CHILDREN_PER_PARENT);
-    assert_eq!(b.pane.steps().len(), MAX_CHILDREN_PER_PARENT);
-    // THE LIMIT IS HOW MANY RUN AT ONCE, so the ones over it WAIT rather than being refused: no error
-    // code, and a receipt that still reads as queued to the parent. Refusing them made an agent choose
-    // between doing that work itself and bothering a human, when the answer is "shortly".
-    // THE LIMIT IS HOW MANY RUN AT ONCE, so everything over it WAITS rather than being refused: no error
-    // code anywhere, and a `claimed` receipt that still reads as queued to the parent. Refusing them made
-    // an agent choose between doing that work itself and bothering a human, when the answer is "shortly".
+    // ALL SEVENTEEN RUN, and that is the measured shape of this bound rather than an oversight.
+    // `MAX_UNFINISHED_PER_PARENT` paces how many requests are READ PER PASS; it is not a ceiling
+    // on how many children run. The seventeenth is read on the next `discover` and launches too.
+    // With the per-parent cap of five gone there is no concurrency ceiling left at all — the only
+    // bounds are the engine's own rate limits and a human watching the rows appear.
+    assert_eq!(ready, 17, "every request eventually runs");
+    assert_eq!(b.pane.steps().len(), 17);
+    // THE WINDOW IS A PACING BOUND, so everything over it WAITS rather than being refused: no error
+    // code anywhere, and a `claimed` receipt that still reads as queued to the parent. Refusing them
+    // made an agent choose between doing that work itself and bothering a human, when the answer is
+    // "shortly".
     // (The seventeenth is read on the later discovery, because a `ready` receipt is settled and frees a
     // slot in the per-parent request window — it then queues like the rest.)
     for n in 1..=17 {
@@ -1241,9 +1244,13 @@ fn sixteen_unfinished_requests_per_parent_are_processed_and_the_rest_wait() {
         );
         assert_eq!(b.error_code(&req_id(n)), None, "{n} is not an error");
     }
+    // AND NOTHING IS LEFT WAITING. A job leaves `spawn.jobs` once it has LAUNCHED, which frees
+    // window room at once — so the window bounds concurrent LAUNCHES, not concurrent children.
+    // Measured here: seventeen requests, seventeen running children, an empty queue. With the
+    // per-parent cap of five gone, nothing in this product bounds how many children a parent runs.
     assert!(
-        !b.app.spawn.jobs.is_empty(),
-        "the queued ones are still in flight, waiting for a slot"
+        b.app.spawn.jobs.is_empty(),
+        "nothing is still waiting: the window paces launches, it does not cap children"
     );
 }
 
@@ -1333,15 +1340,18 @@ fn a_job_runs_in_the_project_directory_when_no_worktree_can_be_made() {
     );
 }
 
-/// THE SIXTH CHILD IS NOT A FAILURE. It used to be answered `child_limit_reached`, which left an agent
-/// choosing between doing that work itself and bothering a human; now it holds its `claimed` receipt —
-/// `queued` to the parent — and stages when a sibling leaves. Nothing is written that an agent must act on.
+/// A SIXTH CHILD JUST RUNS. INVERTED when the per-parent cap was removed: this used to assert the
+/// sixth request held a `claimed` receipt and staged nothing, because five siblings filled the
+/// parent. The cap counted ROWS — a sibling that failed, was cancelled or ended with uncommitted
+/// work kept its row and therefore its place — so five corpses blocked a parent forever, answered
+/// with `PlanRefusal::NotYet`, which is not an error an agent can act on. Pacing is
+/// `spawn::MAX_UNFINISHED_PER_PARENT` at discovery now, and five is nowhere near it.
 #[test]
-fn a_sixth_child_is_queued_rather_than_refused() {
+fn a_sixth_child_launches_because_there_is_no_per_parent_cap() {
     let mut b = broker();
     Registry::update(&b.registry, |registry| {
         let template = registry.projects[0].clone();
-        for n in 0..MAX_CHILDREN_PER_PARENT {
+        for n in 0..5 {
             let mut child = template.clone();
             child.id = format!("kid-{n}");
             child.spawned_by = Some("service".into());
@@ -1355,9 +1365,9 @@ fn a_sixth_child_is_queued_rather_than_refused() {
         b.step();
     }
 
-    assert_eq!(b.state(&req_id(1)), Some(ReceiptState::Claimed), "queued");
+    assert_eq!(b.state(&req_id(1)), Some(ReceiptState::Ready), "it ran");
     assert_eq!(b.error_code(&req_id(1)), None, "and not an error");
-    assert!(b.pane.steps().is_empty(), "nothing was launched");
+    assert_eq!(b.pane.steps().len(), 1, "one launch");
     assert_eq!(
         Registry::load(&b.registry)
             .unwrap()
@@ -1365,55 +1375,8 @@ fn a_sixth_child_is_queued_rather_than_refused() {
             .iter()
             .filter(|row| row.spawned_by.is_some())
             .count(),
-        MAX_CHILDREN_PER_PARENT,
-        "and no sixth row was staged"
-    );
-}
-
-/// A FREED SLOT STARTS THE NEXT ONE, with nothing re-asked. The queue is only useful if it drains: when
-/// a child leaves the session list, the request that was waiting stages on the next frame under the id it
-/// already had.
-#[test]
-fn a_queued_request_starts_as_soon_as_a_sibling_leaves() {
-    let mut b = broker();
-    for n in 1..=MAX_CHILDREN_PER_PARENT as u32 + 1 {
-        b.publish(&req_id(n), args(&format!("task {n}")));
-    }
-    b.discover();
-    for _ in 0..30 {
-        b.step();
-    }
-    let running: Vec<u32> = (1..=MAX_CHILDREN_PER_PARENT as u32 + 1)
-        .filter(|n| b.state(&req_id(*n)) == Some(ReceiptState::Ready))
-        .collect();
-    assert_eq!(running.len(), MAX_CHILDREN_PER_PARENT, "{running:?}");
-    let waiting = (1..=MAX_CHILDREN_PER_PARENT as u32 + 1)
-        .find(|n| b.state(&req_id(*n)) == Some(ReceiptState::Claimed))
-        .expect("one is queued");
-
-    // Retire one child the way the sweep does: its row leaves the registry.
-    let mut reg = Registry::load(&b.registry).unwrap();
-    let child = reg
-        .projects
-        .iter()
-        .find(|row| row.spawned_by.is_some())
-        .map(|row| row.id.clone())
-        .expect("a child row");
-    reg.projects.retain(|row| row.id != child);
-    reg.save(&b.registry).unwrap();
-
-    for _ in 0..30 {
-        b.step();
-    }
-    assert_eq!(
-        b.state(&req_id(waiting)),
-        Some(ReceiptState::Ready),
-        "the queued request started once there was room"
-    );
-    assert_eq!(
-        b.error_code(&req_id(waiting)),
-        None,
-        "and was never refused"
+        6,
+        "a sixth row was staged"
     );
 }
 
