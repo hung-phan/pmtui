@@ -350,7 +350,7 @@ pmtui message --list [--json] [--registry <path>]
 |---|---|
 | 0 | delivered — it arrives as the peer's next turn |
 | 3 | the pane cannot take it right now (a human is attached, a dialog is up, an unsent draft, another input mid-delivery) — ask again under the SAME arguments |
-| 1 | no such session, no agent that anything will start, the hop limit, or a SEND THAT STUCK |
+| 1 | no such session, A CHILD JOB RATHER THAN A PEER, no agent that anything will start, the hop limit, or a SEND THAT STUCK |
 | 2 | usage error |
 
 It creates NO state that outlives the send, which is why there is no broker: spawn needs the
@@ -359,6 +359,19 @@ writes no ledger, no `answers.json` and no row — so the command delivers it it
 same `send_decision` gate and the same `input.lock` as the dashboard's `s`, and no dashboard need
 be running. `--list` exits 0 whenever the registry could be read, and prints its JSON document on a
 nonzero exit too.
+
+A JOB IS NOT A PEER, and the CLI says so rather than letting the pane decide. `--list` omits job
+rows and `--to <job-id>` answers 1 — a job reports a result and exits, so it never becomes
+messageable and 3 would invite a loop with no exit. `docs/SPEC.md` already required the refusal;
+what enforced it instead was the composer probe, which is `is_bare_prompt || is_codex_composer ||
+claude_box` asked ENGINE-BLIND. Measured on a real pane: a well-behaved `claude -p` leaves only its
+result, so the probe finds nothing — but a running job that echoes a bare `>`/`❯`, or prints any
+`›`-led line that is not a numbered option, read as sendable, and `› Ready` is this repo's own stub
+fixture. That refusal also landed in the RETRYABLE family, so an agent polling a job spent its
+whole hop budget learning nothing. The guard runs BEFORE the hop ledger, so a refused job send
+costs no budget. A job is hidden rather than marked, unlike `self`: you need to know which row is
+you, whereas a job has no use in a list of who you can talk to — ask about one with
+`spawn --status`.
 
 A SEND THAT STUCK IS THE ONE WRITE FAILURE IN THE 1 FAMILY. Every other refusal from the write path
 is transient by construction — the lock was busy, a client attached, the pane changed while we
