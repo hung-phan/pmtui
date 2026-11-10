@@ -1019,3 +1019,82 @@ fn a_display_name_resolves_to_an_id_and_never_delivers_on_its_own() {
     assert_eq!(out.status, Status::Delivered, "{out:?}");
     assert_eq!(live.sends().len(), 1);
 }
+
+/// Mark `id` in this fixture's registry as a spawned JOB.
+fn make_job(registry: &std::path::Path, id: &str) {
+    use agent_manager::registry::{LaunchKind, LaunchRecord, LaunchState};
+    let mut reg = Registry::load(registry).unwrap();
+    let row = reg
+        .projects
+        .iter_mut()
+        .find(|entry| entry.id == id)
+        .expect("the fixture row");
+    row.launch = Some(LaunchRecord {
+        request_id: "req-1".into(),
+        args_hash: "hash".into(),
+        state: LaunchState::Started,
+        outcome: None,
+        kind: LaunchKind::Job,
+        branch: None,
+        base_commit: None,
+    });
+    reg.save(registry).unwrap();
+}
+
+/// A JOB IS NOT A PEER: it is out of the address book, and addressing one fails in the family that
+/// does not invite a retry.
+///
+/// Both halves were missing, and `docs/SPEC.md` already required the second ("the dashboard MUST
+/// refuse resume, restart, Autopilot, message and fork on a job row"). What decided it instead was
+/// the pane, by a glyph: the composer probe is `is_bare_prompt || is_codex_composer || claude_box`,
+/// asked engine-blind, so a running job that echoes a bare `>`/`❯` or prints any `›`-led line that
+/// is not a numbered option read as sendable — and `› Ready` is this repo's own stub fixture.
+/// Measured on a real pane: a well-behaved `claude -p` leaves only its result, so the probe found
+/// nothing and the send was refused as `Refused`, which is the RETRYABLE family — so an agent
+/// polling a job spent its whole hop budget learning nothing.
+#[test]
+fn a_job_is_not_a_peer_so_it_is_unlisted_and_addressing_one_does_not_invite_a_retry() {
+    let fx = Fx::new(&[("peer", "peer"), ("kid", "kid"), ("me", "mine")]);
+    make_job(&fx.registry, "kid");
+
+    let listing = MessageCli {
+        list: true,
+        to: None,
+        message: None,
+        registry: Some(fx.registry.clone()),
+        json: false,
+    };
+    let env = |key: &str| match key {
+        "PMTUI_SESSION" => Some("me".to_string()),
+        "TMUX" => Some("/tmp/tmux-0/scratch,1,0".to_string()),
+        _ => None,
+    };
+    let deps = MessageDeps {
+        env: &env,
+        clock: &At(NOW),
+        driver: &|_| Some(Box::new(FakePane::default()) as Box<dyn tmux::Driver>),
+        default_registry: &|| PathBuf::from("/nonexistent/pmtui-test/registry.json"),
+    };
+    let (_, peers) = run_list(&listing, &deps).expect("the registry is readable");
+    let ids: Vec<&str> = peers.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        ["peer", "me"],
+        "a job must not appear in the address book"
+    );
+
+    // Addressing it by id fails, and NOT in the retryable family: a job reports and exits, so
+    // asking again under the same arguments is a loop with no exit.
+    let out = fx.run(&fx.cli("kid", "are you done?"), "me", &[], NOW);
+    assert_eq!(out.status, Status::Failed, "{out:?}");
+    assert_eq!(exit_code(&out), 1, "a job send must not read as retryable");
+    assert!(
+        out.detail.contains("job") && out.detail.contains("spawn --status"),
+        "the refusal must name what it is and where to ask instead: {:?}",
+        out.detail
+    );
+
+    // It cost no hop: the guard runs before the ledger, so a refused job send spends no budget.
+    let hops = fx.state.join("message-hops").join("kid.json");
+    assert!(!hops.exists(), "a refused job send must not spend a hop");
+}

@@ -41,14 +41,16 @@ pub(crate) const HELP: &str = concat!(
     "one ordinary user turn, labelled with this session's id and how to reply.\n\n",
     "--to <session-id>   who to send to, as shown by --list\n",
     "--message <text>    what to say (required with --to)\n",
-    "--list              every session this one can reach, one line each\n",
+    "--list              every session this one can reach, one line each (no child jobs: a job\n",
+    "                    reports a result and exits, so nothing reads a message to it)\n",
     "--registry <path>   registry JSON (default: ~/.config/pmd/registry.json)\n",
     "--json              print one JSON document instead of one line\n\n",
     "A reply is just a send back: the recipient runs `pmtui message --to <this session>`.\n",
     "Nothing blocks and nothing is queued — their answer arrives as a turn in this pane.\n\n",
     "Exit codes: 0 delivered (or listed) · 3 try again shortly (a human is attached there, a\n",
     "dialog is up, the pane has an unsent draft, or another input is mid-delivery) · 1 failed\n",
-    "(no such session, its agent is not running, or the hop limit) · 2 usage error\n",
+    "(no such session, a child job rather than a peer, its agent is not running, or the hop\n",
+    "limit) · 2 usage error\n",
 );
 
 /// What one `pmtui message` command line asks for.
@@ -368,6 +370,14 @@ pub(crate) fn run_list(
     let peers = registry
         .projects
         .iter()
+        // A JOB IS NOT A PEER, so it is not in the address book. A job is a headless `claude -p` /
+        // `codex exec` run that reports a result and exits: it has no agent waiting for a turn and
+        // nothing reads a message to it (`docs/SPEC.md`: the dashboard MUST refuse message on a
+        // job row). Listing one would be advice that cannot work, because the dead-end hint for an
+        // unknown id says "see --list". A child's progress is `spawn --status`, not this.
+        // HIDDEN rather than marked, unlike `self`: you need to know which row is you, whereas a
+        // job has no use in a list of who you can talk to.
+        .filter(|entry| !entry.is_job())
         .map(|entry| {
             let session = tmux::session_name(&entry.id, &entry.root);
             // No driver (not inside tmux) is reported as "not live" rather than failing the
@@ -465,6 +475,29 @@ pub(crate) fn run_message(cli: &MessageCli, deps: &MessageDeps<'_>) -> MessageOu
         };
         return failed(&to, &from, 0, hint);
     };
+    // A JOB IS NOT A PEER. Refused HERE — before the hop ledger, so this costs no budget — and in
+    // the 1 family rather than 3, because a job never becomes messageable: it reports and exits, so
+    // "ask again under the same arguments" is a loop with no exit. Same reasoning as
+    // `tmux::SUBMIT_UNPROVEN`.
+    //
+    // WITHOUT THIS GUARD THE PANE DECIDED, AND IT DECIDES BY A GLYPH. Measured on a real pane: a
+    // well-behaved `claude -p` job leaves only its result on screen, so the composer probe finds
+    // nothing and the send is refused — but the probe is `is_bare_prompt(line) ||
+    // is_codex_composer(line) || claude_box(..)`, asked ENGINE-BLIND here, and a line trimming to
+    // `>` or `❯`, or any line starting `›` that is not a numbered option, matches. A running job
+    // that echoes a shell prompt or prints a `›`-led status line therefore read as sendable, and
+    // the delivery is a paste plus Enter into that run's stdin. `› Ready` is this repo's own stub
+    // fixture. That refusal also landed in the RETRYABLE family, so an agent polling a job spent
+    // its whole hop budget learning nothing.
+    if entry.is_job() {
+        return failed(
+            &to,
+            &from,
+            0,
+            "that is a child job, not a peer — a job reports a result and exits, so nothing reads \
+             a message to it; ask about it with `pmtui spawn --status`",
+        );
+    }
     let target = target_of(entry);
     // The hop ledger is consulted BEFORE the pane is touched, so a refused send costs nothing,
     // and advanced only once the limit allows it — a send the pane then refuses still counts,
