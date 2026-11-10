@@ -109,6 +109,17 @@ fn open_updates_row(host: &TmuxSocket, driver: &TmuxDriver) {
         Duration::from_secs(5)
     ));
     assert!(send_key(host.name(), "ui", "j"));
+    // `j` IS NOT A FRAME. Wait for the signal the keypress is FOR — the cursor landing on Updates
+    // is what puts that row's act in the keybar — because the caller captures once and asserts
+    // against it. Measured in CI: the capture held `Updates  0.1.21 · not checked yet` correctly
+    // while `Check for updates` was absent, i.e. it was the Theme-row frame, drawn before `j`
+    // was handled. Polling here makes all three of the caller's assertions deterministic.
+    assert!(wait_for_pane_text_within(
+        driver,
+        "ui",
+        "Check for updates",
+        Duration::from_secs(5)
+    ));
 }
 
 #[test]
