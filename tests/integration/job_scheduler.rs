@@ -661,14 +661,21 @@ fn supervisor_answers_from_the_goal_over_real_tmux() {
         "IFS= read -r l; printf '%s' \"$l\" | od -An -tx1 > '{}'",
         bytes_out.display()
     );
-    let sink_up = driver
-        .launch_interactive(
-            "pmsup-bytes",
-            &root,
-            &["sh".into(), "-c".into(), sink],
-            &agent_manager::tmux::ManagedEnv::default(),
-        )
-        .is_ok();
+    // The ERROR IS KEPT, because `.is_ok()` cost a release: this launch flaked once on a loaded
+    // CI runner and the failure could only say "could not launch the raw-byte sink pane", which
+    // names the symptom. `LaunchError` already tells apart a pane that never ran our argv from one
+    // that started and died from a tmux probe that errored — three different causes, one message.
+    let sink_launch = driver.launch_interactive(
+        "pmsup-bytes",
+        &root,
+        &["sh".into(), "-c".into(), sink],
+        &agent_manager::tmux::ManagedEnv::default(),
+    );
+    let sink_why = match &sink_launch {
+        Ok(_) => String::new(),
+        Err(error) => format!(": {error}"),
+    };
+    let sink_up = sink_launch.is_ok();
     let esc_sent = sink_up && driver.send_keys("pmsup-bytes", "ESC\u{1b}[Z END").is_ok();
     let esc_arrived = esc_sent
         && wait_until(Duration::from_secs(10), || {
@@ -770,7 +777,7 @@ fn supervisor_answers_from_the_goal_over_real_tmux() {
         "a pane must resolve `claude` to the STUB, or this test spends real tokens"
     );
     // PREMISE for Rule 3: nothing downstream sanitizes, so the harness must.
-    assert!(sink_up, "could not launch the raw-byte sink pane");
+    assert!(sink_up, "could not launch the raw-byte sink pane{sink_why}");
     assert!(
         esc_arrived,
         "PREMISE: `send_keys` must transmit ESC (0x1b) to the pane's process VERBATIM — if \
