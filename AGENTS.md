@@ -513,6 +513,16 @@ empty one, so an empty answer NAMES the file it read rather than blaming the id.
   `pmtui-spawn` is one dispatch, `agent-manager-coordinator` is the standing loop that turns the
   second into a queue run over many wakes. A test holds each one's rules, and the coordinator's
   tests assert it does NOT restate the spawn skill's outcome vocabulary — two copies drift.
+  THE COORDINATOR'S LOOP KNOWS BOTH FORMS, and had to be taught: it predates `--session`, so it
+  told a coordinator that a conversational part "is not ready to dispatch" — true only of a job,
+  which cannot be asked anything — and its collect step read `spawn --status` alone, where a
+  session child sits at `ready` for as long as it lives. In the JOB vocabulary `ready` means "still
+  running", so the loop would have waited for a result that never comes, which is the one mistake
+  the whole exit-code surface is shaped to prevent. The star topology survives as a stated DECISION
+  rather than a fact: a job could not be reached (no `ManagedEnv`), a session child can, and the
+  reason to keep results flowing through the hub is that nobody watches two children talking. Its
+  session section lists only what changes IN THE LOOP and sends the reader to `pmtui-spawn` for
+  what a session is, because that is the same no-repeat rule the tests already hold it to.
   EVERY SKILL IS WRITTEN IN SIMPLIFIED TECHNICAL ENGLISH (ASD-STE100): one instruction per
   sentence, 20 words at most, no metaphor, and no em-dash aside. A technical name (wake, nudge,
   marker, stop, job, peer) is kept and DEFINED on first use rather than replaced. Not a style

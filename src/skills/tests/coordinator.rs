@@ -138,9 +138,21 @@ fn it_says_how_to_split_work_and_when_not_to_dispatch() {
         prose.contains("names its own acceptance test"),
         "`done` has to mean something checkable"
     );
+    // A CONVERSATIONAL PART NOW HAS THREE ANSWERS, not two. The skill used to say such a part is
+    // "not ready to dispatch" and to do it yourself, which was true while every child was a job —
+    // a job cannot be asked anything. `--session` is exactly the missing third answer, so the
+    // sentence that sent a coordinator away from it had to go with the feature.
     assert!(
-        prose.contains("is not ready to dispatch"),
-        "work that needs a conversation must stay in the queue"
+        prose.contains("Such a part is not ready for a JOB"),
+        "a conversational part is refused for the JOB form, not for every form"
+    );
+    assert!(
+        prose.contains("Or stand up a child session for it"),
+        "and the third answer must be named where the reader is turned away"
+    );
+    assert!(
+        !prose.contains("is not ready to dispatch"),
+        "the old blanket refusal would hide the form that handles it"
     );
 }
 
@@ -171,9 +183,27 @@ fn it_keeps_integration_and_completion_with_the_human() {
 #[test]
 fn it_forbids_the_shapes_that_have_no_governor() {
     let prose = prose();
+    // A STAR, AND NOW BY CHOICE RATHER THAN BY FACT. While every child was a job this was simply
+    // true: a job has no `ManagedEnv` and cannot be reached. A child SESSION is a peer, so two
+    // children can talk, and the skill has to say the rule is a decision and why — nobody watches
+    // that conversation and every turn of it costs money.
     assert!(
-        prose.contains("Work goes out from you, and results come back to you"),
-        "children messaging each other has nothing limiting it at the hub"
+        prose.contains("Keep the work going out from you, and the results coming back to you"),
+        "the hub topology must survive as an explicit rule"
+    );
+    assert!(
+        prose.contains("A child session is a peer, so two of them CAN talk"),
+        "and it must admit the thing it is choosing against"
+    );
+    // The trap the job vocabulary sets for a session child: `ready` forever, and a coordinator
+    // that treats it as "still running" waits for a result that is never coming.
+    assert!(
+        prose.contains("It stays `ready` in `spawn --status`. Never wait for that to change."),
+        "a session child's `ready` must be disarmed where the loop reads it"
+    );
+    assert!(
+        prose.contains("Wait for a result from a child session."),
+        "and listed among the shapes with no governor"
     );
     // THERE IS NO PER-PARENT CAP to hold back for. The skill used to say a request over the limit
     // "waits its turn"; the cap it referred to counted ROWS, so dead siblings blocked a parent

@@ -1,6 +1,6 @@
 ---
 name: agent-manager-coordinator
-description: Run a session as a coordinator. Hold a queue of work, send independent parts to child jobs, collect their results each wake, and report. Invoke when your goal is larger than one session can do in order, and its parts can proceed without you. Not for doing the work yourself, and not for supervising other sessions, because a peer has its own human.
+description: Run a session as a coordinator. Hold a queue of work, send independent parts to child jobs, collect their results each wake, and report. Stand up a child session instead for a part that needs a conversation. Invoke when your goal is larger than one session can do in order, and its parts can proceed without you. Not for doing the work yourself, and not for supervising other sessions, because a peer has its own human.
 ---
 
 # Coordinate work across child jobs
@@ -15,6 +15,9 @@ Three skills divide this job, and none of them repeats another:
 - **this skill** holds the loop that turns those dispatches into a queue across many wakes.
 
 Read `pmtui-spawn` before your first dispatch. It states how to spawn. This skill does not repeat it.
+
+You can ask for two kinds of child. A JOB does one task, reports a result, and exits. A SESSION
+stays, and it holds a conversation. Most work is a job. The queue below is a queue of jobs.
 
 ## Your queue lives in your checkpoint
 
@@ -42,6 +45,10 @@ queue longer than one page belongs in a project file. Name that file here. Do no
    - `done`: move it to `done`. Name its branch as ready for the human.
    - `needs_human`: move it to `blockers`. Relay it. Never dispatch it again.
    - any other state: follow `pmtui-spawn`. Do not invent a retry policy here.
+
+   A CHILD SESSION IS NOT IN THIS STEP. It stays `ready` in that listing for as long as it runs.
+   `ready` is not a result for it, and no result is coming. Read its state with `message --list`
+   instead. Ask it for what you need with your `pmtui-message` skill.
 3. **Trim.** Remove finished children from `in_progress`. Shorten `done`.
 4. **Dispatch more.** Take work from `next` while slots are free. Dispatch them all before you ask
    about any of them. `pmtui-spawn` shows that pattern.
@@ -61,8 +68,27 @@ Split the work so that each part:
 - names its own acceptance test, so that `done` means something you can check; and
 - owns its own files. Two children sent to one file both commit, and then a person must choose.
 
-Some parts need a conversation first. Such a part is not ready to dispatch. Do that part yourself,
-or ask your human through your marker. Keep it in `next` until it has an answer.
+Some parts need a conversation. Such a part is not ready for a JOB, because a job cannot ask you
+anything. You now have three answers for one. Do that part yourself. Or ask your human through
+your marker. Or stand up a child session for it, as below.
+
+## A part that needs a conversation
+
+Add `--session` to your dispatch to make a child SESSION instead of a job. `pmtui-spawn` states the
+command. The child takes your Message as its first turn. It then runs until its human closes it.
+
+Use this for a part that needs many turns, or an answer from you. Use a job for every other part.
+A job is cheaper, and it ends by itself.
+
+Four things change in your loop. `pmtui-spawn` states what a session is.
+
+1. It reports no result. Nothing moves it to `done`.
+2. It stays `ready` in `spawn --status`. Never wait for that to change.
+3. Its state comes from `message --list`. Its answers come as turns in your own pane.
+4. You cannot cancel it, so never queue a cancel for it. Its human closes it.
+
+Keep one line for it in `in_progress`, and write the word `session` in that line. A later wake then
+knows not to wait for a result.
 
 ## Set your own cadence, and always report new facts
 
@@ -98,8 +124,10 @@ it, put it in `next` like any other work. When you decline it, say so. See `pmtu
 
 ## Do not
 
-- **Let children message each other.** Work goes out from you, and results come back to you.
-  Nothing limits a conversation between children.
+- **Let children message each other.** A child session is a peer, so two of them CAN talk. Keep
+  the work going out from you, and the results coming back to you. Nobody watches a conversation
+  between two children, and each turn of it costs money.
+- **Wait for a result from a child session.** There is none. Read its state, or ask it.
 - **Hold back children to stay under a limit.** Ask for the children the work needs.
 - **Keep a child alive out of politeness.** Cancel a child that is no longer worth the wait.
 - **Escalate several decisions together.** One decision at a time, through your marker, in the

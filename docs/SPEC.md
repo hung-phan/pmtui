@@ -347,9 +347,20 @@ at a fast cadence asks to be treated as stuck.
 The procedure does not repeat the spawn procedure. It adds the loop: harvest, decide what each
 finished child means, keep the queue current, and fill the free places.
 
-A child is told its task and nothing else, and nobody is at its terminal. So the procedure tells the
-worker that work which needs a conversation is not ready to give away, and that each part it does
-give away MUST own its own files and name how to check it.
+A child job is told its task and nothing else, and nobody is at its terminal. So the procedure tells
+the worker that each part it gives away MUST own its own files and name how to check it.
+
+Work that needs a conversation is not ready to give away as a JOB, because a job cannot be asked
+anything. The procedure MUST give the worker the other two answers as well: do that part itself, or
+ask for a child SESSION for it. It MUST also say what a child session does to the loop. A session
+reports no result, so the loop MUST NOT wait for one. The listing of children shows it as started
+for as long as it runs, and the procedure MUST say that this is not a result. Its state comes from
+the listing of sessions it can reach, and its answers arrive as turns.
+
+The procedure keeps the work going out from the coordinator and the results coming back to it. A
+child session is a peer, so two children CAN reach each other. The procedure MUST present that as a
+decision rather than as something the product prevents: nobody watches a conversation between two
+children, and every turn of it costs money.
 
 Integration stays with the person: the worker says a branch is ready and the person applies it. The
 worker MUST NOT merge for them, and MUST NOT say the project is complete.
