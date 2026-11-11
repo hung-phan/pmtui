@@ -19,10 +19,12 @@
 session owns **one persistent tmux terminal**. It gets nudged on a cadence so it keeps making
 progress toward a goal you set, and reaches you **only when a decision genuinely needs a human**.
 
-![The Sessions view: the session rail grouped by who drives each row, with the selected session's live transcript and its open decision beside it](docs/Sessions.png)
+![The Sessions view: the session rail grouped by who drives each row, with a coordinator's children indented beneath it, and the selected session's live transcript and open decision beside it](docs/Sessions.png)
 
 **Sessions** — every project grouped by who drives it, with the selected session's live transcript
-beside it. The rail tells you where you are needed; the pane tells you why.
+beside it. The rail tells you where you are needed; the pane tells you why. A session an agent
+asked for is indented under the one that asked, so a coordinator and its fleet read as the tree
+they are — and a child that starts waiting on you moves up to NEEDS YOU, where you cannot miss it.
 
 ![The Tasks view: every session as a card in the Paused, Needs You, Pending, Autopilot and Working columns](docs/Tasks.png)
 
