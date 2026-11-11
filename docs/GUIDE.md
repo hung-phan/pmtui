@@ -468,6 +468,19 @@ Unless it is paused, a session waiting on you is listed under NEEDS YOU whatever
 session whose terminal is gone and that is not waiting on you shows as `offline` under
 PAUSED / OFFLINE, keeping its `[A]`/`[S]` tag.
 
+Inside a group, a session you asked another agent to create is indented under it, so a coordinator
+and its fleet read as the tree they are:
+
+```
+  AUTOPILOT (3) · pmd drives
+  ● api-migration    working       [A] 20s
+  └ ● schema-split   working       [A]  4s
+    └ ○ codegen      monitoring    [A]  1m
+```
+
+The indent never hides anything: if that child starts waiting on you it moves to NEEDS YOU and is
+drawn flush at the top, where you cannot miss it. The session's own panel names its parent.
+
 Per row: a state glyph, the session id, what it is doing, the tier, and how long since it
 last did anything. **The glyph means activity, not liveness:** `●` = the agent is working
 *now*, `○` = idle or finished. A row that wants you is filled — **yellow** if the decision is

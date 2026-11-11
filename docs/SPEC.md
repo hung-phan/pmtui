@@ -302,7 +302,8 @@ than something to ask again, because asking again cannot change it.
 ### Concurrency
 
 A parent asks for the children the work needs. The product sets no limit on how many children one
-parent may have, and no limit on how many run at the same time.
+parent may have, and no limit on how many run at the same time. It sets no limit on DEPTH either: a
+session that a worker asked for may ask for children of its own.
 
 The dashboard paces only how many requests it reads for one parent in one pass. A request read on a
 later pass reports that it is in progress. The product MUST NOT write anything that an agent must
@@ -310,6 +311,11 @@ then act on.
 
 The limits that remain are outside the product: the rate limits of the agent engine, and a person
 who can see every child as a row.
+
+A session that was asked for used to be refused its own children. That rule let a worker give away
+work, but never give away the coordination of work, and the tree it produced was not the shape of
+the task. A job still cannot ask for a child, because the product gives a job no way to name itself
+to the command.
 
 A per-parent limit of five used to apply here. It counted ROWS rather than running children, so a
 child that failed, was cancelled, or ended with work left uncommitted held a place for as long as
@@ -428,6 +434,17 @@ The dashboard has three numbered views of the same state:
 | **Settings view** | one row for each setting |
 
 A number key selects a view. It does not switch between two views.
+
+The list of sessions is grouped by what it needs from the person first: the sessions that wait for
+them, then the sessions the supervisor drives, then the sessions they drive, then the sessions that
+are stopped. Inside one group the list reads as the tree of the work: a session is followed by the
+sessions it asked for, each one step further in.
+
+The tree MUST NOT become the outer grouping. A session that waits for a person belongs at the top of
+the list, and not folded under a parent that waits for nothing: a row a person must go looking for is
+a row the product failed to show them. So a session whose parent is in another group is drawn at the
+same level as a session with no parent, and the product names its parent in the detail of the
+session instead.
 
 The groups in the Task view are observations of the live state. They are not a workflow status that a
 person sets. A card MUST NOT move into a state that the product does not have. There is no Done group. A

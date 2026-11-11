@@ -27,7 +27,7 @@ fn row_text_has_icon_id_posture_and_tier() {
 fn mode_tags_remain_visible_and_semantically_distinct() {
     let mut v = view("session", Posture::Working, vec![]);
     v.tier = Some(Tier::Autopilot);
-    let autopilot = project_row_line(&v, ROW_FIXED_W, 1_000);
+    let autopilot = project_row_line(&v, ROW_FIXED_W, 1_000, 0);
     let tag = autopilot
         .spans
         .iter()
@@ -37,7 +37,7 @@ fn mode_tags_remain_visible_and_semantically_distinct() {
     assert!(tag.style.add_modifier.contains(Modifier::BOLD));
 
     v.tier = Some(Tier::Standard);
-    let standard = project_row_line(&v, ROW_FIXED_W, 1_000);
+    let standard = project_row_line(&v, ROW_FIXED_W, 1_000, 0);
     let tag = standard
         .spans
         .iter()
@@ -162,7 +162,7 @@ fn the_age_column_is_shed_before_the_chat_chip_not_after() {
     );
 
     // And the row still fits the pane it was given, chip included.
-    let row = project_row_line(&v, ROW_AGE_W, now);
+    let row = project_row_line(&v, ROW_AGE_W, now, 0);
     assert!(
         row.width() <= usize::from(ROW_AGE_W),
         "row is {} cols wide at a {ROW_AGE_W}-col pane",
@@ -177,7 +177,7 @@ fn row_age_never_widens_the_row_past_its_pane() {
     let mut v = view("sixteen-char-idx", Posture::Stuck, vec![]);
     v.last_activity = Some(0);
     v.stops = vec![stop("s1", "publish", RiskClass::Hard)];
-    let row = project_row_line(&v, ROW_AGE_W, 51 * 7 * 86_400); // widest age: `51w`
+    let row = project_row_line(&v, ROW_AGE_W, 51 * 7 * 86_400, 0); // widest age: `51w`
     assert!(
         row.width() <= usize::from(ROW_AGE_W),
         "row is {} wide: {row:?}",
@@ -273,7 +273,7 @@ fn attention_row_uses_a_semantic_foreground_without_a_fill() {
     }
     // The id is ORDINARY TEXT, and attention must not turn it into a filled state label: which
     // session is shouting has to be readable without depending on a hue.
-    let id = project_row_line(&asking, 80, 1_000)
+    let id = project_row_line(&asking, 80, 1_000, 0)
         .spans
         .into_iter()
         .find(|span| span.content.contains("asking"))
@@ -290,7 +290,7 @@ fn attention_row_uses_a_semantic_foreground_without_a_fill() {
 
 #[test]
 fn every_secondary_label_keeps_the_same_left_aligned_field() {
-    let attention = project_row_line(&view("x", Posture::NeedsYou, vec![]), 80, 1_000)
+    let attention = project_row_line(&view("x", Posture::NeedsYou, vec![]), 80, 1_000, 0)
         .spans
         .into_iter()
         .find(|s| s.content.contains("needs you"))
@@ -307,7 +307,7 @@ fn every_secondary_label_keeps_the_same_left_aligned_field() {
 
     let mut calm_view = view("y", Posture::Monitoring, vec![]);
     calm_view.session_live = true;
-    let calm = project_row_line(&calm_view, 80, 1_000)
+    let calm = project_row_line(&calm_view, 80, 1_000, 0)
         .spans
         .into_iter()
         .find(|s| s.content.contains("monitoring"))
@@ -361,7 +361,7 @@ fn semantic_states_do_not_change_the_fixed_row_width() {
     ];
     for v in states {
         for w in 24u16..=64 {
-            let row = project_row_line(&v, w, 1_000);
+            let row = project_row_line(&v, w, 1_000, 0);
             assert!(
                 row.width() <= usize::from(w).max(usize::from(ROW_FIXED_W)),
                 "{} overflows at {w}: {} cols",
@@ -391,7 +391,7 @@ fn wide_display_names_keep_the_status_and_tier_on_the_floor_width_row() {
             v.display_name = Some(name.into());
             v.tier = Some(tier);
             v.session_live = true;
-            let row = project_row_line(&v, content_w, 1_000);
+            let row = project_row_line(&v, content_w, 1_000, 0);
             let text: String = row.spans.iter().map(|span| span.content.as_ref()).collect();
             assert_eq!(row.width(), usize::from(ROW_FIXED_W), "{text}");
             assert!(text.contains(" needs you "), "{text}");
@@ -419,8 +419,8 @@ fn a_driven_row_wears_no_special_colour_on_its_id() {
     let mut v = view("driven", Posture::Working, vec![]);
     v.tier = Some(Tier::Autopilot);
     v.session_live = true;
-    let first = project_row_line(&v, 80, 1_000);
-    let second = project_row_line(&v, 80, 1_000);
+    let first = project_row_line(&v, 80, 1_000, 0);
+    let second = project_row_line(&v, 80, 1_000, 0);
     assert_eq!(
         first, second,
         "row styling must not depend on wall-clock phase"
@@ -433,7 +433,7 @@ fn a_driven_row_wears_no_special_colour_on_its_id() {
     // Cyan here used to seed a TachyonFX hue sweep. The sweep is gone, so an autopilot id reads
     // exactly like a standard one — the lane, the `[A]` tag and `control pmd` carry that fact.
     let standard = view("plain", Posture::Working, vec![]);
-    let plain = project_row_line(&standard, 80, 1_000);
+    let plain = project_row_line(&standard, 80, 1_000, 0);
     let plain_id = plain
         .spans
         .iter()
@@ -666,7 +666,7 @@ fn row_groups_keep_attention_first_and_put_dead_terminals_offline() {
         v.tier = Some(tier);
         v.posture = Posture::Working;
         assert_eq!(row_group(&v), RowGroup::Paused, "{tag} offline row");
-        let offline = project_row_line(&v, ROW_FIXED_W, 1_000);
+        let offline = project_row_line(&v, ROW_FIXED_W, 1_000, 0);
         let text: String = offline
             .spans
             .iter()
@@ -782,6 +782,9 @@ fn the_sort_and_the_screen_agree_on_row_order() {
     let app = live_sectioned_app();
     let mut sorted = app.projects.clone();
     sorted.sort_by(row_order);
+    // The WHOLE pipeline `refresh` runs, not half of it: the lineage pass reorders within a group,
+    // so a test that stopped at the sort would stop checking the thing most likely to drift.
+    arrange_lineage(&mut sorted);
     let sorted_app = App {
         projects: sorted.clone(),
         ..live_sectioned_app()
@@ -857,8 +860,8 @@ fn the_chat_chip_survives_beside_a_hard_stop() {
         "the label must survive at 44 columns: {tight:?}"
     );
     // …and the row still fits the pane it was given.
-    assert!(project_row_line(&v, 44, 1_000).width() <= 44);
-    let line = project_row_line(&v, 44, 1_000);
+    assert!(project_row_line(&v, 44, 1_000, 0).width() <= 44);
+    let line = project_row_line(&v, 44, 1_000, 0);
     let attached = line
         .spans
         .iter()
@@ -878,7 +881,7 @@ fn the_chat_chip_survives_beside_a_hard_stop() {
 fn a_disabled_attention_row_recedes_as_paused() {
     let mut v = view("x", Posture::NeedsYou, vec![]);
     v.enabled = false;
-    let line = project_row_line(&v, 80, 1_000);
+    let line = project_row_line(&v, 80, 1_000, 0);
     let label = line
         .spans
         .iter()
@@ -901,7 +904,7 @@ fn a_hard_stop_paints_the_row_red_even_when_the_agent_declared_it_low() {
         vec![stop("s1", "publish", RiskClass::Low)],
     );
     assert_eq!(attention::level(&v), attention::Level::Hard);
-    let label = project_row_line(&v, 80, 1_000)
+    let label = project_row_line(&v, 80, 1_000, 0)
         .spans
         .into_iter()
         .find(|s| s.content.contains("needs you"))
@@ -1036,15 +1039,15 @@ fn session_row_head_width_is_unchanged_for_spawned_rows() {
     spawned.spawned_by = Some("parent-with-a-very-long-session-id".into());
     spawned.spawned_by_label = Some("發布協調工作流程 parent label that is far too long".into());
     assert_eq!(
-        project_row_line(&spawned, content_w, 1_000),
-        project_row_line(&plain, content_w, 1_000),
+        project_row_line(&spawned, content_w, 1_000, 0),
+        project_row_line(&plain, content_w, 1_000, 0),
         "spawn lineage must not change the Session row"
     );
 
     let mut paused = agent_loop_view("child");
     paused.enabled = false;
     for v in [&spawned, &staged_view("child"), &paused] {
-        let row = project_row_line(v, content_w, 1_000);
+        let row = project_row_line(v, content_w, 1_000, 0);
         assert_eq!(row.width(), usize::from(ROW_FIXED_W), "{row:?}");
     }
 
@@ -1060,4 +1063,196 @@ fn session_row_head_width_is_unchanged_for_spawned_rows() {
         text_cols(kid.trim_end()),
         "{rows:#?}"
     );
+}
+
+/// A lineage fixture in ONE group: `api-migration` roots a tree, `release-prep` stands alone.
+///
+/// `row_order` sorts these by label inside a group, so the sorted order is api-migration, codegen,
+/// docs-pass, release-prep, schema-split — deliberately interleaved, so an arrangement that merely
+/// preserved the sort would fail every assertion below.
+fn lineage_views() -> Vec<ProjectView> {
+    let child = |id: &str, parent: Option<&str>| {
+        let mut v = view(id, Posture::Working, vec![]);
+        v.mode = Mode::AgentLoop;
+        v.tier = Some(Tier::Autopilot);
+        v.session_live = true;
+        v.spawned_by = parent.map(str::to_string);
+        v
+    };
+    let mut views = vec![
+        child("api-migration", None),
+        child("schema-split", Some("api-migration")),
+        child("codegen", Some("schema-split")),
+        child("docs-pass", Some("api-migration")),
+        child("release-prep", None),
+    ];
+    views.sort_by(row_order);
+    views
+}
+
+fn ids(views: &[ProjectView]) -> Vec<&str> {
+    views.iter().map(|v| v.id.as_str()).collect()
+}
+
+/// EACH CHILD DIRECTLY AFTER ITS OWN PARENT, depth first, and a root's own place is the one the
+/// sort gave it. This is the order `j`/`k` walks, so it is also the order the list draws.
+#[test]
+fn the_tree_reads_as_the_work_was_structured() {
+    let mut views = lineage_views();
+    assert_eq!(
+        ids(&views),
+        [
+            "api-migration",
+            "codegen",
+            "docs-pass",
+            "release-prep",
+            "schema-split"
+        ],
+        "the sort alone interleaves the tree"
+    );
+
+    arrange_lineage(&mut views);
+
+    assert_eq!(
+        ids(&views),
+        [
+            "api-migration",
+            "docs-pass",
+            "schema-split",
+            "codegen",
+            "release-prep"
+        ],
+        "a parent is followed by its descendants, each in the order the sort gave them"
+    );
+    let members: Vec<usize> = (0..views.len()).collect();
+    assert_eq!(
+        views
+            .iter()
+            .enumerate()
+            .map(|(i, _)| row_depth(&views, &members, i))
+            .collect::<Vec<_>>(),
+        [0, 1, 1, 2, 0],
+        "and the drawn depth is the distance to its root"
+    );
+}
+
+/// URGENCY OUTRANKS LINEAGE, and this is the assertion that says so. A needy child is drawn at the
+/// top of `NEEDS YOU`, flush, rather than indented under a parent that is in another section — a
+/// row folded under a parent elsewhere is a row a human has to go looking for, and telling them
+/// which agent needs them is the product's one job. Lineage stays a CUE there: `from <parent>` is
+/// in the preview head.
+#[test]
+fn a_needy_child_is_never_indented_under_a_parent_in_another_section() {
+    let mut parent = view("api-migration", Posture::Working, vec![]);
+    parent.mode = Mode::AgentLoop;
+    parent.tier = Some(Tier::Autopilot);
+    parent.session_live = true;
+    let mut needy = view(
+        "docs-pass",
+        Posture::NeedsYou,
+        vec![stop("s1", "publish", RiskClass::Hard)],
+    );
+    needy.mode = Mode::AgentLoop;
+    needy.tier = Some(Tier::Autopilot);
+    needy.session_live = true;
+    needy.spawned_by = Some("api-migration".into());
+
+    let mut views = vec![parent, needy];
+    views.sort_by(row_order);
+    arrange_lineage(&mut views);
+
+    // Different groups, so the child roots its own section.
+    assert_eq!(ids(&views), ["docs-pass", "api-migration"]);
+    let needy_at = 0;
+    let members = vec![needy_at];
+    assert_eq!(
+        row_depth(&views, &members, needy_at),
+        0,
+        "an ancestor outside the group does not indent the row"
+    );
+
+    let app = App {
+        projects: views,
+        ..app_with(Vec::new(), UiMode::Normal)
+    };
+    let rows = session_rows(&app, 100, 20);
+    let drawn = rows
+        .iter()
+        .find(|row| row.contains("docs-pass"))
+        .unwrap_or_else(|| panic!("the needy child was not drawn: {rows:?}"));
+    assert!(
+        !drawn.contains('\u{2514}'),
+        "it must be drawn flush, with no tie: {drawn:?}"
+    );
+}
+
+/// THE INDENT IS PAID OUT OF THE NAME FIELD. `ROW_FIXED_W` is what every trailing item is admitted
+/// against, and that admission has shipped two regressions of its own — a badge no human could see,
+/// and a row that kept the age while dropping the chip saying why nothing was advancing. A tie that
+/// widened the head would move all of those thresholds at once.
+#[test]
+fn the_tie_costs_name_columns_and_never_row_columns() {
+    let mut v = view("a-very-long-session-name", Posture::Working, vec![]);
+    v.mode = Mode::AgentLoop;
+    v.tier = Some(Tier::Autopilot);
+    v.session_live = true;
+
+    let flush = project_row_line(&v, ROW_FIXED_W, 1_000, 0);
+    for depth in 1..=ROW_MAX_INDENT {
+        let tied = project_row_line(&v, ROW_FIXED_W, 1_000, depth);
+        assert_eq!(
+            tied.width(),
+            flush.width(),
+            "depth {depth} changed the row's width"
+        );
+        let text: String = tied.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(
+            text.starts_with(&format!(
+                "{}\u{2514} ",
+                " ".repeat((depth - 1) * ROW_INDENT_W)
+            )),
+            "the tie leads the row at depth {depth}: {text:?}"
+        );
+        assert!(
+            text.contains("[A]"),
+            "the tier tag still lands inside the fixed head at depth {depth}: {text:?}"
+        );
+    }
+
+    // Deeper than the cap draws the cap, rather than eating more of the name.
+    let capped: String = project_row_line(&v, ROW_FIXED_W, 1_000, 9)
+        .spans
+        .iter()
+        .map(|s| s.content.as_ref())
+        .collect();
+    let at_cap: String = project_row_line(&v, ROW_FIXED_W, 1_000, ROW_MAX_INDENT)
+        .spans
+        .iter()
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert_eq!(capped, at_cap);
+}
+
+/// DEFENSIVE, and cheap. Lineage cannot point in a circle today — a child names a row that already
+/// existed — but an arrangement that dropped or repeated a row would silently desync `j`/`k` from
+/// the screen, so the pass is written to place every row exactly once whatever the data says.
+#[test]
+fn a_lineage_that_points_in_a_circle_still_places_every_row_once() {
+    let mut a = view("a", Posture::Working, vec![]);
+    a.mode = Mode::AgentLoop;
+    a.tier = Some(Tier::Autopilot);
+    a.session_live = true;
+    a.spawned_by = Some("b".into());
+    let mut b = view("b", Posture::Working, vec![]);
+    b.mode = Mode::AgentLoop;
+    b.tier = Some(Tier::Autopilot);
+    b.session_live = true;
+    b.spawned_by = Some("a".into());
+
+    let mut views = vec![a, b];
+    arrange_lineage(&mut views);
+
+    let mut drawn = ids(&views);
+    drawn.sort_unstable();
+    assert_eq!(drawn, ["a", "b"], "every row, exactly once");
 }

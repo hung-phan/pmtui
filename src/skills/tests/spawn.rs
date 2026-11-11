@@ -122,10 +122,7 @@ fn spawn_skill_body_names_the_command_request_id_and_every_state() {
             &["`request_unwritable`"][..],
             "rerun the same command, with the same `--request-id`, later.",
         ),
-        (
-            &["`nested_spawn_refused`", "`dir_not_allowed`"][..],
-            "stop and ask the human.",
-        ),
+        (&["`dir_not_allowed`"][..], "stop and ask the human."),
         (
             &[
                 "`invalid_argument`",
@@ -409,12 +406,17 @@ fn the_skill_tells_the_two_forms_apart() {
     // depth rule is in `plan_child`, which refuses ANY parent whose own `spawned_by` is set,
     // whatever kind it is. A job differs by being unable to run the command at all — it is given
     // no `ManagedEnv` — but the outcome a coordinator plans around is the same refusal.
+    // A SESSION MAY COORDINATE, at any depth: the old `nested_spawn_refused` rule is gone, and the
+    // asymmetry that remains is about REACHABILITY rather than permission — a job is given no
+    // `ManagedEnv`, so it cannot name itself to the command at all.
     assert!(
-        prose.contains("It cannot ask for its own children."),
-        "the depth rule is stated where the differences are listed"
+        prose.contains(
+            "It can ask for children of its own. A job cannot, because a job gets no way to ask."
+        ),
+        "a session's own children are allowed, and the job's difference is named"
     );
     assert!(
-        !prose.contains("It can ask for its own children"),
-        "and the opposite is never promised"
+        !prose.contains("nested_spawn_refused"),
+        "a code nothing can construct must not be left in a procedure"
     );
 }

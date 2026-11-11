@@ -230,7 +230,6 @@ fn error_codes_and_next_action_kinds_use_the_spec_names() {
         (ErrorCode::RequestConflict, "request_conflict"),
         (ErrorCode::RequestUnwritable, "request_unwritable"),
         (ErrorCode::ParentNotFound, "parent_not_found"),
-        (ErrorCode::NestedSpawnRefused, "nested_spawn_refused"),
         (ErrorCode::DirNotFound, "dir_not_found"),
         (ErrorCode::DirNotAllowed, "dir_not_allowed"),
         (ErrorCode::MessageTooLong, "message_too_long"),

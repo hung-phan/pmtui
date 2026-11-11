@@ -190,9 +190,13 @@ pub struct ProjectEntry {
     /// the source row so board and detail views can explain the relationship.
     #[serde(default)]
     pub forked_from: Option<String>,
-    /// Spawn lineage: the session whose agent asked for this one through a spawn request.
-    /// A fork copies it from its source, so a child's forks stay under the same parent's
-    /// depth rule. A row with this set cannot parent.
+    /// Spawn lineage: the session whose agent asked for this one through a spawn request. It names
+    /// ONE STEP UP, not the root, so the chain is the shape of the work. A fork copies it from its
+    /// source, so a fork of a child is a sibling of that child rather than its own kind of row.
+    ///
+    /// A row with this set used to be forbidden from parenting. That rule is gone: a session may
+    /// coordinate its own children at any depth, and a job cannot spawn because it is given no
+    /// `ManagedEnv` rather than because of a check.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spawned_by: Option<String>,
     /// The spawn broker's record of the one launch it owes this row. Only the broker writes

@@ -471,6 +471,24 @@ fn seed_gallery(fx: &EnterFixture) {
     ];
     entries[0].display_name = Some("Release Gate".into());
     entries[5].forked_from = Some("active-build".into());
+    // A COORDINATOR AND ITS FLEET, two levels deep, because that is now a first-class shape and
+    // the gallery is what the published screenshots are taken from: a page with no lineage would
+    // document a list the product no longer draws.
+    //
+    // EVERY ROW IN THE CHAIN MUST LAND IN THE SAME GROUP AS ITS PARENT, or the page shows the
+    // opposite of the feature — `row_depth` counts only in-group ancestors, so a child whose parent
+    // is elsewhere is drawn flush (which is the safety property, demonstrated by the needy rows).
+    // These three are all AUTOPILOT with a launched pane.
+    //
+    // THE DEEPER ROW TAKES THE SHORTER NAME, because the indent is paid out of the name field: two
+    // columns per level, so `working-tests` (12) is whole at depth 1 and `monitoring` (10) is whole
+    // at depth 2. It is also what keeps the readiness gate above able to see the ids in full.
+    //
+    // NOT `autopilot-docs`, which is the FORK fixture: a fork copies `spawned_by` from its source,
+    // so a fork of a parentless row cannot have one. The gallery only shows shapes the product can
+    // actually produce.
+    entries[3].spawned_by = Some("active-build".into());
+    entries[4].spawned_by = Some("working-tests".into());
     Registry { projects: entries }
         .save(&fx.reg_path)
         .expect("write gallery registry");
@@ -631,6 +649,11 @@ fn launch_gallery_panes(fx: &EnterFixture) {
         fx,
         "active-build",
         "printf 'Compiling the responsive workbench...\\n'; exec sleep 600",
+    );
+    launch_pane(
+        fx,
+        "working-tests",
+        "printf 'Reproducing the tmux input regression...\\n'; exec sleep 600",
     );
     for id in ["monitoring", "autopilot-docs", "hands-on"] {
         launch_pane(fx, id, "printf '> \\n'; exec cat");
