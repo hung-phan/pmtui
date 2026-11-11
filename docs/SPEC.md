@@ -279,6 +279,26 @@ MUST NOT use the code alone.
 
 `AGENTS.md` gives the names of the commands, their arguments, their output and their exit codes.
 
+### A Child That Stays
+
+Some work does not end in one run. It needs an agent that keeps a conversation, asks its person a
+question, and continues over many turns. The request command MUST therefore offer a second form: a
+SESSION instead of a job.
+
+A session a worker asks for is the same thing a person makes in the dashboard. It takes the Message
+of the request as its first turn. It is Standard, so nothing drives it until a person turns that on.
+It keeps its row and its state when its agent stops, and a person closes it. It is a PEER of the
+session that asked for it, so another worker may message it, and it may ask for children of its own.
+
+The two forms differ in what ANSWERS the request. A job answers with a result, so the start of a job
+is not an answer. A session has no result to give, so the start of the session IS the answer, and the
+product MUST report the request as final once the session is up. A form that never answered would
+leave a worker asking about it for as long as the session lived.
+
+The product MUST NOT let a worker stop a session it asked for. A job is work, and a worker may stop
+work. A session has its own person, and only that person closes it. The refusal MUST be final rather
+than something to ask again, because asking again cannot change it.
+
 ### Concurrency
 
 A parent asks for the children the work needs. The product sets no limit on how many children one

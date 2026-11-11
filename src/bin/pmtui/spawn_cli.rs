@@ -21,7 +21,7 @@ use serde::Serialize;
 
 use agent_manager::clock::Clock;
 use agent_manager::job_engine;
-use agent_manager::registry::{Engine, normalize_display_name};
+use agent_manager::registry::{Engine, LaunchKind, normalize_display_name};
 use agent_manager::spawn::{
     self, ErrorCode, Publish, ReceiptState, SpawnArgs, SpawnError, SpawnReceipt, SpawnRequest,
 };
@@ -35,8 +35,8 @@ pub(crate) const MAX_WAIT_S: u64 = 120;
 pub(crate) const POLL_MS: u64 = 250;
 
 pub(crate) const HELP: &str = concat!(
-    "pmtui spawn — ask the running dashboard for a Standard child session\n\n",
-    "Usage: pmtui spawn --message <text> [--title <text>] [--name <display-name>]\n",
+    "pmtui spawn — ask the running dashboard for a child: a one-shot job, or a session\n\n",
+    "Usage: pmtui spawn --message <text> [--session] [--title <text>] [--name <display-name>]\n",
     "                   [--dir <existing-directory>] [--agent claude|codex] [--model <id>]\n",
     "                   [--request-id <uuid>] [--wait <seconds>] [--json]\n",
     "       pmtui spawn --request-id <uuid> --cancel [--json]\n",
@@ -44,6 +44,11 @@ pub(crate) const HELP: &str = concat!(
     "Run it inside a pmtui-managed session. It reads PMTUI_SESSION and PMTUI_STATE_DIR, writes\n",
     "one request into that session's state dir, and waits for the dashboard to answer it.\n\n",
     "--message <text>      the child's one-time first message (required)\n",
+    "--session             ask for a SESSION instead of a job: a persistent agent like the one\n",
+    "                      the dashboard's `n` creates, which takes the message as its first turn,\n",
+    "                      stays on screen, and can be reached with `pmtui message`. It reports no\n",
+    "                      result and nothing retires it; its human closes it. For this form exit 0\n",
+    "                      means `ready` — the session is up — and --cancel does not apply\n",
     "--title <text>        the Task title, at most 120 characters (default: the message's first line)\n",
     "--name <name>         a display name for the child\n",
     "--dir <path>          an existing folder inside this session's folder, or another session's\n",
@@ -61,13 +66,14 @@ pub(crate) const HELP: &str = concat!(
     "                      kills it, and its receipt becomes `cancelled`\n",
     "--json                print the result as one JSON document\n\n",
     "Exit codes, for the dispatch and --cancel forms:\n",
-    "  0  done — the child ran and reported\n",
+    "  0  done — the child ran and reported; or, under --session, ready — the session is up\n",
     "  3  queued, in_progress, needs_attention, needs_human or cancel_requested; ask again under\n",
     "     the SAME --request-id\n",
     "  1  failed, ended_without_result or cancelled; read error.code\n",
     "  2  usage error\n",
-    "`ready` is NOT one of them: for a job it means the run STARTED, so it never ends the wait and\n",
-    "exit 0 always means the task is over. --status prints `ready` for a child that is RUNNING, and\n",
+    "For a JOB `ready` is NOT one of them: it means the run STARTED, so it never ends the wait and\n",
+    "exit 0 always means the task is over. For a SESSION there is no result coming, so `ready` is\n",
+    "the answer. --status prints `ready` for a child that is RUNNING, and\n",
     "--status itself exits 0 whenever it could read this session's directory — a listing is not an\n",
     "outcome. Every form prints its JSON document on a nonzero exit too; read the document.\n",
 );
@@ -212,6 +218,7 @@ pub(crate) fn parse(argv: &[String]) -> Result<Option<SpawnCli>, UsageError> {
     let mut json = false;
     let mut cancel = false;
     let mut status = false;
+    let mut session = false;
     let mut i = 0;
     while i < argv.len() {
         let flag = argv[i].as_str();
@@ -220,6 +227,7 @@ pub(crate) fn parse(argv: &[String]) -> Result<Option<SpawnCli>, UsageError> {
             "--json" => json = true,
             "--cancel" => cancel = true,
             "--status" => status = true,
+            "--session" => session = true,
             _ if VALUE_FLAGS.contains(&flag) => {
                 let value = argv
                     .get(i + 1)
@@ -251,6 +259,9 @@ pub(crate) fn parse(argv: &[String]) -> Result<Option<SpawnCli>, UsageError> {
         if let Some((flag, _)) = values.first() {
             return Err(usage(format!("{flag} cannot be used with --status")));
         }
+        if session {
+            return Err(usage("--session cannot be used with --status".into()));
+        }
         return Ok(Some(SpawnCli {
             args: SpawnArgs::default(),
             request_id: None,
@@ -268,6 +279,11 @@ pub(crate) fn parse(argv: &[String]) -> Result<Option<SpawnCli>, UsageError> {
         let request_id = parse_request_id(request_id).map_err(usage)?;
         if let Some((flag, _)) = values.first() {
             return Err(usage(format!("{flag} cannot be used with --cancel")));
+        }
+        // A cancel NAMES a child, and the request it names already says which kind it is — so
+        // `--session` here would either repeat the request or contradict it.
+        if session {
+            return Err(usage("--session cannot be used with --cancel".into()));
         }
         return Ok(Some(SpawnCli {
             args: SpawnArgs::default(),
@@ -303,6 +319,7 @@ pub(crate) fn parse(argv: &[String]) -> Result<Option<SpawnCli>, UsageError> {
             dir: take("--dir").map(PathBuf::from),
             agent,
             model: take("--model"),
+            kind: kind_of(session),
         },
         request_id,
         wait_s,
@@ -310,6 +327,15 @@ pub(crate) fn parse(argv: &[String]) -> Result<Option<SpawnCli>, UsageError> {
         cancel: false,
         status: false,
     }))
+}
+
+/// What `--session` asks for, against the default.
+fn kind_of(session: bool) -> LaunchKind {
+    if session {
+        LaunchKind::Chat
+    } else {
+        LaunchKind::Job
+    }
 }
 
 fn parse_agent(value: &str) -> Result<Engine, String> {
@@ -405,10 +431,10 @@ pub(crate) fn run_spawn(
         // make a second one. "Does the caller have its answer?" decides whether to return now, and that
         // is `answered()`: a job's `ready` means the run started, so wait for its result instead.
         if previous.state.is_final() && !request_file_present(&dir, &request_id) {
-            return if answered(previous.state) {
+            return if answered(previous.state, cli.args.kind) {
                 waited(&request_id, Some(previous), true)
             } else {
-                wait_for_receipt(&dir, &request_id, cli.wait_s, waiter)
+                wait_for_receipt(&dir, &request_id, cli.wait_s, waiter, cli.args.kind)
             };
         }
     }
@@ -429,7 +455,7 @@ pub(crate) fn run_spawn(
             );
         }
     }
-    wait_for_receipt(&dir, &request_id, cli.wait_s, waiter)
+    wait_for_receipt(&dir, &request_id, cli.wait_s, waiter, cli.args.kind)
 }
 
 /// Record a cancel for `request_id` and report where that request stands.
@@ -448,6 +474,23 @@ fn run_cancel(dir: &Path, request_id: &str) -> CliOutput {
             ErrorCode::InvalidArgument,
             format!(
                 "this session never asked for request {request_id}, so there is nothing to cancel"
+            ),
+        );
+    }
+    // A SESSION IS NOT CANCELLABLE, and this is the refusal that keeps it from being a loop with no
+    // exit. The harvest only ever considers job rows, so a cancel marker on a session would be
+    // written, never acted on, and polled at 3 forever. Closing a session is the human's `d` — the
+    // row leaving their list IS the human deciding.
+    if receipt
+        .as_ref()
+        .is_some_and(|found| found.kind == LaunchKind::Chat)
+    {
+        return CliOutput::failed(
+            request_id,
+            ErrorCode::InvalidArgument,
+            format!(
+                "request {request_id} asked for a session, not a job — a session is closed by its \
+                 human with `d`, so there is nothing here to cancel"
             ),
         );
     }
@@ -555,12 +598,20 @@ fn same_request(existing: &SpawnRequest, request: &SpawnRequest) -> bool {
 
 /// Poll the receipt every [`POLL_MS`] until it is final or `wait_s` has passed. A receipt that
 /// cannot be read counts as none yet: only the dashboard writes it, and it replaces it whole.
-fn wait_for_receipt(dir: &Path, id: &str, wait_s: u64, waiter: &mut dyn Waiter) -> CliOutput {
+fn wait_for_receipt(
+    dir: &Path,
+    id: &str,
+    wait_s: u64,
+    waiter: &mut dyn Waiter,
+    kind: LaunchKind,
+) -> CliOutput {
     let deadline = waiter.now_ms() + u128::from(wait_s) * 1000;
     loop {
         let receipt = spawn::read_receipt(dir, id).ok().flatten();
         let now = waiter.now_ms();
-        let finished = receipt.as_ref().is_some_and(|found| answered(found.state));
+        let finished = receipt
+            .as_ref()
+            .is_some_and(|found| answered(found.state, kind));
         if finished || now >= deadline {
             return waited(id, receipt, finished);
         }
@@ -571,17 +622,21 @@ fn wait_for_receipt(dir: &Path, id: &str, wait_s: u64, waiter: &mut dyn Waiter) 
 
 /// Whether this state ANSWERS what the caller asked for — the point `--wait` stops at.
 ///
-/// A child is a job, so `ready` is NOT an answer: it means the run STARTED. Stopping there is what sent
-/// a parent to read its child's transcript for something the receipt was about to say in one line.
-/// `outcome_unknown` is not an answer either — for a job it says readiness could not see the terminal
-/// twice, and the retirement sweep replaces it moments later with what the run actually left.
+/// THE TWO FORMS DISAGREE ABOUT EXACTLY ONE STATE, and it is the one this surface is shaped around.
+/// For a JOB, `ready` means the run STARTED: stopping there is what sent a parent to read its
+/// child's transcript for something the receipt was about to say in one line. For a SESSION there is
+/// no result coming — the ask was "stand up a teammate", and `ready` is that teammate standing. A
+/// session that never ended the wait would be a 3 forever, which is the loop with no exit.
 ///
-/// Everything else that is final IS an answer: the five job outcomes, a launch that failed, and
-/// `needs_attention`, which is the dashboard asking for a person rather than reporting on the task.
-pub(crate) fn answered(state: ReceiptState) -> bool {
+/// `outcome_unknown` is an answer for neither: for a job it says readiness could not see the
+/// terminal twice and the retirement sweep is about to replace it; for a session it says the same
+/// about a row the human can see on screen. Everything else that is final IS an answer: the five job
+/// outcomes, a launch that failed, and `needs_attention`, which is the dashboard asking for a person
+/// rather than reporting on the task.
+pub(crate) fn answered(state: ReceiptState, kind: LaunchKind) -> bool {
     match state {
-        ReceiptState::Ready
-        | ReceiptState::OutcomeUnknown
+        ReceiptState::Ready => kind == LaunchKind::Chat,
+        ReceiptState::OutcomeUnknown
         | ReceiptState::Claimed
         | ReceiptState::Staged
         | ReceiptState::Launching => false,

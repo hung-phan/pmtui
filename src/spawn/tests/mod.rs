@@ -9,7 +9,7 @@ mod result;
 use std::path::PathBuf;
 
 use super::*;
-use crate::registry::{Engine, LaunchState};
+use crate::registry::{Engine, LaunchKind, LaunchState};
 
 /// A canonical lowercase request id, the one most tests publish under.
 const ID: &str = "550e8400-e29b-41d4-a716-446655440000";
@@ -24,6 +24,7 @@ fn args(message: &str) -> SpawnArgs {
         dir: None,
         agent: None,
         model: None,
+        ..SpawnArgs::default()
     }
 }
 
@@ -51,6 +52,7 @@ fn receipt(id: &str, state: ReceiptState) -> SpawnReceipt {
         result: None,
         work: None,
         updated_at: 1_790_000_004,
+        kind: LaunchKind::Job,
     }
 }
 

@@ -1578,3 +1578,145 @@ fn killing_the_dashboard_mid_request_recovers_without_a_second_terminal() {
         rig.diagnose()
     );
 }
+
+/// A SESSION, over a real terminal: the parent asks for a teammate rather than a task, and what
+/// arrives is the thing the dashboard's own `n` makes.
+///
+/// Three facts a unit test cannot establish, because each one is about a real process: the child was
+/// launched INTERACTIVELY (its pane prompts and takes a line, rather than printing a result and
+/// exiting), it was given a `ManagedEnv` so it can name itself to the commands (a job is given none,
+/// on purpose), and it is REACHABLE as a peer — the child itself runs `message --list` and finds the
+/// parent, which is the whole point of asking for a session instead of a job.
+///
+/// The fourth is a non-event: nothing retires it. A job's row goes when its process does; this row
+/// outlives the sweep, because only its human may remove it.
+#[test]
+#[ignore]
+fn a_parent_asks_for_a_session_and_gets_a_reachable_teammate_nothing_retires() {
+    if !tmux_available() {
+        eprintln!("skipping spawn session test: tmux not available");
+        return;
+    }
+    let rig = SpawnRig::new(
+        "spwsess",
+        &Stub {
+            parent_on_start: spawn_call("session", " --session --wait 60"),
+            // Run BY THE CHILD, which reaches the command through its own managed env.
+            //
+            // `--registry` IS NOT OPTIONAL HERE, and that is a property of the product rather than
+            // of this test: the registry is the one thing a managed session is NOT told, because it
+            // maps an id to a project root while a tmux session name only hashes one. So the command
+            // defaults to the dashboard's own path — which, for a test, is the DEVELOPER'S real
+            // registry. Measured: without this the child listed this machine's actual sessions. The
+            // path is read from a file at line time, because the fixture does not exist yet when
+            // this stub is written.
+            on_line: "case $line in\n  peers) \"${PMTUI_BIN:-$pmtui}\" message --list --json \
+                      --registry \"$(cat \"$logs/registry\")\" \
+                      > \"$logs/$sid.peers.json\" 2>\"$logs/$sid.peers.err\" ;;\nesac"
+                .to_string(),
+            ..Stub::default()
+        },
+    );
+    rig.start_parent();
+
+    // READY IS THE ANSWER for this form: there is no result coming, so the launch is what the parent
+    // asked for. The same receipt under the job form would still be waiting.
+    let run = rig.wait_spawn(PARENT, "session", Duration::from_secs(90));
+    assert_eq!(
+        (run.code, run.state()),
+        (0, "ready"),
+        "a session's launch IS its answer\n{run:?}\n{}",
+        rig.diagnose()
+    );
+    let child = run
+        .child_id()
+        .unwrap_or_else(|| panic!("no child session in the receipt\n{run:?}"))
+        .to_string();
+    assert_eq!(run.json["receipt"]["kind"], "chat", "{run:?}");
+    assert!(
+        run.json["receipt"]["result"].is_null() && run.json["receipt"]["work"].is_null(),
+        "a session reports no result and no work\n{run:?}"
+    );
+
+    // AN INTERACTIVE AGENT: its pane shows the Message it was launched with, under no job preamble.
+    let child_session = session_name(&child, &rig.fx.proj);
+    assert!(
+        wait_for_pane_text_within(
+            &rig.fx.agent,
+            &child_session,
+            &format!("stub {child} message: {MESSAGE}"),
+            Duration::from_secs(20)
+        ),
+        "the session's pane never showed its first turn\n{}",
+        rig.diagnose()
+    );
+    assert_eq!(rig.launches(&child), vec![MESSAGE.to_string()]);
+    let prompt = rig.prompt(&child);
+    assert_eq!(
+        prompt.trim(),
+        MESSAGE,
+        "a session's first turn is the Message alone, with no job preamble"
+    );
+
+    // IT CAN NAME ITSELF, which is what a job is deliberately denied.
+    let pmtui = std::fs::canonicalize(rig.fx.dir.path().join("exe").join("pmtui")).unwrap();
+    assert_eq!(
+        rig.env_var(&child, "PMTUI_SESSION").as_deref(),
+        Some(child.as_str())
+    );
+    assert_eq!(
+        rig.env_var(&child, "PMTUI_BIN"),
+        Some(pmtui.display().to_string())
+    );
+
+    // AND IT IS A PEER: the child asks who it can reach, and the parent is on the list.
+    std::fs::write(
+        rig.logs.join("registry"),
+        rig.fx.reg_path.display().to_string(),
+    )
+    .unwrap();
+    assert!(type_line(&rig.fx, &child_session, "peers"));
+    let listing = rig.logs.join(format!("{child}.peers.json"));
+    assert!(
+        wait_until(Duration::from_secs(30), || listing.exists()),
+        "the child's `message --list` never finished\n{}",
+        rig.diagnose()
+    );
+    let peers: serde_json::Value = serde_json::from_str(&rig.log(&format!("{child}.peers.json")))
+        .unwrap_or_else(|error| {
+            panic!(
+                "the child printed no listing ({error}): {:?}",
+                rig.log(&format!("{child}.peers.json"))
+            )
+        });
+    let ids: Vec<&str> = peers["sessions"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no sessions array: {peers}"))
+        .iter()
+        .filter_map(|entry| entry["id"].as_str())
+        .collect();
+    assert!(
+        ids.contains(&PARENT) && ids.contains(&child.as_str()),
+        "a session is listed with its parent, and a job would be hidden: {peers}"
+    );
+    let me = peers["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["id"].as_str() == Some(child.as_str()))
+        .unwrap();
+    assert_eq!(me["self"], true, "it knows which row is itself: {peers}");
+    assert_eq!(me["job"], false, "and that it is not a job: {peers}");
+
+    // NOTHING RETIRES IT. Five seconds of real sweeps, and the row and its terminal are still there.
+    assert!(
+        !rig.wait_retired(&child, Duration::from_secs(5)),
+        "a session must outlive the retirement sweep\n{}",
+        rig.diagnose()
+    );
+    let row = rig
+        .row(&child)
+        .unwrap_or_else(|| panic!("the session's row is gone\n{}", rig.diagnose()));
+    assert!(row.enabled, "and it stays live");
+    assert!(!row.is_job());
+}

@@ -274,6 +274,8 @@ impl App {
             launch_state: Some(LaunchState::Started),
             error,
             next_action: None,
+            // The row's own launch record, which is where the staged kind lives.
+            kind: launch.kind,
             args_hash: Some(launch.args_hash.clone()),
             result,
             work: work.clone(),
@@ -409,6 +411,8 @@ impl App {
                 message: reason.to_string(),
             }),
             next_action: None,
+            // The row's own launch record, which is where the staged kind lives.
+            kind: launch.kind,
             args_hash: Some(launch.args_hash.clone()),
             result: None,
             work: None,

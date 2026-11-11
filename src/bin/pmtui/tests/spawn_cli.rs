@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::spawn_cli::*;
-use agent_manager::registry::LaunchState;
+use agent_manager::registry::{LaunchKind, LaunchState};
 use agent_manager::spawn::{
     self, ErrorCode, NextAction, NextActionKind, ReceiptSession, ReceiptState, SpawnArgs,
     SpawnError, SpawnReceipt, SpawnRequest,
@@ -247,6 +247,7 @@ fn receipt(id: &str, state: ReceiptState) -> SpawnReceipt {
         result: None,
         work: None,
         updated_at: CREATED_AT + 4,
+        kind: LaunchKind::Job,
     }
 }
 
@@ -290,6 +291,7 @@ fn parse_accepts_every_documented_flag_and_defaults_the_rest() {
                 dir: Some(PathBuf::from("/work/service")),
                 agent: Some(Engine::Codex),
                 model: Some("gpt-5".into()),
+                ..SpawnArgs::default()
             },
             request_id: Some(REQUEST_ID.into()),
             wait_s: 120,
@@ -848,6 +850,7 @@ fn publishes_then_times_out_as_queued_exit_3_without_touching_home() {
                 dir: None,
                 agent: None,
                 model: None,
+                ..SpawnArgs::default()
             },
         }
     );
@@ -1448,6 +1451,7 @@ fn recorded_args(message: &str) -> SpawnArgs {
         dir: None,
         agent: None,
         model: None,
+        ..SpawnArgs::default()
     }
 }
 
@@ -1635,36 +1639,188 @@ fn a_failed_status_listing_still_prints_its_json_document() {
     assert!(err.contains("spawn --status:"), "{err}");
 }
 
-/// Exit 0 means the TASK IS OVER, and `ready` can never produce it. `answered` returns false for
-/// `ready` and `outcome_unknown`, so neither ever ends the wait — which is why HELP no longer
-/// advertises them. An agent that read "0 ready or done" and branched on `state == "ready"` wrote
-/// dead code at best, and at worst learned that a started run counts as a finished one.
+/// THE TWO FORMS DISAGREE ABOUT `ready`, AND ONLY ABOUT `ready`. For a job, exit 0 means the task
+/// is over, so a started run must never produce it: an agent that read "0 ready or done" and
+/// branched on `state == "ready"` wrote dead code at best, and at worst learned that a launch counts
+/// as a finish. For a session there is no result coming, so `ready` IS the answer — a session that
+/// never ended the wait would be a 3 forever. The help text must say both, and the predicate and
+/// the text are pinned together here because that is the pair that drifted before.
 #[test]
-fn help_promises_no_exit_code_for_a_state_no_form_produces() {
+fn ready_ends_the_wait_for_a_session_and_never_for_a_job() {
     let help = crate::spawn_cli::HELP;
     assert!(
         !help.contains("0 ready or done"),
-        "the old promise is gone: {help}"
+        "the old unconditional promise is gone: {help}"
     );
-    assert!(help.contains("0  done"), "exit 0 is `done` alone: {help}");
     assert!(
-        help.contains("`ready` is NOT one of them"),
-        "it says why `ready` is absent: {help}"
+        help.contains("0  done — the child ran and reported; or, under --session, ready"),
+        "exit 0 names both forms: {help}"
     );
-    for unreachable in [ReceiptState::Ready, ReceiptState::OutcomeUnknown] {
+    assert!(
+        help.contains("For a JOB `ready` is NOT one of them"),
+        "it says why `ready` is absent for a job: {help}"
+    );
+    assert!(
+        help.contains("For a SESSION there is no result coming, so `ready` is"),
+        "and why it is the answer for a session: {help}"
+    );
+
+    assert!(
+        !answered(ReceiptState::Ready, LaunchKind::Job),
+        "a job's `ready` means the run STARTED"
+    );
+    assert!(
+        answered(ReceiptState::Ready, LaunchKind::Chat),
+        "a session's `ready` is the session standing up"
+    );
+    for kind in [LaunchKind::Job, LaunchKind::Chat] {
         assert!(
-            !answered(unreachable),
-            "{unreachable:?} must not end the wait, or the help text is wrong again"
+            !answered(ReceiptState::OutcomeUnknown, kind),
+            "`outcome_unknown` ends the wait for neither form ({kind:?})"
+        );
+        // Every state that CAN reach a caller is one the help text names, so the two cannot drift.
+        for state in ReceiptState::ALL
+            .into_iter()
+            .filter(|state| answered(*state, kind))
+        {
+            // serde's wire name, which equals what the command prints for every ANSWERED state.
+            let printed = serde_json::to_value(state).unwrap();
+            let printed = printed.as_str().unwrap();
+            assert!(
+                help.contains(printed),
+                "the help text never mentions {printed}, which a {kind:?} caller can see"
+            );
+        }
+    }
+}
+
+/// `--session` IS THE WHOLE DIFFERENCE between asking for a one-shot job and asking for a teammate,
+/// so it belongs on the request the dashboard stages from — not on a receipt the agent could not
+/// have written, and not inferred later from anything.
+#[test]
+fn session_asks_for_a_chat_child_and_everything_else_is_a_job() {
+    let job = cli(&["--message", "do the thing"]);
+    assert_eq!(job.args.kind, LaunchKind::Job, "the default ask is a job");
+
+    let session = cli(&["--message", "own the migration", "--session"]);
+    assert_eq!(session.args.kind, LaunchKind::Chat);
+    assert!(session.args.is_chat());
+
+    // The flag order does not matter, and it composes with every other dispatch flag.
+    let mixed = cli(&[
+        "--session",
+        "--message",
+        "m",
+        "--agent",
+        "codex",
+        "--wait",
+        "0",
+    ]);
+    assert_eq!(mixed.args.kind, LaunchKind::Chat);
+    assert_eq!(mixed.args.agent, Some(Engine::Codex));
+
+    // It describes a child, so the two forms that do not describe one refuse it rather than
+    // accepting an argument nothing reads.
+    for extra in [
+        vec!["--status", "--session"],
+        vec!["--cancel", "--request-id", REQUEST_ID, "--session"],
+    ] {
+        let error = usage_error(&extra);
+        assert!(
+            error.message.contains("--session cannot be used with"),
+            "{extra:?} must say why: {}",
+            error.message
         );
     }
-    // Every state that CAN reach a caller is one the help text names, so the two cannot drift.
-    for state in ReceiptState::ALL.into_iter().filter(|s| answered(*s)) {
-        // serde's wire name, which equals what the command prints for every ANSWERED state.
-        let printed = serde_json::to_value(state).unwrap();
-        let printed = printed.as_str().unwrap();
-        assert!(
-            help.contains(printed),
-            "the help text never mentions {printed}, which a caller can see"
-        );
+
+    assert!(
+        crate::spawn_cli::HELP.contains("--session"),
+        "the flag is documented"
+    );
+}
+
+/// A SESSION CANNOT BE CANCELLED, and the refusal is in the 1 family because retrying cannot change
+/// it. The harvest only ever considers job rows, so a marker written for a session would be acted on
+/// by nobody and polled at 3 forever — the loop with no exit. The kind is read from the RECEIPT
+/// because that outlives the request file: a refusal that worked only until cleanup would be worse
+/// than none.
+#[test]
+fn cancelling_a_session_is_refused_and_leaves_no_marker() {
+    let session = Session::new();
+    std::fs::create_dir_all(session.requests()).unwrap();
+    spawn::write_receipt(
+        &session.requests(),
+        &SpawnReceipt {
+            kind: LaunchKind::Chat,
+            ..receipt(REQUEST_ID, ReceiptState::Ready)
+        },
+    )
+    .unwrap();
+
+    let (code, out, _) = session.dispatch(
+        &["spawn", "--request-id", REQUEST_ID, "--cancel", "--json"],
+        &mut FakeWaiter::new(),
+    );
+
+    assert_eq!(code, 1, "retrying cannot make a session cancellable: {out}");
+    let doc = json(&out);
+    assert_eq!(doc["state"], "failed");
+    assert_eq!(doc["error"]["code"], "invalid_argument");
+    let detail = doc["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        detail.contains("asked for a session") && detail.contains("`d`"),
+        "it must name who closes a session: {detail}"
+    );
+    assert!(
+        !spawn::cancel_requested(&session.requests(), REQUEST_ID),
+        "no marker is written, so nothing is stranded in the directory"
+    );
+}
+
+/// For a SESSION the launch IS the answer, so `ready` ends the wait at exit 0. The same receipt for a
+/// job keeps waiting, which is the one state the two forms disagree about.
+#[test]
+fn a_ready_session_ends_the_wait_at_zero_while_a_ready_job_keeps_waiting() {
+    for (argv, code, state) in [
+        (
+            vec![
+                "spawn",
+                "--message",
+                "m",
+                "--session",
+                "--request-id",
+                REQUEST_ID,
+                "--wait",
+                "0",
+                "--json",
+            ],
+            0,
+            "ready",
+        ),
+        (
+            vec![
+                "spawn",
+                "--message",
+                "m",
+                "--request-id",
+                REQUEST_ID,
+                "--wait",
+                "0",
+                "--json",
+            ],
+            3,
+            "in_progress",
+        ),
+    ] {
+        let session = Session::new();
+        std::fs::create_dir_all(session.requests()).unwrap();
+        spawn::write_receipt(
+            &session.requests(),
+            &receipt(REQUEST_ID, ReceiptState::Ready),
+        )
+        .unwrap();
+        let (got, out, _) = session.dispatch(&argv, &mut FakeWaiter::new());
+        assert_eq!(got, code, "{argv:?} -> {out}");
+        assert_eq!(json(&out)["state"], state, "{out}");
     }
 }

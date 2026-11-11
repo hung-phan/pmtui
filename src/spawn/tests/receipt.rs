@@ -164,6 +164,9 @@ fn receipt_json_uses_snake_case_and_never_contains_a_message_field() {
             "args_hash",
             "claimed_by",
             "error",
+            // Which form the request asked for. Always written, because a later `--cancel` reads it
+            // from the receipt once the request file is gone.
+            "kind",
             "launch_state",
             "next_action",
             "request_id",

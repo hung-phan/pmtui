@@ -6,12 +6,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::clock::Epoch;
-use crate::registry::Engine;
+use crate::registry::{Engine, LaunchKind};
 
 /// The arguments of one spawn request, as the agent passed them. Defaults (directory,
 /// agent, model) are resolved later by the dashboard from the parent row, so an absent
 /// value stays `None` here.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpawnArgs {
     /// The child's one-time initial Message.
     pub message: String,
@@ -20,6 +20,36 @@ pub struct SpawnArgs {
     pub dir: Option<PathBuf>,
     pub agent: Option<Engine>,
     pub model: Option<String>,
+    /// WHAT THE AGENT ASKED FOR: a one-shot `Job` that reports a result and exits, or a `Chat` —
+    /// a persistent session like the one `n` creates, which no machine retires.
+    ///
+    /// Absent means `Job` — see [`super::default_kind`] for why that is not `LaunchKind`'s own
+    /// default.
+    #[serde(default = "super::default_kind", skip_serializing_if = "is_job")]
+    pub kind: LaunchKind,
+}
+
+/// Hand-written rather than derived, for the same reason the serde default is: `LaunchKind`'s own
+/// `Default` is `Chat`, so a derived one would make an empty `SpawnArgs` ask for a session.
+impl Default for SpawnArgs {
+    fn default() -> Self {
+        Self {
+            message: String::new(),
+            title: None,
+            name: None,
+            dir: None,
+            agent: None,
+            model: None,
+            kind: super::default_kind(),
+        }
+    }
+}
+
+/// Serialization skips the kind for a job, so EVERY JOB REQUEST STILL HASHES AS IT DID. The hash is
+/// fixed at staging and matched on recovery, so a field that changed one existing request's bytes
+/// would orphan any child staged by the previous build and recovered by this one.
+fn is_job(kind: &LaunchKind) -> bool {
+    *kind == LaunchKind::Job
 }
 
 impl SpawnArgs {
@@ -32,7 +62,13 @@ impl SpawnArgs {
             dir: self.dir.clone(),
             agent: self.agent,
             model: trimmed(self.model.as_deref()),
+            kind: self.kind,
         }
+    }
+
+    /// A persistent session rather than a one-shot job.
+    pub fn is_chat(&self) -> bool {
+        self.kind == LaunchKind::Chat
     }
 
     /// Lowercase hex sha256 of `serde_json::to_vec(&self.normalized())` (struct field order is stable).

@@ -15,6 +15,7 @@ fn full_args() -> SpawnArgs {
         dir: Some(PathBuf::from("/work/service")),
         agent: Some(Engine::Claude),
         model: Some("opus".into()),
+        ..SpawnArgs::default()
     }
 }
 
@@ -27,6 +28,7 @@ fn normalization_trims_and_drops_empty_optionals() {
         dir: Some(PathBuf::from(" /work/service ")),
         agent: Some(Engine::Codex),
         model: Some(String::new()),
+        ..SpawnArgs::default()
     };
 
     let normalized = raw.normalized();
@@ -42,6 +44,7 @@ fn normalization_trims_and_drops_empty_optionals() {
             dir: Some(PathBuf::from(" /work/service ")),
             agent: Some(Engine::Codex),
             model: None,
+            ..SpawnArgs::default()
         }
     );
     assert_eq!(
@@ -152,6 +155,12 @@ fn hash_differs_when_any_field_differs() {
             model: None,
             ..base.clone()
         },
+        // A SESSION IS A DIFFERENT ASK. Same message, same folder, same agent: what differs is
+        // whether the child reports a result and exits, so the same id must not match both.
+        SpawnArgs {
+            kind: LaunchKind::Chat,
+            ..base.clone()
+        },
     ];
 
     let mut seen = HashSet::from([base.args_hash()]);
@@ -207,4 +216,45 @@ fn request_json_matches_the_spec_shape_and_absent_optionals_parse_as_none() {
     let parsed: SpawnArgs = serde_json::from_str(codex).unwrap();
     assert_eq!(parsed.agent, Some(Engine::Codex));
     assert_eq!(parsed.dir, Some(PathBuf::from("/work")));
+}
+
+/// EVERY JOB REQUEST STILL HASHES AS IT DID BEFORE THE FIELD EXISTED, because the hash is fixed at
+/// staging and matched on recovery: a field that changed one existing request's bytes would orphan a
+/// child staged by the previous build and recovered by this one. The guarantee is mechanical —
+/// serialization skips the kind for a job — and the canonical-bytes assertion in
+/// `hash_is_stable_across_whitespace_only_differences` is the other half of it.
+#[test]
+fn a_job_request_carries_no_kind_on_the_wire_and_an_absent_one_is_a_job() {
+    let job = full_args();
+    assert_eq!(job.kind, LaunchKind::Job, "the default ask is a job");
+    let wire = serde_json::to_string(&job).unwrap();
+    assert!(
+        !wire.contains("kind"),
+        "a job request is byte-identical to one written before the field: {wire}"
+    );
+
+    // A request file from that build parses as a job. Read as `Chat` it would stand up a session
+    // nobody asked for, which is why this does not use `LaunchKind`'s own default.
+    let old: SpawnArgs = serde_json::from_str(
+        r#"{"message":"Fix it","title":null,"name":null,"dir":null,"agent":null,"model":null}"#,
+    )
+    .expect("a v1 request still parses");
+    assert_eq!(old.kind, LaunchKind::Job);
+    assert!(!old.is_chat());
+
+    // A session says so, and round-trips.
+    let session = SpawnArgs {
+        kind: LaunchKind::Chat,
+        ..full_args()
+    };
+    let wire = serde_json::to_string(&session).unwrap();
+    assert!(wire.contains(r#""kind":"chat""#), "{wire}");
+    let back: SpawnArgs = serde_json::from_str(&wire).unwrap();
+    assert_eq!(back, session);
+    assert!(back.is_chat());
+    assert_ne!(
+        session.args_hash(),
+        full_args().args_hash(),
+        "the two asks must not share one hash"
+    );
 }
