@@ -19,8 +19,17 @@ So put everything the peer needs in one message. Then continue your own work.
 "$PMTUI_BIN" message --list
 ```
 
-Each line has the form `id (name)  engine  folder  — state`. The name appears only when a human set
-one. `this session` is you. Only a session with the state `reachable` can accept a message now.
+Each line has the form `id (name)  engine  folder  — state, tags`. The name appears only when a
+human set one. `this session` is you.
+
+The state comes first after the dash. It says what that session does now. `needs you` means a human
+decision is open, and it also says how long that decision waited. `working` means a turn runs now.
+
+The tags say if the pane can take your message. Only a session with the tag `reachable` can accept a
+message now. The other two answers are `a human is attached` and `no agent running`.
+
+`--list --json` prints the same facts as fields. Branch on the field `needs_you`. The field
+`working` can be absent. Absent means not known, and it never means idle.
 
 **Address it by the id.** The id is the first field, before the parentheses. Two sessions can share
 one name, and two sessions can share one folder. Only the id names one session. When you know a

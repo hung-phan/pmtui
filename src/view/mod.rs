@@ -12,6 +12,9 @@ use crate::registry::{Engine, Mode};
 use crate::state::{self, Tier};
 
 mod agent_loop;
+mod summary;
+
+pub use summary::SessionSummary;
 
 /// A glanceable posture for the dashboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -185,3 +188,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/codex_monitoring.rs"]
 mod codex_monitoring_tests;
+
+#[cfg(test)]
+#[path = "tests/summary.rs"]
+mod summary_tests;

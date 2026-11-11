@@ -192,7 +192,7 @@ pub struct ProjectEntry {
     pub forked_from: Option<String>,
     /// Spawn lineage: the session whose agent asked for this one through a spawn request.
     /// A fork copies it from its source, so a child's forks stay under the same parent's
-    /// depth rule and [`MAX_CHILDREN_PER_PARENT`] cap. A row with this set cannot parent.
+    /// depth rule. A row with this set cannot parent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spawned_by: Option<String>,
     /// The spawn broker's record of the one launch it owes this row. Only the broker writes

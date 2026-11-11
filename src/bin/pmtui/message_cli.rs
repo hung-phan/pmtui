@@ -27,6 +27,7 @@ use agent_manager::clock::Clock;
 use agent_manager::registry::{Mode, Registry};
 use agent_manager::state::{Config, ProjectPaths};
 use agent_manager::tmux::{self, ENV_SESSION, ENV_STATE_DIR};
+use agent_manager::view::{ProjectView, SessionSummary};
 
 use agent_manager::message::{HOP_MAX, HOP_WINDOW_S, Hops, envelope, next_hop};
 
@@ -41,8 +42,9 @@ pub(crate) const HELP: &str = concat!(
     "one ordinary user turn, labelled with this session's id and how to reply.\n\n",
     "--to <session-id>   who to send to, as shown by --list\n",
     "--message <text>    what to say (required with --to)\n",
-    "--list              every session this one can reach, one line each (no child jobs: a job\n",
-    "                    reports a result and exits, so nothing reads a message to it)\n",
+    "--list              every session this one can reach, one line each: what it is doing, then\n",
+    "                    whether its pane can take a message (no child jobs: a job reports a\n",
+    "                    result and exits, so nothing reads a message to it)\n",
     "--registry <path>   registry JSON (default: ~/.config/pmd/registry.json)\n",
     "--json              print one JSON document instead of one line\n\n",
     "A reply is just a send back: the recipient runs `pmtui message --to <this session>`.\n",
@@ -184,23 +186,24 @@ pub(crate) fn render_plain(out: &MessageOutput) -> String {
     }
 }
 
-/// One reachable session, as `--list` reports it.
+/// One reachable session, as `--list` reports it: the shared projection plus the one fact only
+/// this command knows.
+///
+/// IT CARRIES STATE NOW, and that is the point. This used to be seven hand-written fields — id,
+/// name, root, engine, live, attached, self — so an agent could ADDRESS a peer but could not tell
+/// a working one from a blocked one, a paused row from a live one. A coordinator cannot coordinate
+/// on an address book; it could only broadcast and hope.
+///
+/// The fields are NOT added here. They come from [`SessionSummary`], which the dashboard builds
+/// from the same constructor, because hand-building a second surface is how this one already drew
+/// `display_name` RAW while the dashboard normalized it — one field, two answers, measured. A
+/// field added by hand is the next one of those.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct Peer {
-    /// The ADDRESS. Unique by construction, and what `--to` matches.
-    pub(crate) id: String,
-    /// The label a human gave it, when they gave one. Shown because a human thinks of a session by
-    /// its name, and NOT an address: `normalize_display_name` enforces no uniqueness, so two
-    /// sessions can share one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) name: Option<String>,
-    pub(crate) root: String,
-    pub(crate) engine: String,
-    /// Its agent's pane is up, so a message can land.
-    pub(crate) live: bool,
-    /// A human is in that pane; a send would be refused rather than type over them.
-    pub(crate) attached: bool,
-    /// This is the session running the command — sending to it is refused.
+    #[serde(flatten)]
+    pub(crate) summary: SessionSummary,
+    /// This is the session running the command — sending to it is refused. The one fact the
+    /// projection cannot hold, because it is about the CALLER rather than the row.
     #[serde(rename = "self")]
     pub(crate) is_self: bool,
 }
@@ -237,27 +240,47 @@ pub(crate) fn render_list_plain(path: &Path, peers: &[Peer]) -> String {
     peers
         .iter()
         .map(|p| {
+            let s = &p.summary;
             let mut tags = Vec::new();
             if p.is_self {
-                tags.push("this session");
+                tags.push("this session".to_string());
             }
-            if !p.live {
-                tags.push("no agent running");
+            if !s.live {
+                tags.push("no agent running".to_string());
             }
-            if p.attached {
-                tags.push("a human is attached");
+            if s.attached {
+                tags.push("a human is attached".to_string());
             }
-            let note = if tags.is_empty() {
-                "reachable".to_string()
+            // THE STATE LEADS, because "can I reach it" is the second question and "what is it
+            // doing" is the first. A waiting decision is named with how long it has waited, by
+            // the same `age_label` ladder the rows use — a second duration format is a second
+            // answer to the same question.
+            let state = if s.needs_you {
+                match s.waiting_s {
+                    Some(waited) => {
+                        format!("needs you {}", crate::display::age_label(Some(0), waited))
+                    }
+                    None => "needs you".to_string(),
+                }
+            } else if s.working == Some(true) {
+                "working".to_string()
             } else {
-                tags.join(", ")
+                s.state.clone()
             };
+            // "reachable" STAYS, and is not replaced by the state: the message skill tells an
+            // agent that only a session reading `reachable` can accept a message now, so the word
+            // is load-bearing rather than decoration. The state answers a DIFFERENT question — a
+            // reachable peer can still be mid-turn, and a blocked one is still reachable.
+            if tags.is_empty() {
+                tags.push("reachable".to_string());
+            }
+            tags.insert(0, state);
             // The id comes FIRST and alone, because it is the only field `--to` accepts.
-            let named = match &p.name {
-                Some(name) => format!("{} ({name})", p.id),
-                None => p.id.clone(),
+            let named = match &s.name {
+                Some(name) => format!("{} ({name})", s.id),
+                None => s.id.clone(),
             };
-            format!("{named}  {}  {}  — {}", p.engine, p.root, note)
+            format!("{named}  {}  {}  — {}", s.engine, s.root, tags.join(", "))
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -363,6 +386,7 @@ pub(crate) fn run_list(
 ) -> Result<(PathBuf, Vec<Peer>), String> {
     let (path, registry) = load_registry(cli, deps)?;
     let me = (deps.env)(ENV_SESSION).unwrap_or_default();
+    let now = deps.clock.now();
     let driver = (deps.env)("TMUX")
         .as_deref()
         .and_then(socket_from_tmux_env)
@@ -386,17 +410,21 @@ pub(crate) fn run_list(
                 .as_ref()
                 .and_then(|d| d.is_alive(&session).ok())
                 .unwrap_or(false);
+            // The ledger, config and marker — a pure file read, the same one the dashboard does.
+            // A missing or half-written session renders as `fresh` with no stops rather than
+            // failing the listing, because `read_agent_loop` already tolerates that.
+            let paths = ProjectPaths::for_session(&entry.root, &entry.id);
+            let mut view = ProjectView::read_agent_loop(&entry.id, &paths, entry.enabled, now);
+            view.session_live = live;
+            view.human_attached = live
+                && driver
+                    .as_ref()
+                    .and_then(|d| d.has_clients(&session).ok())
+                    .unwrap_or(false);
             Peer {
-                id: entry.id.clone(),
-                name: entry.display_name.clone(),
-                root: entry.root.to_string_lossy().into_owned(),
-                engine: entry.engine.map_or("default", |e| e.label()).to_string(),
-                live,
-                attached: live
-                    && driver
-                        .as_ref()
-                        .and_then(|d| d.has_clients(&session).ok())
-                        .unwrap_or(false),
+                // NOT CONFIRMED: this command has no cross-tick state, so `working` is the hook's
+                // own turn-end file without the dashboard's pane confirmation over it.
+                summary: SessionSummary::of(entry, &view, now, false),
                 is_self: entry.id == me,
             }
         })

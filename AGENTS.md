@@ -375,6 +375,22 @@ same `send_decision` gate and the same `input.lock` as the dashboard's `s`, and 
 be running. `--list` exits 0 whenever the registry could be read, and prints its JSON document on a
 nonzero exit too.
 
+`--list` REPORTS STATE, not just an address, and every field of it comes from
+`view::SessionSummary` — the one projection of a session for everything outside the dashboard's own
+frame. It used to be seven hand-written fields, so an agent could address a peer but could not tell
+a working one from a blocked one; a coordinator cannot coordinate on an address book. The fields
+are NOT added here but there, through its single constructor, because this surface had already
+drifted: it printed `display_name` RAW while the dashboard passed the same field through
+`normalize_display_name`, which is one field with two answers. A LINE ANSWERS TWO QUESTIONS AND
+KEEPS THEM APART — the state says what the peer is doing, the tags say whether its pane can take a
+message — and `reachable` stays a tag rather than becoming the state, because the skill tells an
+agent that only a `reachable` session can accept a message now, while a reachable peer can still be
+mid-turn. `working` is a TRI-STATE whose source is the engine hook's turn-end signal FILE, so a
+one-shot read gets the authoritative answer and lacks only the dashboard's pane confirmation
+(reported separately as `working_confirmed`): `null` means NOT KNOWN, and an agent is told never to
+read it as idle. `ProjectView` itself is never serialized — it is the TUI's working set, with
+`step_id`, `turn_trace`, the parked-advice queue and handles to detached work.
+
 A JOB IS NOT A PEER, and the CLI says so rather than letting the pane decide. `--list` omits job
 rows and `--to <job-id>` answers 1 — a job reports a result and exits, so it never becomes
 messageable and 3 would invite a loop with no exit. `docs/SPEC.md` already required the refusal;
@@ -442,6 +458,9 @@ empty one, so an empty answer NAMES the file it read rather than blaming the id.
 - `src/theme.rs`: the opaline seam — the dashboard's colour ROLES and the one place RGB
   enters chrome; `src/attention.rs` builds every style from it.
 - `src/spawn/`: the request/receipt protocol, the job prompt, and the job result the harness writes.
+- `src/view/summary.rs`: the one readable projection of a session, for every surface outside the
+  dashboard's frame. One type and ONE constructor, so a second surface cannot answer a field its own
+  way. `src/view/mod.rs` keeps `ProjectView`, which is the TUI's working set and is never published.
 - `src/message.rs`: the agent-to-agent message protocol — the hop bound, the envelope and the hop
   arithmetic. In the library rather than beside the command because the skill text that DOCUMENTS
   the limit is embedded here too, so a test holds the prose against the enforced number.

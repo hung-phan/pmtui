@@ -368,11 +368,17 @@ fn the_listing_marks_this_session_and_names_an_empty_registry() {
     let (path, peers) = run_list(&listing, &deps).expect("the registry is readable");
     assert_eq!(path, fx.registry);
     assert_eq!(peers.len(), 2);
-    let me = peers.iter().find(|p| p.id == "me").unwrap();
+    let me = peers.iter().find(|p| p.summary.id == "me").unwrap();
     assert!(me.is_self, "the caller's own row is marked");
-    assert!(!peers.iter().find(|p| p.id == "peer").unwrap().is_self);
+    assert!(
+        !peers
+            .iter()
+            .find(|p| p.summary.id == "peer")
+            .unwrap()
+            .is_self
+    );
     // No session is alive on a fresh FakePane, which a listing reports rather than failing on.
-    assert!(peers.iter().all(|p| !p.live && !p.attached));
+    assert!(peers.iter().all(|p| !p.summary.live && !p.summary.attached));
 
     let plain = render_list_plain(&path, &peers);
     assert!(
@@ -638,8 +644,8 @@ fn the_listing_separates_reachable_from_attached() {
         },
     )
     .expect("readable");
-    let peer = peers.iter().find(|p| p.id == "peer").unwrap();
-    assert!(peer.live && !peer.attached, "{peer:?}");
+    let peer = peers.iter().find(|p| p.summary.id == "peer").unwrap();
+    assert!(peer.summary.live && !peer.summary.attached, "{peer:?}");
     assert!(render_list_plain(&path, &peers).contains("reachable"));
 
     // The same pane with a human in it.
@@ -654,8 +660,8 @@ fn the_listing_separates_reachable_from_attached() {
         },
     )
     .expect("readable");
-    let peer = peers.iter().find(|p| p.id == "peer").unwrap();
-    assert!(peer.live && peer.attached, "{peer:?}");
+    let peer = peers.iter().find(|p| p.summary.id == "peer").unwrap();
+    assert!(peer.summary.live && peer.summary.attached, "{peer:?}");
     assert!(
         render_list_plain(&path, &peers).contains("a human is attached"),
         "the line must say why it is not reachable"
@@ -908,11 +914,14 @@ fn same_folder_same_name_sessions_are_still_addressed_by_id() {
     .expect("readable");
 
     assert_eq!(peers.len(), 3, "both same-folder sessions are listed");
-    assert_eq!(peers[0].name.as_deref(), Some("The Build"));
-    assert_eq!(peers[1].name.as_deref(), Some("The Build"));
-    assert_eq!(peers[2].name, None, "an unnamed session shows no name");
+    assert_eq!(peers[0].summary.name.as_deref(), Some("The Build"));
+    assert_eq!(peers[1].summary.name.as_deref(), Some("The Build"));
+    assert_eq!(
+        peers[2].summary.name, None,
+        "an unnamed session shows no name"
+    );
     // Only the one whose pane is up is reachable, which is the point of listing them apart.
-    assert!(!peers[0].live && peers[1].live, "{peers:?}");
+    assert!(!peers[0].summary.live && peers[1].summary.live, "{peers:?}");
 
     let plain = render_list_plain(&path, &peers);
     assert!(
@@ -1076,7 +1085,7 @@ fn a_job_is_not_a_peer_so_it_is_unlisted_and_addressing_one_does_not_invite_a_re
         default_registry: &|| PathBuf::from("/nonexistent/pmtui-test/registry.json"),
     };
     let (_, peers) = run_list(&listing, &deps).expect("the registry is readable");
-    let ids: Vec<&str> = peers.iter().map(|p| p.id.as_str()).collect();
+    let ids: Vec<&str> = peers.iter().map(|p| p.summary.id.as_str()).collect();
     assert_eq!(
         ids,
         ["peer", "me"],
