@@ -86,6 +86,10 @@ impl ReceiptState {
 
 /// Why a spawn did not produce a ready child. The first four are raised by the command, the
 /// rest by the dashboard.
+///
+/// A CODE NOTHING CAN CONSTRUCT IS WORSE THAN NONE, because the skill tells an agent to branch on
+/// these by name: `NestedSpawnRefused` left with the depth rule and `ChildLimitReached` with the
+/// per-parent cap, rather than staying here as something an agent would wait for forever.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
@@ -94,7 +98,6 @@ pub enum ErrorCode {
     RequestConflict,
     RequestUnwritable,
     ParentNotFound,
-    NestedSpawnRefused,
     DirNotFound,
     /// The directory exists but is neither inside the parent's root nor another session's root.
     DirNotAllowed,
@@ -114,13 +117,12 @@ impl ErrorCode {
     /// pair list is the same length, so a new code cannot ship with an untested name — which is
     /// what happened to [`Self::JobFailed`], the one code the spawn skill tells an agent to branch
     /// on by name.
-    pub const ALL: [ErrorCode; 14] = [
+    pub const ALL: [ErrorCode; 13] = [
         Self::NotInASession,
         Self::InvalidArgument,
         Self::RequestConflict,
         Self::RequestUnwritable,
         Self::ParentNotFound,
-        Self::NestedSpawnRefused,
         Self::DirNotFound,
         Self::DirNotAllowed,
         Self::MessageTooLong,

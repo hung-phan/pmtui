@@ -56,7 +56,7 @@ not a session you talk to. You cannot message it, and it cannot ask you anything
        command with the original arguments and the same `--request-id` to check on it. Never make
        a new id for the same task.
      - `request_unwritable`: rerun the same command, with the same `--request-id`, later.
-     - `nested_spawn_refused` or `dir_not_allowed`: stop and ask the human.
+     - `dir_not_allowed`: stop and ask the human.
      - `invalid_argument`, `dir_not_found`, `message_too_long` or `invalid_request`: nothing ran.
        Fix the argument, then retry with a new id.
      - `job_failed`: the child ran, and it reports that the task failed. Read `result.summary`,
@@ -82,7 +82,7 @@ not a session you talk to. You cannot message it, and it cannot ask you anything
 
    The command reports `cancel_requested`. Keep checking as in step 5, until the receipt reads
    `cancelled`.
-7. A job cannot spawn. Ask for the children the work needs.
+7. A job cannot spawn. A session can, at any depth. Ask for the children the work needs.
 
 ## Ask for a session instead of a job
 
@@ -106,7 +106,7 @@ Five rules change for a session:
 1. It reports no result. Nothing writes `result` or `work` for it.
 2. You cannot cancel it. Its human closes it with `d`.
 3. It stays on the dashboard after its agent exits.
-4. It cannot ask for its own children. The product refuses a request from a spawned session.
+4. It can ask for children of its own. A job cannot, because a job gets no way to ask.
 5. It has its own human and its own goal. It carries no orders from you.
 
 Ask for a session when the work needs many turns, or an answer from you. Ask for a job for every

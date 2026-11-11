@@ -489,15 +489,6 @@ fn validation_failures_write_failed_receipts_and_stage_nothing() {
             code: ErrorCode::ParentNotFound,
         },
         Refused {
-            what: "nested parent",
-            setup: |b| {
-                b.update_row("service", |parent| parent.spawned_by = Some("root".into()));
-                args(MESSAGE)
-            },
-            between: untouched,
-            code: ErrorCode::NestedSpawnRefused,
-        },
-        Refused {
             what: "missing dir",
             setup: |b| SpawnArgs {
                 dir: Some(b.base.join("missing")),
@@ -1534,8 +1525,15 @@ fn a_claim_that_cannot_be_written_stages_nothing() {
     assert_eq!(b.state(REQ), Some(ReceiptState::Ready));
 }
 
+/// A CHILD MAY COORDINATE. This used to be refused with `nested_spawn_refused`, which let a
+/// coordinator delegate work but never delegate COORDINATION — and the refusal was aimed at a job,
+/// which cannot reach the command anyway (it is given no `ManagedEnv`). What it actually stopped was
+/// a session asking for the help its own work needed.
+///
+/// The grandchild's lineage names its OWN parent rather than the root, so the tree is the shape of
+/// the work: three rows, each pointing one step up.
 #[test]
-fn a_child_spawn_request_is_refused_as_nested() {
+fn a_child_may_spawn_its_own_child() {
     let mut b = broker();
     b.publish(REQ, args(MESSAGE));
     b.settle();
@@ -1547,15 +1545,26 @@ fn a_child_spawn_request_is_refused_as_nested() {
     .unwrap();
     b.discover();
     b.settle();
+
     let receipt = spawn::read_receipt(&child_requests, &req_id(5))
         .unwrap()
         .unwrap();
-    assert_eq!(receipt.state, ReceiptState::Failed);
     assert_eq!(
-        receipt.error.map(|error| error.code),
-        Some(ErrorCode::NestedSpawnRefused)
+        receipt.state,
+        ReceiptState::Ready,
+        "a grandchild comes up like any other child: {receipt:?}"
     );
-    assert_eq!(b.rows().len(), 2);
+    assert_eq!(receipt.error, None);
+    let rows = b.rows();
+    assert_eq!(rows.len(), 3, "root, child, grandchild: {rows:?}");
+    let grandchild = rows
+        .iter()
+        .find(|row| row.spawned_by.as_deref() == Some("service-2"))
+        .unwrap_or_else(|| panic!("no row names the child as its parent: {rows:?}"));
+    assert_eq!(
+        grandchild.root, b.root,
+        "it inherits the folder of the session that asked"
+    );
 }
 
 #[test]

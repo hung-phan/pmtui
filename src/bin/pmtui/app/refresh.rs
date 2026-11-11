@@ -307,6 +307,9 @@ impl App {
             })
             .collect();
         views.sort_by(row_order);
+        // THEN THE TREE, within each group only: a parent is followed by its own children, which is
+        // the order both the list and `j`/`k` read. Urgency still decides the groups.
+        arrange_lineage(&mut views);
         self.projects = views;
         // The freshly rebuilt working-vs-idle gate replaces the taken one; entries for rows not
         // seen this tick were never re-inserted, so a closed session's gate state is dropped.

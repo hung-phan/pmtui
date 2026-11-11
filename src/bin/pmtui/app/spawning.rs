@@ -629,16 +629,17 @@ pub(super) fn plan_child(reg: &Registry, request: &SpawnRequest) -> Result<Child
                 ),
             ))
         })?;
-    if let Some(grandparent) = parent.spawned_by.as_deref() {
-        return Err(refusal(
-            ErrorCode::NestedSpawnRefused,
-            format!(
-                "{} was spawned by {grandparent}, and a spawned session cannot spawn",
-                parent.id
-            ),
-        )
-        .into());
-    }
+    // NO DEPTH RULE. A spawned session used to be refused here with `nested_spawn_refused`, so a
+    // coordinator could delegate work but never delegate COORDINATION — and the refusal did not
+    // tell apart the two kinds of child it was aimed at. A JOB still cannot spawn, and by
+    // construction rather than by a check: it is given no `ManagedEnv`, so it cannot name itself to
+    // the command at all. What the rule actually stopped was a SESSION, which has its own human,
+    // its own row and its own goal, from asking for the help its own work needs.
+    //
+    // NOTHING NOW BOUNDS DEPTH, as nothing bounds breadth since the per-parent cap went. That is the
+    // chosen trade and not an oversight: the guards that remain are the engine's own rate limits and
+    // a human who sees every session as a row. A real bound, if one is ever wanted, has to be a
+    // bound on LIVE agents rather than on the shape of the tree — the shape is what the work is.
     let dir = resolve_dir(args.dir.as_deref(), &parent.root, reg)?;
     let parent_engine = parent.engine.unwrap_or(Engine::Claude);
     let engine = args.agent.unwrap_or(parent_engine);

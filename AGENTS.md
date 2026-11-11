@@ -173,8 +173,12 @@ server and daemon when the test ends.
   never free, while the one code that would have reached a human (`ErrorCode::ChildLimitReached`)
   had no constructor anywhere in the tree. `children_of` and that code are deleted too; a code
   nothing can construct is worse than none, because the skill told agents to act on it.
-  NOTHING NOW BOUNDS HOW MANY CHILDREN A PARENT RUNS, and that is the chosen trade rather than an
-  oversight. `spawn::MAX_UNFINISHED_PER_PARENT` (16) reads like the remaining ceiling and is not
+  NOTHING NOW BOUNDS HOW MANY CHILDREN A PARENT RUNS, NOR HOW DEEP THEY GO, and that is the chosen
+  trade rather than an oversight. `nested_spawn_refused` went the same way as the cap and for a
+  related reason: it let a coordinator delegate work but never delegate COORDINATION, and it was
+  aimed at a child that cannot reach the command anyway — a JOB is given no `ManagedEnv`, so it
+  cannot name itself, which is a refusal by construction rather than by a check. `spawned_by` names
+  ONE STEP UP, so the chain is the shape of the work. `spawn::MAX_UNFINISHED_PER_PARENT` (16) reads like the remaining ceiling and is not
   one: MEASURED, a job leaves `spawn.jobs` the moment it has LAUNCHED, which frees window room at
   once, so seventeen requests produce seventeen running children in a single pass with an empty
   queue. The window paces concurrent LAUNCHES; it caps nothing. The guards that remain are the
@@ -213,6 +217,19 @@ server and daemon when the test ends.
   `resize_window` flips tmux to `window-size manual` — measured, a window resized to 70 stayed 70
   under a 180-column client — so every attach path calls `set_window_size_auto` FIRST, and the run
   loop forgets the fit afterwards so the next frame re-fits.
+- THE SESSIONS LIST IS GROUPED BY URGENCY AND INDENTED BY LINEAGE, and the two are not the same
+  axis. `RowGroup` (`NeedsYou → Autopilot → Standard → Paused`) owns the sections; `arrange_lineage`
+  then settles the order WITHIN one section so a parent is followed by its own descendants, and
+  `row_depth` counts only ancestors that are in the SAME section. That scoping is the whole safety
+  property: a needy child whose parent is on Autopilot is drawn flush at the top of `NEEDS YOU`
+  rather than folded under a parent that is not there, because a row a human must go looking for is
+  a row the product failed to show them — and the preview head already names the parent, which is
+  the weight lineage has always had there. The tie (`└ `) is drawn BEFORE the glyph and its columns
+  come out of the 16-column name field, so `ROW_FIXED_W` is unchanged and every trailing admission
+  threshold stays put; the indent caps at `ROW_MAX_INDENT` because depth is now unbounded and a
+  third level would eat names to draw a shape the `from <parent>` cue states in words. `refresh`
+  runs `sort_by(row_order)` and then `arrange_lineage`, and that one vec is what ties `j`/`k` to the
+  screen — `the_sort_and_the_screen_agree_on_row_order` asserts the whole pipeline, not half of it.
 - No VERDICT row. One used to sit above the body naming which sessions need you, on the theory that
   the status bar carries the count and the names are what a count cannot. They are not: the
   `NEEDS YOU (n)` group inside the SESSIONS pane lists exactly those sessions, sorted the same way,

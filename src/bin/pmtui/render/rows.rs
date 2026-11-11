@@ -41,6 +41,23 @@ pub(crate) const ROW_AGE_COL_W: u16 = 4;
 /// `" chat"` — the live-chat chip.
 pub(crate) const ROW_CHAT_W: u16 = 5;
 
+/// How many lineage levels a row may be indented by.
+///
+/// TWO, and the `from <parent>` cue in the preview head carries anything deeper. Nothing bounds
+/// depth any more (a session may coordinate its own children), but the indent is paid for out of
+/// the 16-column name field — see [`ROW_INDENT_W`] — so a third level would start eating names to
+/// draw a shape the preview already states in words.
+pub(crate) const ROW_MAX_INDENT: usize = 2;
+
+/// Columns one lineage level costs: `"\u{2514} "`, or two spaces under it.
+///
+/// TAKEN FROM THE NAME FIELD, never added to the row. [`ROW_FIXED_W`] is what every trailing item
+/// is admitted against, and that admission is load-bearing — a regression there once shipped a
+/// `(paused)` badge no human could see, and another spent the last columns on the age while
+/// dropping the chip that said why nothing was advancing. An indent that widened the head would
+/// move every one of those thresholds; this one moves none.
+pub(crate) const ROW_INDENT_W: usize = 2;
+
 /// Which section of the SESSIONS list a row belongs to.
 ///
 /// Attention and unavailable terminals are view-level states around the actual operating mode;
@@ -88,6 +105,105 @@ pub(crate) fn row_group(v: &ProjectView) -> RowGroup {
         RowGroup::Autopilot
     } else {
         RowGroup::Standard
+    }
+}
+
+/// How many of `row`'s ancestors are in `members` — its drawn indent level.
+///
+/// Pure over the slice it is handed, for the same reason [`row_group`] is: the arrangement and the
+/// render must not disagree about which rows are children. An ancestor OUTSIDE the group does not
+/// count, which is what keeps a needy child at the top of `NEEDS YOU` rather than indented under a
+/// parent that is not there — the `from <parent>` cue still names it.
+///
+/// The walk is bounded by `members.len()`, so a lineage that somehow pointed in a circle costs one
+/// pass rather than hanging the frame.
+pub(crate) fn row_depth(views: &[ProjectView], members: &[usize], row: usize) -> usize {
+    let mut depth = 0;
+    let mut parent = views[row].spawned_by.as_deref();
+    while let Some(id) = parent {
+        let Some(&at) = members.iter().find(|&&i| views[i].id == id) else {
+            break;
+        };
+        depth += 1;
+        if depth > members.len() {
+            break;
+        }
+        parent = views[at].spawned_by.as_deref();
+    }
+    depth
+}
+
+/// The indices of `views`, grouped as the list draws them and with each child directly after its
+/// own parent.
+///
+/// LINEAGE IS NOT A CONTAINER HERE, and that is the whole point. The groups stay exactly as
+/// [`row_order`] put them — urgency first — and this only settles the order WITHIN one group, so a
+/// needy child whose parent is on Autopilot still sits at the top of `NEEDS YOU` instead of being
+/// folded under a parent elsewhere. The product's one job is telling a human which agent needs
+/// them, and a row that is hidden inside a parent is a row that failed to.
+///
+/// Within a group a parent is followed by its descendants, depth first, each in the order
+/// [`row_order`] already gave them. A member whose parent is not in the group is a root here.
+pub(crate) fn lineage_order(views: &[ProjectView]) -> Vec<usize> {
+    let mut order = Vec::with_capacity(views.len());
+    for group in ROW_GROUPS {
+        let members: Vec<usize> = (0..views.len())
+            .filter(|i| row_group(&views[*i]) == group)
+            .collect();
+        let mut placed = vec![false; members.len()];
+        for (n, &i) in members.iter().enumerate() {
+            if placed[n] || row_depth(views, &members, i) != 0 {
+                continue;
+            }
+            placed[n] = true;
+            order.push(i);
+            push_descendants(
+                views,
+                &members,
+                &views[i].id.clone(),
+                &mut placed,
+                &mut order,
+            );
+        }
+        // Defensive, and it keeps the two orders equal in length: anything left unplaced (only
+        // reachable from a lineage that points in a circle) keeps its sorted position at the end.
+        for (n, &i) in members.iter().enumerate() {
+            if !placed[n] {
+                order.push(i);
+            }
+        }
+    }
+    order
+}
+
+/// Append every member whose parent is `parent`, then that member's own descendants.
+fn push_descendants(
+    views: &[ProjectView],
+    members: &[usize],
+    parent: &str,
+    placed: &mut [bool],
+    order: &mut Vec<usize>,
+) {
+    for (n, &i) in members.iter().enumerate() {
+        if placed[n] || views[i].spawned_by.as_deref() != Some(parent) {
+            continue;
+        }
+        placed[n] = true;
+        order.push(i);
+        push_descendants(views, members, &views[i].id.clone(), placed, order);
+    }
+}
+
+/// Reorder `views` in place so the list reads as the tree it is. Called once per refresh, after
+/// [`row_order`]; the keyboard walks this vec and the render filters it in this order, so screen
+/// order and `j`/`k` cannot come apart.
+pub(crate) fn arrange_lineage(views: &mut Vec<ProjectView>) {
+    let order = lineage_order(views);
+    let mut taken: Vec<Option<ProjectView>> = views.drain(..).map(Some).collect();
+    for i in order {
+        if let Some(view) = taken[i].take() {
+            views.push(view);
+        }
     }
 }
 
@@ -202,7 +318,12 @@ fn tier_style(tier: Option<Tier>) -> Style {
 /// `content_w` is the LIST pane's inner width (see [`ROW_AGE_W`]); `now` is passed in
 /// rather than read from the clock here so the row stays a pure function of its inputs
 /// and the age is unit-testable without a fake clock.
-pub(crate) fn project_row_line(v: &ProjectView, content_w: u16, now: Epoch) -> Line<'static> {
+pub(crate) fn project_row_line(
+    v: &ProjectView,
+    content_w: u16,
+    now: Epoch,
+    depth: usize,
+) -> Line<'static> {
     let offline = row_offline(v);
     let (glyph, gcolor) = if offline {
         ("○", agent_manager::theme::hard())
@@ -210,14 +331,24 @@ pub(crate) fn project_row_line(v: &ProjectView, content_w: u16, now: Epoch) -> L
         status_glyph(v)
     };
     let loud = v.enabled && v.posture.needs_attention();
-    let mut spans = vec![Span::styled(
+    // THE LINEAGE TIE COMES FIRST, so a child's whole row — glyph included — steps right of its
+    // parent's. Its columns come OUT OF THE NAME FIELD rather than being added to the head, so
+    // `ROW_FIXED_W` is unchanged and every trailing admission threshold stays where it was.
+    let depth = depth.min(ROW_MAX_INDENT);
+    let mut spans: Vec<Span<'static>> = Vec::with_capacity(8);
+    if depth > 0 {
+        let mut tie = " ".repeat((depth - 1) * ROW_INDENT_W);
+        tie.push_str("\u{2514} ");
+        spans.push(Span::styled(tie, attention::text_dim()));
+    }
+    spans.push(Span::styled(
         format!("{glyph} "),
         if loud {
             Style::default().fg(gcolor).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(gcolor)
         },
-    )];
+    ));
     // EVERY id is ordinary text. An autopilot row's id used to start cyan so the TachyonFX hue sweep
     // had saturation to rotate; the sweep is gone, so the colour was left saying "this row is driven"
     // — a job the Autopilot section, the `[A]` tag and the `control pmd` line already do, and one a hue
@@ -225,7 +356,7 @@ pub(crate) fn project_row_line(v: &ProjectView, content_w: u16, now: Epoch) -> L
     // color for the autopilot text. just keey it normal"*).
     // Sized in terminal cells: a display name is user text, and a CJK or emoji label padded by
     // chars pushed the status label and tier tag past the pane edge.
-    let id_field = pad_cols(v.label(), 16);
+    let id_field = pad_cols(v.label(), 16 - depth * ROW_INDENT_W);
     let id_color = attention::text();
     spans.push(Span::styled(
         id_field,
@@ -335,7 +466,7 @@ pub(crate) fn project_row_text(v: &ProjectView) -> String {
 /// width tier is tested through.
 #[cfg(test)]
 pub(crate) fn project_row_text_at(v: &ProjectView, content_w: u16, now: Epoch) -> String {
-    project_row_line(v, content_w, now)
+    project_row_line(v, content_w, now, 0)
         .spans
         .iter()
         .map(|s| s.content.as_ref())
@@ -418,7 +549,7 @@ pub(crate) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
         drawn_a_group = true;
         items.push(ListItem::new(group.header(members.len(), content_w)));
         item_to_proj.push(None); // a header is not selectable
-        for i in members {
+        for &i in &members {
             let v = &app.projects[i];
             if i == app.selected {
                 sel_item = Some(items.len());
@@ -438,7 +569,12 @@ pub(crate) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
                 Span::raw("  ")
             };
             let mut spans = vec![gutter];
-            spans.extend(project_row_line(v, content_w, now).spans);
+            // ITS OWN GROUP DECIDES THE INDENT. `row_depth` counts only ancestors inside
+            // `members`, so a child whose parent sits in another section is drawn flush — and keeps
+            // its `from <parent>` cue in the preview head, where lineage has always been a cue.
+            spans.extend(
+                project_row_line(v, content_w, now, row_depth(&app.projects, &members, i)).spans,
+            );
             let mut item = ListItem::new(Line::from(spans));
             if !v.enabled {
                 // Preserve the disabled-row dimming across the whole row.
