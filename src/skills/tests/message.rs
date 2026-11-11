@@ -107,6 +107,31 @@ fn it_shows_the_two_commands_and_reads_the_binary_from_the_environment() {
     );
 }
 
+/// `--list` reports two DIFFERENT things on one line, and an agent that conflates them either waits
+/// for a working peer or sends into an attached human's pane. The absent-`working` rule is here for
+/// the same reason it is in [`crate::view::SessionSummary`]'s doc: reading `null` as idle is how a
+/// coordinator reports a mid-turn agent as finished.
+#[test]
+fn it_separates_what_a_peer_is_doing_from_whether_it_can_be_reached() {
+    let prose = prose();
+    assert!(
+        prose.contains("tag `reachable`"),
+        "the sendable answer is a TAG, not the state: {prose}"
+    );
+    assert!(
+        prose.contains("It says what that session does now"),
+        "the state must be introduced as what the peer is doing"
+    );
+    assert!(
+        prose.contains("Branch on the field `needs_you`"),
+        "an agent must be told the one field to branch on"
+    );
+    assert!(
+        prose.contains("Absent means not known, and it never means idle"),
+        "an absent `working` read as idle reports a working agent as finished"
+    );
+}
+
 #[test]
 fn it_bounds_the_conversation_and_says_what_to_do_at_the_limit() {
     let prose = prose();

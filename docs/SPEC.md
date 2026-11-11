@@ -355,6 +355,13 @@ reach a terminal a person is attached to, MUST NOT answer a menu with its own wo
 while another input is being delivered. The product tells the sender which of these refused it, and whether
 asking again would help.
 
+A worker MAY ask which sessions it can reach. The product MUST tell it what each session is DOING, and
+MUST tell it apart from whether that terminal can take a message now. A session that works is reachable,
+and a session that waits for its person is reachable too. Where the product cannot know whether a worker
+is in a turn, it MUST say that it does not know. It MUST NOT report that as idle, because a worker
+reported as idle is read as finished. Every reading in that answer MUST come from the same projection the
+dashboard reads, so that two surfaces cannot give one field two answers.
+
 A delivered message becomes ONE ordinary turn of the other worker. The product MUST mark it as coming from
 another session, and MUST say which command answers it. Without that mark the other worker cannot tell a
 peer from its own person. A message carries no authority: the procedure tells the worker that a request
