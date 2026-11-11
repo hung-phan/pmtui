@@ -106,7 +106,7 @@ Five rules change for a session:
 1. It reports no result. Nothing writes `result` or `work` for it.
 2. You cannot cancel it. Its human closes it with `d`.
 3. It stays on the dashboard after its agent exits.
-4. It can ask for its own children. A job cannot.
+4. It cannot ask for its own children. The product refuses a request from a spawned session.
 5. It has its own human and its own goal. It carries no orders from you.
 
 Ask for a session when the work needs many turns, or an answer from you. Ask for a job for every

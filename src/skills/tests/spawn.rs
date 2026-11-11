@@ -405,8 +405,16 @@ fn the_skill_tells_the_two_forms_apart() {
     );
     // The job's own rules stay put, so the two cannot be read as one procedure.
     assert!(prose.contains("A job cannot spawn."));
+    // A SPAWNED SESSION CANNOT SPAWN EITHER, and the skill must not promise that it can: the
+    // depth rule is in `plan_child`, which refuses ANY parent whose own `spawned_by` is set,
+    // whatever kind it is. A job differs by being unable to run the command at all — it is given
+    // no `ManagedEnv` — but the outcome a coordinator plans around is the same refusal.
     assert!(
-        prose.contains("It can ask for its own children. A job cannot."),
-        "the asymmetry is stated where the difference is listed"
+        prose.contains("It cannot ask for its own children."),
+        "the depth rule is stated where the differences are listed"
+    );
+    assert!(
+        !prose.contains("It can ask for its own children"),
+        "and the opposite is never promised"
     );
 }
