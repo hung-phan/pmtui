@@ -1,6 +1,6 @@
 ---
 name: pmtui-spawn
-description: Dispatch one independent part of your task to a child job. A child job is one headless agent run that does the task, reports a result and exits. Invoke when another agent could do that part without you. Dispatch it with one complete Message, poll for its result, and act on the JSON.
+description: Dispatch one independent part of your task to a child job. A child job is one headless agent run that does the task, reports a result and exits. Invoke when another agent could do that part without you. Dispatch it with one complete Message, poll for its result, and act on the JSON. Use --session instead when the part needs an agent that stays, which makes a persistent session you can message.
 ---
 
 # Spawn a child job
@@ -83,3 +83,31 @@ not a session you talk to. You cannot message it, and it cannot ask you anything
    The command reports `cancel_requested`. Keep checking as in step 5, until the receipt reads
    `cancelled`.
 7. A job cannot spawn. Ask for the children the work needs.
+
+## Ask for a session instead of a job
+
+A job is for work that ends. Some work does not end in one run. It needs an agent that stays.
+
+Add `--session` to ask for a SESSION instead of a job. A session is a persistent agent. It is the
+same thing a human makes with `n` in the dashboard. It takes your Message as its first turn.
+
+```bash
+"$PMTUI_BIN" spawn --session --request-id "$id" --name "<short name>" --message "<the goal, and the first step>" --wait 60 --json
+```
+
+Read `state` from the JSON. `ready` means the session is up. Exit 0 means the same. This form waits
+for no result, because a session reports none.
+
+A session is a PEER after that. Talk to it with your `pmtui-message` skill. Address it by the `id`
+inside `session`.
+
+Five rules change for a session:
+
+1. It reports no result. Nothing writes `result` or `work` for it.
+2. You cannot cancel it. Its human closes it with `d`.
+3. It stays on the dashboard after its agent exits.
+4. It cannot ask for its own children. The product refuses a request from a spawned session.
+5. It has its own human and its own goal. It carries no orders from you.
+
+Ask for a session when the work needs many turns, or an answer from you. Ask for a job for every
+other part. A job is cheaper, and it ends by itself.

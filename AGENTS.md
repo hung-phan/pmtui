@@ -310,11 +310,29 @@ server and daemon when the test ends.
 keeps commands, arguments and exit codes out of it.
 
 ```bash
-pmtui spawn [--message M] [--title T] [--name N] [--dir D] [--agent A] [--model M] \
+pmtui spawn [--message M] [--session] [--title T] [--name N] [--dir D] [--agent A] [--model M] \
             [--request-id ID] [--wait SECONDS] [--json]
 pmtui spawn --status                      # every child this session asked for, one line each
 pmtui spawn --cancel --request-id ID      # ask once; asking twice is asking once
 ```
+
+`--session` ASKS FOR A TEAMMATE RATHER THAN A TASK: the same thing `n` creates, launched
+interactively with a `ManagedEnv`, carrying the Message as its first turn with no job preamble,
+messageable at once, and retired by nobody. The chat path was built in v1 and `launch_child` still
+has both arms — what made the interactive one unreachable was `stage()` hard-coding
+`LaunchKind::Job`, so this flag is the request reaching a decision the broker already knew how to
+make. The REQUEST decides and the request alone: a row's `launch.kind` is written from
+`args.kind`, and a request that does not name a kind asked for a job. That default is the OPPOSITE
+of `LaunchKind`'s own (`Chat`) and both are right — an old ROW was staged by v1, when every staged
+child was interactive, while an old REQUEST came from a build whose only form was the job.
+`SpawnArgs` SKIPS THE FIELD ON THE WIRE FOR A JOB, so every existing request hashes byte-identically:
+the hash is fixed at staging and matched on recovery, so a field that changed those bytes would
+orphan a child staged by the previous build. The RECEIPT carries the kind too, because it outlives
+the request file and is what a later `--cancel` reads.
+
+A SESSION CANNOT BE CANCELLED, and that refusal is in the 1 family. The harvest only considers job
+rows, so a marker written for a session would be acted on by nobody and polled at 3 forever. Closing
+a session is the human's `d` — the row leaving their list IS the human deciding.
 
 `--cancel` names its child through `--request-id`; it takes no value of its own. The agent flag is
 `--agent`, not `--engine`.
@@ -329,7 +347,7 @@ Dispatch (`--message`) and `--cancel`:
 
 | Code | States |
 |---|---|
-| 0 | `done` — the child ran and reported |
+| 0 | `done` — the child ran and reported; under `--session`, `ready` — the session is up |
 | 3 | `queued`, `in_progress`, `cancel_requested`, `needs_attention`, `needs_human`, and a receipt still `claimed`/`staged`/`launching` — ask again under the SAME request id |
 | 1 | `failed`, `ended_without_result`, `cancelled` — read `error.code` |
 | 2 | usage error |
@@ -337,13 +355,13 @@ Dispatch (`--message`) and `--cancel`:
 `--status`: always 0 whenever it could read its own directory, because a listing is not an outcome.
 Its `state` field carries any `ReceiptState`, and `ready` there means the job is STILL RUNNING.
 
-`ready` AND `outcome_unknown` ARE ABSENT FROM THE TABLE ON PURPOSE, and they are reachable in
-neither form: `answered` returns false for both, so neither ends the wait, and `--cancel` returns
-early only on `is_job_terminal`, which excludes both. The table used to promise `ready` at 0 under
-the heading "the thing you asked for happened" — for a job that is "the run started", and treating
-a launch as an answer is the single mistake this whole surface is shaped to prevent. `exit_code`
-keeps its arms for them (the match is exhaustive over the enum) and a test holds the help text to
-the predicate.
+`ready` MEANS OPPOSITE THINGS TO THE TWO FORMS, and `answered` takes the kind for that one reason.
+For a JOB it is "the run started": treating a launch as an answer is the single mistake this whole
+surface is shaped to prevent, and the table used to promise `ready` at 0 under the heading "the
+thing you asked for happened". For a SESSION no result is coming, so the launch IS the answer and a
+session that never ended the wait would be a 3 forever. `outcome_unknown` is an answer for neither
+and stays absent from the table; `exit_code` keeps its arm (the match is exhaustive over the enum)
+and one test pins the predicate and the help text together, because that is the pair that drifted.
 
 `needs_human` sits in the 3 family for the same reason as `needs_attention`: the receipt names the
 next action. Every form reads only `PMTUI_SESSION`/`PMTUI_STATE_DIR`/`PMTUI_BIN` plus its own state

@@ -184,6 +184,13 @@ pub struct SpawnReceipt {
     /// it on a replay: another hash under the same id is a conflict even after cleanup.
     #[serde(default)]
     pub args_hash: Option<String>,
+    /// WHICH FORM THIS REQUEST ASKED FOR. The receipt is the only record that outlives both the
+    /// request file and (for a job) the row, so this is where a later command learns whether the id
+    /// named a one-shot job or a session: `--cancel` refuses a session, because closing a session is
+    /// the human's `d`, and without the kind that refusal would work until the request file was
+    /// cleaned up and then silently stop working. Absent means `Job`; see [`super::default_kind`].
+    #[serde(default = "super::default_kind")]
+    pub kind: crate::registry::LaunchKind,
     /// What a job child reported when it ended, absent until then and absent for a chat child.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<super::JobResult>,

@@ -29,6 +29,7 @@ fn args(message: &str) -> SpawnArgs {
         dir: None,
         agent: None,
         model: None,
+        ..SpawnArgs::default()
     }
 }
 
@@ -1398,6 +1399,7 @@ fn retention_removes_only_old_final_requests_and_keeps_every_receipt() {
         result: None,
         updated_at,
         work: None,
+        kind: agent_manager::registry::LaunchKind::Job,
     };
     let cases = [
         (req_id(1), ReceiptState::Ready, old, false),
@@ -1742,6 +1744,7 @@ fn an_unwritable_requests_dir_is_noted_once() {
             result: None,
             updated_at: SystemClock.now() - spawn::RETENTION_SECS - 60,
             work: None,
+            kind: agent_manager::registry::LaunchKind::Job,
         },
     )
     .unwrap();
@@ -2230,6 +2233,7 @@ fn a_receipt_past_claimed_proves_its_request_staged_a_row() {
                 result: None,
                 updated_at: SystemClock.now(),
                 work: None,
+                kind: agent_manager::registry::LaunchKind::Job,
             },
         )
         .unwrap();
@@ -2526,6 +2530,7 @@ fn a_pending_row_whose_request_waits_behind_the_cap_is_left_for_discovery() {
                 result: None,
                 updated_at: SystemClock.now(),
                 work: None,
+                kind: agent_manager::registry::LaunchKind::Job,
             },
         )
         .unwrap();
@@ -2635,4 +2640,85 @@ fn a_row_staged_before_the_kind_field_launches_as_an_interactive_child() {
             .map(|launch| launch.state),
         Some(LaunchState::Started)
     );
+}
+
+/// A SESSION REQUEST STANDS UP A TEAMMATE, not a one-shot run, and the whole difference is carried
+/// by the request: `stage` used to hard-code `LaunchKind::Job`, which made the interactive arm of
+/// `launch_child` unreachable — the chat path was built in v1, then the job wrapper took over its
+/// only entry point.
+///
+/// What it must be is what the dashboard's own `n` makes: an INTERACTIVE agent, launched with a
+/// `ManagedEnv` so it can identify itself (a job is given none, by construction), carrying the
+/// Message as its first turn with NO job preamble — nobody tells it to report a result and exit —
+/// and left alone by the retirement sweep forever, because its human closes it.
+#[test]
+fn a_session_request_launches_an_interactive_child_that_is_never_retired() {
+    let mut b = broker();
+    let asked = SpawnArgs {
+        kind: agent_manager::registry::LaunchKind::Chat,
+        title: Some("Own the migration".into()),
+        ..args(MESSAGE)
+    };
+    b.publish(REQ, asked.clone());
+    b.settle();
+
+    let row = b.row("service-2").expect("a row");
+    assert_eq!(
+        row.launch.as_ref().map(|launch| launch.kind),
+        Some(agent_manager::registry::LaunchKind::Chat),
+        "the request decides the kind"
+    );
+    assert!(!row.is_job(), "so nothing treats it as a job");
+    assert!(row.enabled, "it is a live session");
+    assert_eq!(row.initial_prompt.as_deref(), Some(MESSAGE));
+
+    // An INTERACTIVE launch, not a wrapped one-shot step.
+    assert!(
+        b.pane.steps().is_empty(),
+        "a session is not a step: {:?}",
+        b.pane.steps()
+    );
+    let launches = b.pane.launches();
+    assert_eq!(launches.len(), 1, "launched once: {launches:?}");
+    let (session, cwd, argv) = &launches[0];
+    assert_eq!(session, &b.child_session());
+    assert_eq!(cwd, &b.root.display().to_string());
+    let joined = argv.join(" ");
+    assert!(
+        !joined.contains("Nobody is at this terminal"),
+        "no job preamble reaches a session: {joined}"
+    );
+    // It can identify itself, which is what lets it spawn and be messaged in turn.
+    let envs = b.pane.launched_env();
+    assert_eq!(envs.len(), 1, "a session gets a ManagedEnv: {envs:?}");
+
+    let ready = b.receipt(REQ).expect("a receipt");
+    assert_eq!(ready.state, ReceiptState::Ready, "ready IS the answer here");
+    assert_eq!(
+        ready.kind,
+        agent_manager::registry::LaunchKind::Chat,
+        "the receipt carries the form, so a later --cancel can refuse it"
+    );
+    assert_eq!(ready.args_hash, Some(asked.args_hash()));
+
+    // THE RETIREMENT SWEEP NEVER TOUCHES IT. A job's row is retired when its process is gone; a
+    // session's row outlives its agent, because only its human may remove it.
+    use agent_manager::tmux::Driver;
+    b.pane.terminate(&b.child_session()).unwrap();
+    for _ in 0..10 {
+        b.discover();
+        b.step();
+        let registry = Registry::load(&b.registry).unwrap();
+        b.app.retire_finished_jobs(&registry);
+    }
+    assert!(
+        b.row("service-2").is_some(),
+        "a session row survives its agent exiting, and every sweep"
+    );
+    assert_eq!(
+        b.state(REQ),
+        Some(ReceiptState::Ready),
+        "and so does its receipt"
+    );
+    assert_eq!(b.pane.launches().len(), 1, "nothing relaunches it");
 }

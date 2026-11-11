@@ -198,14 +198,9 @@ impl SpawnJob {
                 request_id: launch.request_id.clone(),
                 parent_session: parent.clone(),
                 created_at: 0,
-                args: SpawnArgs {
-                    message: String::new(),
-                    title: None,
-                    name: None,
-                    dir: None,
-                    agent: None,
-                    model: None,
-                },
+                // An orphan's row already carries the kind its launch was staged with, and these
+                // args reach nothing: it resumes at `Staged` and is never validated or launched.
+                args: SpawnArgs::default(),
             },
             parent,
             dir,
@@ -270,6 +265,9 @@ impl SpawnJob {
             launch_state: None,
             error: None,
             next_action: None,
+            // What was ASKED FOR, carried on every receipt this request gets, because the receipt
+            // outlives the request file and a later `--cancel` reads the kind from it.
+            kind: self.request.args.kind,
             args_hash: Some(self.hash.clone()),
             result: None,
             work: None,
@@ -560,6 +558,8 @@ impl App {
                 message: reason.to_string(),
             }),
             next_action: None,
+            // The request did not parse, so nothing asked for a session.
+            kind: spawn::default_kind(),
             args_hash: None,
             result: None,
             work: None,

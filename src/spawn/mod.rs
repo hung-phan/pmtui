@@ -37,8 +37,9 @@ pub const REQUESTS_DIR: &str = "spawn-requests";
 pub const MAX_REQUEST_BYTES: u64 = 64 * 1024;
 /// The most unfinished requests the dashboard processes per parent directory at once.
 pub const MAX_UNFINISHED_PER_PARENT: usize = 16;
-/// The most receipts one `pmtui spawn --status` lists. A parent is capped at five children, so this is
-/// slack for a long-lived session's tombstones rather than a limit anyone should reach.
+/// The most receipts one `pmtui spawn --status` lists. Nothing caps how many children a parent asks
+/// for, so this bounds one listing rather than the fan-out; it is slack for a long-lived session's
+/// tombstones rather than a limit anyone should reach.
 pub const MAX_RECEIPTS_LISTED: usize = 256;
 /// The most unsettled request entries the dashboard opens per parent directory in one refresh; a
 /// settled request (its receipt already final) is skipped without opening anything.
@@ -48,6 +49,17 @@ pub const TITLE_MAX_CHARS: usize = 120;
 /// How long a request file is kept after its receipt became final. The receipt itself is kept
 /// for good, as a tombstone.
 pub const RETENTION_SECS: i64 = 7 * 24 * 3600;
+
+/// What a request or receipt WITHOUT a `kind` field asked for: a job.
+///
+/// The serde default for BOTH files, and deliberately not [`LaunchKind`]'s own `Default` (`Chat`),
+/// which is right for a ROW — v1 staged only interactive children, so a row written then was one.
+/// A FILE without the field was written by a build whose only form was the job, so reading it as
+/// `Chat` would claim an agent asked for a session it never asked for. One function, because the
+/// two readers must not disagree.
+pub fn default_kind() -> crate::registry::LaunchKind {
+    crate::registry::LaunchKind::Job
+}
 
 pub use files::{
     Listed, Publish, ScanEntry, cancel_path, cancel_requested, is_valid_request_id,

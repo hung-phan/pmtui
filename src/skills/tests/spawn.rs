@@ -196,8 +196,12 @@ fn spawn_skill_body_names_the_command_request_id_and_every_state() {
     );
 }
 
+/// TWO RUNS, AND NOTHING SKIPPED IN EITHER. The job procedure is steps 1 to 7; the session section
+/// then restarts at 1 for the five rules that differ, because it is a different form rather than
+/// more of the same procedure. A duplicated or skipped number is how a reader loses its place in a
+/// list it is meant to follow in order.
 #[test]
-fn spawn_skill_is_exactly_its_seven_numbered_steps() {
+fn spawn_skill_numbers_the_job_procedure_then_restarts_for_the_session_form() {
     let numbered: Vec<&str> = SPAWN_SKILL_MD
         .lines()
         .filter_map(|line| {
@@ -205,7 +209,10 @@ fn spawn_skill_is_exactly_its_seven_numbered_steps() {
             (!number.is_empty() && number.chars().all(|c| c.is_ascii_digit())).then_some(number)
         })
         .collect();
-    assert_eq!(numbered, ["1", "2", "3", "4", "5", "6", "7"]);
+    assert_eq!(
+        numbered,
+        ["1", "2", "3", "4", "5", "6", "7", "1", "2", "3", "4", "5"]
+    );
 }
 
 #[test]
@@ -359,4 +366,55 @@ fn launch_installer_ships_the_skill_only_with_a_terminal_that_names_pmtui() {
         SPAWN_SKILL_MD
     );
     assert!(is_symlink(&paths.claude_spawn_skill_dir()));
+}
+
+/// THE SESSION FORM IS A DIFFERENT ASK, and the skill must keep it apart from the job's vocabulary.
+/// A `ready` that an agent reads with the job rules in mind is a launch mistaken for a finish; a
+/// cancel it believes in is a poll with no exit; and a peer it believes it commands is this
+/// product's one standing refusal. Each of those is a line here.
+#[test]
+fn the_skill_tells_the_two_forms_apart() {
+    // Whitespace is collapsed because the file is hard-wrapped: a sentence spans lines.
+    let prose = SPAWN_SKILL_MD
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        prose.contains("Add `--session` to ask for a SESSION instead of a job."),
+        "the flag is the whole difference, so it is named: {prose}"
+    );
+    assert!(
+        prose.contains("`ready` means the session is up."),
+        "`ready` must be given its meaning for THIS form"
+    );
+    assert!(
+        prose.contains("This form waits for no result, because a session reports none."),
+        "and it must say no result is coming"
+    );
+    assert!(
+        prose.contains("You cannot cancel it. Its human closes it with `d`."),
+        "a session is not cancellable, and the skill says who closes it"
+    );
+    assert!(
+        prose.contains("It carries no orders from you."),
+        "a session is a peer, and a peer takes no orders"
+    );
+    assert!(
+        prose.contains("pmtui-message"),
+        "it must point at how to talk to the session it just made"
+    );
+    // The job's own rules stay put, so the two cannot be read as one procedure.
+    assert!(prose.contains("A job cannot spawn."));
+    // A SPAWNED SESSION CANNOT SPAWN EITHER, and the skill must not promise that it can: the
+    // depth rule is in `plan_child`, which refuses ANY parent whose own `spawned_by` is set,
+    // whatever kind it is. A job differs by being unable to run the command at all — it is given
+    // no `ManagedEnv` — but the outcome a coordinator plans around is the same refusal.
+    assert!(
+        prose.contains("It cannot ask for its own children."),
+        "the depth rule is stated where the differences are listed"
+    );
+    assert!(
+        !prose.contains("It can ask for its own children"),
+        "and the opposite is never promised"
+    );
 }

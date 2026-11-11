@@ -210,9 +210,10 @@ impl App {
                 args_hash: job.hash.clone(),
                 state: LaunchState::Pending,
                 outcome: None,
-                // Every spawn this build stages is a JOB: a one-shot run that reports and exits.
-                // `Chat` exists only for rows an older build staged.
-                kind: LaunchKind::Job,
+                // THE REQUEST DECIDES, and a request that does not say asked for a job. This was a
+                // constant, which made the interactive arm of `launch_child` unreachable — the
+                // whole chat path was built, then the job wrapper took over its only entry point.
+                kind: job.request.args.kind,
                 // Filled when the launch creates the child's worktree, which is the first moment there
                 // is a branch to name.
                 branch: None,
