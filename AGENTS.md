@@ -159,6 +159,19 @@ server and daemon when the test ends.
   their work finished — `d` confirms first, and the confirmation NAMES what it deletes, because it
   is the only warning (it used to promise `.project-state` was kept, which would now be a lie).
   A purge that fails never blocks the removal, and a dirty worktree cancels it outright.
+  AND NOTHING MAY WRITE IT BACK. `write_atomic` does `create_dir_all`, so a late write RESURRECTS
+  the subtree — measured on a real machine: a session removed with `d` left `sessions/<seg>/`
+  holding one `driver.json` with `exit_reason: failed`, because pmd's reconcile aborts the pruned
+  runner and `write_driver_end` recreated the folder to record a fate nobody can read. That exact
+  symptom was fixed ONCE for job rows, by skipping them in `Daemon::reconcile`, which left every
+  other form of removal hitting it — so the guard is on the WRITE (`write_driver_end` returns when
+  the state dir is absent) rather than on one caller. The `Running` handle still creates it: a
+  relaunch writes the handle before the ledger, and a crash between the two must stay recoverable.
+  THE FOLDER ITSELF GOES WHEN THE LAST SESSION DOES, by `remove_dir` on `sessions/` and
+  `.project-state/` — never `remove_dir_all`. A non-empty directory REFUSES, which is how a
+  sibling session, the project ledger and anything else a human put there keep the folder alive
+  without `tidy_empty_state_dirs` knowing what any of it is. Deleting the whole folder on a
+  confirm would take a sibling's state with it; a session at the same root is a different session.
 - A job in a git repository works in its OWN WORKTREE, on its own branch, and is told to commit there.
   Isolation is the dashboard's job; INTEGRATION IS THE HUMAN'S — `a` cherry-picks one child's commit onto
   their checkout, confirmed, refused while their tree is dirty, and aborted on a conflict. Uncommitted work

@@ -489,9 +489,10 @@ impl App {
         self.refresh();
     }
 
-    /// Kill the tmux session (best-effort — it may already be dead) and drop the
-    /// registry entry. `.project-state/` is intentionally left on disk, and the
-    /// project's own source files are never touched.
+    /// Kill the tmux session (best-effort — it may already be dead), drop the registry entry,
+    /// and delete that session's own state. The project's source files are never touched, and
+    /// neither is any sibling session's state: `.project-state/` itself goes only when nothing
+    /// is left in it (see [`App::tidy_empty_state_dirs`]).
     pub(crate) fn remove_project(&mut self, id: &str, session: &str) {
         let _ = self.agent_tmux.terminate(session);
         let mut reg = Registry::load(&self.registry_path).unwrap_or_default();
@@ -551,11 +552,13 @@ impl App {
                     worktree.branch
                 ));
             }
-            if !keep_state
-                && let Err(error) =
+            if !keep_state {
+                if let Err(error) =
                     agent_manager::state::purge_session_state(&ProjectPaths::for_session(&root, id))
-            {
-                self.log_line(&format!("spawn: could not clear {id}'s state ({error:#})"));
+                {
+                    self.log_line(&format!("spawn: could not clear {id}'s state ({error:#})"));
+                }
+                Self::tidy_empty_state_dirs(&root);
             }
         }
         match reg.save(&self.registry_path) {
@@ -568,5 +571,21 @@ impl App {
         }
         self.mode = UiMode::Normal;
         self.refresh();
+    }
+
+    /// Remove `.project-state/sessions/` and `.project-state/` when the last session leaves —
+    /// and ONLY while they are empty, which is the whole safety property.
+    ///
+    /// `remove_dir` (not `remove_dir_all`) fails on a non-empty directory, so a sibling session,
+    /// a project ledger, or anything else a human or an agent put there keeps the folder alive
+    /// without this needing to know what any of it is. Deleting the whole folder on a confirm
+    /// would take a sibling's state with it; a session at the same root is a different session.
+    ///
+    /// Best-effort by construction: there is nothing to report. An empty directory left behind
+    /// costs nothing, and a non-empty one is the answer rather than an error.
+    fn tidy_empty_state_dirs(root: &Path) {
+        let state = root.join(agent_manager::state::STATE_DIR);
+        let _ = std::fs::remove_dir(state.join("sessions"));
+        let _ = std::fs::remove_dir(state);
     }
 }

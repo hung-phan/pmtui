@@ -231,9 +231,13 @@ impl Daemon {
         // runner we abort its in-flight worker — otherwise a human who closes an
         // agent-loop session mid-wake (its id leaves the registry) would orphan the
         // `pmj-…` pane, which would keep editing the tree. `abort` is a no-op when
-        // nothing is running, so this is safe/universal for every mode: it only
-        // terminates the pane and never touches the per-session on-disk state under
-        // `sessions/<id>/`. Mirrors the interactive-switch abort below.
+        // nothing is running, so this is safe/universal for every mode. Mirrors the
+        // interactive-switch abort below.
+        //
+        // That comment used to claim abort "never touches the per-session on-disk state under
+        // `sessions/<id>/`", which was never true — it records a terminal fate, and the write
+        // RECREATED the directory the dashboard had just purged. The guard lives in
+        // `write_driver_end` now, because this is only one of the paths that reaches it.
         let live: std::collections::HashSet<&str> =
             reg.projects.iter().map(|p| p.id.as_str()).collect();
         let removed: Vec<String> = self

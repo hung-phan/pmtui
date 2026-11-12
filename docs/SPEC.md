@@ -222,6 +222,10 @@ always continues, because a commit can have no other home.
 To retire a job is to stop its terminal, remove its row, and delete the state of that session. It deletes
 nothing else. The receipt of the parent holds what the run achieved.
 
+A removal MUST leave nothing of that session behind. After the state of a session is deleted, no part of
+the product may write it again. The state folder of the project is also removed, but only while it holds
+nothing. State of another session in the same folder MUST stay.
+
 - The product MUST NOT retire the session of a person this way.
 - The product MUST NOT retire a job while a person is attached.
 - The product MUST NOT retire a job before readiness records its own outcome.
