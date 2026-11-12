@@ -10,6 +10,7 @@ mod decisions;
 mod enter;
 mod forking;
 mod lifecycle;
+pub(crate) mod needy_notify;
 mod pmd;
 mod prompts;
 mod refresh;
@@ -274,6 +275,14 @@ pub(crate) struct App {
     /// Rebuilt fresh each refresh (a row not seen this tick is simply not re-inserted), so it cannot
     /// leak entries for closed sessions.
     pub(crate) idle_gate: std::collections::HashMap<String, (u64, u32)>,
+    /// Which sessions were ALREADY needing the human at the last refresh, so a notification
+    /// fires once per transition rather than once per frame. `None` until the first refresh
+    /// has recorded them — see [`needy_notify::newly_needy`].
+    pub(crate) needy_notified: Option<std::collections::HashSet<String>>,
+    /// How a "this session needs you" notification leaves the process. Boxed for the same
+    /// reason as [`App::agent_tmux`]: production writes OSC 777 to the real terminal, and a
+    /// test needs to read back what would have been sent.
+    pub(crate) notifier: Box<dyn agent_manager::escalation::Notifier>,
     /// Override for claude's config home, so [`App::start_undriven_session`]'s
     /// resume-vs-create probe ([`job_engine::claude_conversation_exists`]) can be pointed at
     /// a scratch `projects/` in a unit test instead of the real `$HOME/.claude`. `None` in
@@ -464,6 +473,8 @@ impl App {
             panes: std::cell::Cell::new(PaneRects::default()),
             agent_pane_fit: std::cell::RefCell::new(None),
             idle_gate: std::collections::HashMap::new(),
+            needy_notified: None,
+            notifier: needy_notify::terminal_notifier(),
             claude_home: None,
             pmtui_bin: tmux::pmtui_bin_for_current_process(),
             decisions_seen: std::collections::HashMap::new(),

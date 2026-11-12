@@ -1166,6 +1166,11 @@ enforces what the account can use.
 Open stops and stuck states are saved dashboard state. A desktop notification is a best-effort signal. A
 failure of that channel MUST NOT remove the state and MUST NOT resolve it.
 
+The dashboard also signals the person itself. When a session newly needs the person, the dashboard sends
+one notification to its own terminal. It sends one notification for each change into that state. It MUST
+NOT send one again for a state it already reported. Sessions that need the person when the dashboard
+starts are recorded without a notification. A paused session MUST NOT notify.
+
 ## 9. Lifecycle, Saved State and Failures
 
 ### Who Owns What

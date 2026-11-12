@@ -23,6 +23,7 @@ mod job_scheduler;
 mod keystrokes;
 #[cfg(target_os = "linux")]
 mod message_cli;
+mod needy_notify;
 mod nonblocking_checkpoint;
 mod nudge_judge;
 mod pane_reading;
