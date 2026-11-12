@@ -135,6 +135,7 @@ mod launch_env;
 mod lifecycle;
 mod log;
 mod message_cli;
+mod needy_notify;
 mod overlays;
 mod pane_dialog_answering;
 mod path_complete;
@@ -742,6 +743,8 @@ fn app_with_driver(projects: Vec<ProjectView>, mode: UiMode, agent_tmux: Box<dyn
         panes: std::cell::Cell::new(PaneRects::default()),
         agent_pane_fit: std::cell::RefCell::new(None),
         idle_gate: std::collections::HashMap::new(),
+        needy_notified: None,
+        notifier: Box::new(CaptureNotifier::default()),
         decisions_seen: std::collections::HashMap::new(),
         row_hits: std::cell::RefCell::new(Vec::new()),
         settings_hits: std::cell::RefCell::new(Vec::new()),
@@ -783,6 +786,26 @@ fn app_with_driver(projects: Vec<ProjectView>, mode: UiMode, agent_tmux: Box<dyn
         spawned_pmd: std::cell::RefCell::new(Vec::new()),
         spawn: SpawnBroker::default(),
         agent_tmux,
+    }
+}
+
+/// Every escalation the dashboard would have written to the terminal. Cloning shares the
+/// log, so a test holds one handle while `App` holds the other.
+#[derive(Clone, Default)]
+struct CaptureNotifier(
+    std::sync::Arc<std::sync::Mutex<Vec<agent_manager::escalation::Escalation>>>,
+);
+
+impl CaptureNotifier {
+    fn sent(&self) -> Vec<agent_manager::escalation::Escalation> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+impl agent_manager::escalation::Notifier for CaptureNotifier {
+    fn notify(&self, e: &agent_manager::escalation::Escalation) -> anyhow::Result<()> {
+        self.0.lock().unwrap().push(e.clone());
+        Ok(())
     }
 }
 
@@ -1163,6 +1186,8 @@ fn creating_loop_app(
         panes: std::cell::Cell::new(PaneRects::default()),
         agent_pane_fit: std::cell::RefCell::new(None),
         idle_gate: std::collections::HashMap::new(),
+        needy_notified: None,
+        notifier: Box::new(CaptureNotifier::default()),
         decisions_seen: std::collections::HashMap::new(),
         row_hits: std::cell::RefCell::new(Vec::new()),
         settings_hits: std::cell::RefCell::new(Vec::new()),

@@ -410,9 +410,13 @@ fn osc_field(s: &str) -> String {
 /// Two text slots, so project and title fold together the way they do for
 /// `notify-send`. OSC 777 carries no urgency field, so severity survives only as
 /// the transport's own min-severity gate.
+///
+/// TERMINATED BY ST (`ESC \`), not BEL. Both end an OSC and most terminals take either,
+/// but the only sequence MEASURED to raise a notification in the surface this exists for
+/// was terminated by ST, typed by hand into a cmux tab. BEL has no such reading behind it.
 pub(super) fn osc777(e: &Escalation) -> String {
     format!(
-        "\x1b]777;notify;{};{}\x07",
+        "\x1b]777;notify;{};{}\x1b\\",
         osc_field(&format!("pmd · {} — {}", e.project, e.title)),
         osc_field(&e.body),
     )

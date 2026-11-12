@@ -326,6 +326,9 @@ impl App {
         if changed {
             self.reset_selection_context();
         }
+        // LAST, on the rows the next frame will draw: tell the human about a session that
+        // newly needs them. Edge-triggered, so a second `refresh` in the same tick is silent.
+        self.notify_newly_needy();
     }
 
     /// Drain an armed auto-open ([`App::pending_first_chat`]): re-read the armed

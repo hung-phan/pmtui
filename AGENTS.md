@@ -500,9 +500,22 @@ one, so an empty answer NAMES the file it read rather than blaming the id.
   transient, so it warns once and then costs nothing — a PATH probe would only duplicate a
   decision already made correctly. The terminal family carries none of it, because a write
   lands or fails at once. OSC 777 is the sequence, MEASURED against cmux: OSC 9 and OSC 99
-  were emitted the same way and produced nothing. It must be emitted BY A PROCESS IN THE
+  were emitted the same way and produced nothing. IT IS TERMINATED BY ST (`ESC \`) RATHER
+  THAN BEL, which is the one byte with a reading behind it: the sequence that actually raised
+  a notification was typed by hand into a cmux tab and ended in ST. Both terminators are
+  valid and most terminals take either, so this is a choice between an untested default and a
+  measured one. It must be emitted BY A PROCESS IN THE
   SURFACE to its own tty — the same bytes written into another process's pts were silently
   dropped — which is why `OscNotifier` writes its own stderr and only when that is a terminal.
+  THAT MAKES THE DASHBOARD THE EMITTER, not pmd: a pmd this pmtui started has its stderr in
+  `pmd.log` (an inherited terminal fd would corrupt the live frame), and a tmux server between
+  the writer and the surface swallows the sequence — measured, with `allow-passthrough on`, from
+  an agent pane. pmtui runs IN the cmux tab, so `src/bin/pmtui/app/needy_notify.rs` reuses the
+  same notifier at the end of `refresh`. EDGE-TRIGGERED and seeded silently: `refresh` runs
+  several times a second and the first one is inside `App::new`, so a row already needing the
+  human when the dashboard opens is recorded without a sound. `Stuck` is excluded though it is
+  `needs_attention()` too — it can flap, and one notification per flap teaches the human to
+  ignore all of them — and a paused row is silent off screen because it is not loud on screen.
   A transport is asked for BY NAME (`Transport`, `pmd --notify log,cmux,osc`) and
   `DEFAULT_TRANSPORTS` is deliberately NOT all of them: `cmux` and `osc` have effects outside
   the process, and THE INTEGRATION SUITE LAUNCHES THE REAL `pmd` BINARY, so on by default
