@@ -41,7 +41,7 @@ pub use dialog::{
 };
 pub use driver::{Driver, Observation, StepHandle, observe};
 pub use launch::{
-    ENV_BIN, ENV_SESSION, ENV_STATE_DIR, LaunchError, LaunchOutcome, ManagedEnv,
+    ENV_BIN, ENV_REGISTRY, ENV_SESSION, ENV_STATE_DIR, LaunchError, LaunchOutcome, ManagedEnv,
     pmtui_bin_for_current_process,
 };
 pub use real::{LAUNCH_COMMAND_MAX_BYTES, SUBMIT_UNPROVEN, TmuxDriver, launch_command};

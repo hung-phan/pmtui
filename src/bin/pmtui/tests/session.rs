@@ -489,6 +489,7 @@ fn chat_create_and_attach_run_through_the_injected_driver_and_handoff() {
         session_id: "bot".into(),
         state_dir: paths.state_dir(),
         pmtui_bin: Some(PathBuf::from("/opt/am/pmtui")),
+        registry: None,
     };
     let chat_req = ChatReq {
         session_paths: paths.clone(),
@@ -522,6 +523,7 @@ fn chat_create_and_attach_run_through_the_injected_driver_and_handoff() {
         session_id: "created".into(),
         state_dir: create_paths.state_dir(),
         pmtui_bin: None,
+        registry: None,
     };
     let create_req = CreateChatReq {
         session_paths: create_paths.clone(),

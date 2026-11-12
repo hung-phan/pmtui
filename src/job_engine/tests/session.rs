@@ -73,6 +73,7 @@ fn the_persistent_terminal_carries_its_session_identity_and_pmds_pmtui() {
         session_id: SESSION_ID.to_string(),
         state_dir: fx.paths.state_dir(),
         pmtui_bin: None,
+        registry: None,
     };
     assert_eq!(
         fx.driver.launched_env(),

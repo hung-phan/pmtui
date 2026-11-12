@@ -290,6 +290,9 @@ pub struct JobScheduler {
     /// `None` to omit it. Set once by pmd ([`JobScheduler::set_pmtui_bin`]) from
     /// [`tmux::pmtui_bin_for_current_process`]: the scheduler has no pmtui path of its own.
     pmtui_bin: Option<PathBuf>,
+    /// The session list this session's terminal names as `PMTUI_REGISTRY`; see
+    /// [`JobScheduler::set_registry_path`]. `None` omits the variable.
+    registry_path: Option<PathBuf>,
     /// NO-PROGRESS circuit breaker (slice 1): escalate once the working tree is byte-identical
     /// across this many CONSECUTIVE nudges (`0` = disabled). Read ONCE from `PM_NO_PROGRESS`
     /// when the scheduler is built (default [`progress::DEFAULT_NO_PROGRESS_NUDGES`]); tests set
@@ -352,6 +355,7 @@ impl JobScheduler {
             worker_skill_installed: false,
             claude_home: None,
             pmtui_bin: None,
+            registry_path: None,
             no_progress_threshold: progress::no_progress_threshold_from_env(
                 std::env::var(progress::NO_PROGRESS_ENV).ok().as_deref(),
             ),
@@ -414,6 +418,16 @@ impl JobScheduler {
         self.pmtui_bin = bin;
     }
 
+    /// Set the session list every launch of this session's terminal names as `PMTUI_REGISTRY`
+    /// (`None` omits the variable). Set once per runner by pmd, from its own `--registry`.
+    ///
+    /// pmd NEEDS THIS TOO, not only the dashboard: pmd relaunches a session's terminal on its wake
+    /// path, so without it the same session would carry the variable or not depending on which
+    /// process last started it.
+    pub fn set_registry_path(&mut self, registry: Option<PathBuf>) {
+        self.registry_path = registry;
+    }
+
     /// Who this session's terminal belongs to, for the agent inside it: the stable id, the
     /// per-session state directory, and pmtui when pmd found one.
     pub(crate) fn managed_env(&self) -> tmux::ManagedEnv {
@@ -421,6 +435,7 @@ impl JobScheduler {
             session_id: self.project_id.clone(),
             state_dir: self.paths.state_dir(),
             pmtui_bin: self.pmtui_bin.clone(),
+            registry: self.registry_path.clone(),
         }
     }
 

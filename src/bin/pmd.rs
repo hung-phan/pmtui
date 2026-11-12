@@ -478,7 +478,11 @@ where
     };
     // Every terminal pmd launches names the `pmtui` beside this executable (or omits
     // PMTUI_BIN when there is none), resolved once here rather than per launch.
-    let mut daemon = daemon.with_pmtui_bin(agent_manager::tmux::pmtui_bin_for_current_process());
+    let mut daemon = daemon
+        .with_pmtui_bin(agent_manager::tmux::pmtui_bin_for_current_process())
+        // The list THIS pmd drives, so a session it relaunches resolves peers in the same fleet the
+        // dashboard's own launches do. One pmd owns one socket, so there is no other answer.
+        .with_registry_path(Some(args.registry.clone()));
     // WHICH BUILD THIS IS, as a file rather than a version string. An update replaces the binaries
     // and nothing more, so a daemon that keeps running drives with the old code while the dashboard
     // reports the new one. Nobody can tell this process to restart — one pmd owns one socket, so

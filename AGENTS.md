@@ -173,8 +173,19 @@ server and daemon when the test ends.
   never free, while the one code that would have reached a human (`ErrorCode::ChildLimitReached`)
   had no constructor anywhere in the tree. `children_of` and that code are deleted too; a code
   nothing can construct is worse than none, because the skill told agents to act on it.
-  NOTHING NOW BOUNDS HOW MANY CHILDREN A PARENT RUNS, NOR HOW DEEP THEY GO, and that is the chosen
-  trade rather than an oversight. `nested_spawn_refused` went the same way as the cap and for a
+  ONE CEILING REMAINS AND IT COUNTS THE RIGHT THING: `spawn::MAX_LIVE_CHILDREN` (16) bounds the
+  children that are LIVE across the whole dashboard, plus the ones already on their way — the
+  queued ones count, or a burst of twenty is claimed in one pass while none is live yet and every
+  one launches. GLOBAL rather than per-parent, because depth is unbounded and a budget renewed at
+  each level bounds nothing. Over the ceiling the request is NOT refused: it is left unclaimed, so
+  it stays durable, the caller reads `queued` (exit 3, ask again under the same id) and it is
+  claimed when a child exits. That is the whole difference from the cap that was removed — a slot
+  here genuinely frees, so deferring is honest rather than a wait with no end — and the dashboard
+  says on screen that requests are waiting, because a human watching rows is one of the two guards
+  left. Liveness is read from the PREVIOUS frame's views on purpose: discovery runs before they are
+  rebuilt, a frame is milliseconds, and a fresh probe would double the tmux calls per refresh to
+  sharpen a number that only has to be approximately right.
+  NOTHING BOUNDS HOW DEEP CHILDREN GO, and that is the chosen trade rather than an oversight. `nested_spawn_refused` went the same way as the cap and for a
   related reason: it let a coordinator delegate work but never delegate COORDINATION, and it was
   aimed at a child that cannot reach the command anyway — a JOB is given no `ManagedEnv`, so it
   cannot name itself, which is a refusal by construction rather than by a check. `spawned_by` names
@@ -185,6 +196,15 @@ server and daemon when the test ends.
   engine's own rate limits and a human watching rows appear. A real ceiling, if one is ever wanted,
   must count LIVE CHILDREN — the defect here was a cap counting the wrong thing, never the idea of
   a cap, and a row-count cap cannot be made correct because a corpse holds a place.
+- A CHILD'S PARENT IS ANSWERED WHEN A HUMAN REMOVES THE ROW, whichever form the child was. `d`
+  writes the `cancelled` receipt for a job and now for a SESSION too: the `is_job` guard in
+  `write_cancel_receipt` was correct while every brokered row was a job and became the defect the
+  moment `--session` shipped, because a receipt is a permanent tombstone — a closed session read
+  `ready` in `spawn --status` for good while `message --list` correctly showed it gone. One child,
+  two answers, which is the drift `SessionSummary` exists to prevent elsewhere. A session's `ready`
+  is only replaced once the session is gone; it was the answer the parent already had (exit 0), and
+  this is the honest later answer to the same question. A job's recorded outcome is still never
+  overwritten — the terminal-state check owns that, not the form.
 - A job is ANSWERED ONCE, and one harvest runs at a time. The recorded answer beats anything a later pass
   can reconstruct from a directory retirement already deleted.
 - Stopping pmd never kills project terminals. Pause, restart, and remove are
@@ -446,11 +466,18 @@ composer. Only a person can clear them, so 3 would be an invitation to loop fore
 classification keys on `tmux::SUBMIT_UNPROVEN`, the const the driver's own bail is built from, so a
 reword cannot quietly turn it back into a 3.
 
-Nothing in `ManagedEnv` changed for it: `PMTUI_SESSION` is the sender, `PMTUI_STATE_DIR` houses the
-hop ledger, and `$TMUX` names the socket. The registry is the one thing not in the environment —
-it maps an id to a project root, which a tmux session name only hashes — so it defaults to the
-dashboard's path and `--registry` overrides it. `Registry::load` reads a MISSING registry as an
-empty one, so an empty answer NAMES the file it read rather than blaming the id.
+`PMTUI_SESSION` is the sender, `PMTUI_STATE_DIR` houses the hop ledger, `$TMUX` names the socket,
+and `PMTUI_REGISTRY` names the session list its own dashboard owns. THAT LAST ONE WAS MISSING, and
+it is the one thing a session cannot infer: a registry maps an id to a project root, which a tmux
+session name merely hashes. The command fell back to the default path, so a session under any other
+dashboard resolved peers in the WRONG FLEET — measured, a child in a scratch dashboard listed the
+developer's real sessions, because the default was its only answer. Both pmtui and pmd put it in
+every managed terminal (`Daemon::with_registry_path` → `JobScheduler::set_registry_path`), because
+pmd relaunches a session's terminal on its wake path and the same session must not carry the
+variable or not depending on who started it last. Precedence is `--registry`, then the
+environment, then the default; a RELATIVE value in the environment is ignored rather than resolved
+against whatever directory the agent is in. `Registry::load` reads a MISSING registry as an empty
+one, so an empty answer NAMES the file it read rather than blaming the id.
 
 ## Code Organization
 

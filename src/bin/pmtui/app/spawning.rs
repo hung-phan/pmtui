@@ -317,6 +317,8 @@ impl App {
         let now = SystemClock.now();
         let mut resumed = Vec::new();
         let mut fresh = Vec::new();
+        let mut budget = self.live_child_budget();
+        let mut deferred = 0usize;
         for owner in &reg.projects {
             let dir = spawn::requests_dir(&entry_state_paths(owner).state_dir());
             let mut owner_resumed = Vec::new();
@@ -376,23 +378,58 @@ impl App {
                 .iter()
                 .filter(|job| job.parent == owner.id)
                 .count();
-            let room = spawn::MAX_UNFINISHED_PER_PARENT.saturating_sub(active);
+            // TWO LIMITS, DIFFERENT JOBS. The per-parent window paces how many of one parent's
+            // requests are in flight; the global budget bounds how many children RUN. A request
+            // left out here is not refused: it stays durable, the caller reads `queued`, and it is
+            // claimed when a child exits.
+            let room = spawn::MAX_UNFINISHED_PER_PARENT
+                .saturating_sub(active)
+                .min(budget);
+            deferred += (owner_resumed.len() + owner_fresh.len()).saturating_sub(room);
             let queued = owner_resumed.len().min(room);
             resumed.extend(
                 owner_resumed
                     .drain(..queued)
                     .map(|request| (owner.id.clone(), dir.clone(), request)),
             );
+            let taken = owner_fresh.len().min(room - queued);
             fresh.extend(
                 owner_fresh
                     .into_iter()
-                    .take(room - queued)
+                    .take(taken)
                     .map(|request| (owner.id.clone(), dir.clone(), request)),
             );
+            budget = budget.saturating_sub(queued + taken);
         }
         for (parent, dir, request) in resumed.into_iter().chain(fresh) {
             self.spawn.jobs.push(SpawnJob::new(parent, dir, request));
         }
+        // SAY IT ON SCREEN. A human watching rows is one of the two guards left, and a request
+        // waiting for a slot looks exactly like nothing happening.
+        if deferred > 0 {
+            self.status = format!(
+                "{deferred} spawn request(s) waiting: {} children are already running",
+                spawn::MAX_LIVE_CHILDREN
+            );
+            self.record_status();
+        }
+    }
+
+    /// How many more children may start: [`spawn::MAX_LIVE_CHILDREN`] less the ones already running
+    /// and the ones already on their way.
+    ///
+    /// THE QUEUED ONES COUNT, or the ceiling bounds nothing: a burst of twenty requests is claimed
+    /// in one pass, when none of them is live yet, and every one of them then launches. Liveness is
+    /// read from the views of the previous frame, which is deliberate — this pass runs before they
+    /// are rebuilt, a frame is milliseconds, and a fresh probe would double the tmux calls per
+    /// refresh to sharpen a number that only has to be approximately right.
+    fn live_child_budget(&self) -> usize {
+        let live = self
+            .projects
+            .iter()
+            .filter(|view| view.spawned_by.is_some() && view.session_live)
+            .count();
+        spawn::MAX_LIVE_CHILDREN.saturating_sub(live + self.spawn.jobs.len())
     }
 
     /// Advance every queued request by at most one phase. Never sleeps and never waits: a

@@ -16,6 +16,7 @@ fn fake_launch_interactive_marks_alive_and_records_argv() {
         session_id: "x".into(),
         state_dir: "/tmp/.project-state/sessions/x-00000000".into(),
         pmtui_bin: Some("/bin/pmtui".into()),
+        registry: None,
     };
     assert_eq!(
         d.launch_interactive(

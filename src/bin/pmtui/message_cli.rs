@@ -13,11 +13,13 @@
 //! in the sender's pane as an ordinary turn. Nothing polls, nothing blocks, and no agent can
 //! deadlock waiting on another's turn.
 //!
-//! Everything it needs is already in a managed pane's environment, so `ManagedEnv` is untouched:
-//! `PMTUI_SESSION` is the sender, `PMTUI_STATE_DIR` yields the sender's root and houses the hop
-//! ledger, and `$TMUX` names the tmux socket. The registry is the one thing not in the
-//! environment — it maps an id to its project root, which a tmux session name only hashes — so it
-//! falls back to the dashboard's default path and `--registry` overrides it.
+//! Everything it needs is in a managed pane's environment: `PMTUI_SESSION` is the sender,
+//! `PMTUI_STATE_DIR` yields the sender's root and houses the hop ledger, `$TMUX` names the tmux
+//! socket, and `PMTUI_REGISTRY` names the session list its own dashboard owns. That last one used
+//! to be absent, and it is the one thing a session could not infer: a registry maps an id to a
+//! project root, which a tmux session name merely hashes. The command fell back to the default
+//! path, so a session under any other dashboard resolved peers in the wrong fleet. `--registry`
+//! still overrides both.
 
 use std::path::{Path, PathBuf};
 
@@ -45,7 +47,8 @@ pub(crate) const HELP: &str = concat!(
     "--list              every session this one can reach, one line each: what it is doing, then\n",
     "                    whether its pane can take a message (no child jobs: a job reports a\n",
     "                    result and exits, so nothing reads a message to it)\n",
-    "--registry <path>   registry JSON (default: ~/.config/pmd/registry.json)\n",
+    "--registry <path>   registry JSON (default: this session's own, from PMTUI_REGISTRY, else\n",
+    "                    ~/.config/pmd/registry.json)\n",
     "--json              print one JSON document instead of one line\n\n",
     "A reply is just a send back: the recipient runs `pmtui message --to <this session>`.\n",
     "Nothing blocks and nothing is queued — their answer arrives as a turn in this pane.\n\n",
@@ -339,10 +342,23 @@ fn failed(to: &str, from: &str, hop: u32, detail: impl Into<String>) -> MessageO
 }
 
 /// Resolve the registry path, then load it.
+///
+/// THREE ANSWERS, IN THIS ORDER. `--registry` is the human's explicit one. Then `PMTUI_REGISTRY`,
+/// which the dashboard (and pmd) now put in every managed terminal's environment — a session can
+/// therefore resolve peers in ITS OWN fleet, which is the one thing it previously could not do: an
+/// id only becomes a project root through a registry, and a tmux session name merely hashes that
+/// root. The default path is last, and is now only reached outside a managed session. MEASURED: a
+/// child in a scratch dashboard listed the developer's real sessions, because the default was the
+/// only answer available to it.
 fn load_registry(cli: &MessageCli, deps: &MessageDeps<'_>) -> Result<(PathBuf, Registry), String> {
     let path = cli
         .registry
         .clone()
+        .or_else(|| {
+            (deps.env)(tmux::ENV_REGISTRY)
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute())
+        })
         .unwrap_or_else(|| (deps.default_registry)());
     let registry = Registry::load(&path).map_err(|error| {
         format!(

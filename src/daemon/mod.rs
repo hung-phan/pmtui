@@ -85,6 +85,7 @@ impl Runner {
         p: &ProjectEntry,
         supervisor_enabled: Option<bool>,
         pmtui_bin: Option<&std::path::Path>,
+        registry_path: Option<&std::path::Path>,
     ) -> Runner {
         let mut js = JobScheduler::new(
             p.id.clone(),
@@ -97,6 +98,7 @@ impl Runner {
             js.set_supervisor_enabled(enabled);
         }
         js.set_pmtui_bin(pmtui_bin.map(std::path::Path::to_path_buf));
+        js.set_registry_path(registry_path.map(std::path::Path::to_path_buf));
         // Seed the adopt arm with the registry's `conversation_id` (the id the
         // human's first chat created). `reconcile_one` re-sets this each sweep so
         // a seed written AFTER the runner was built still reaches the scheduler.
@@ -184,6 +186,8 @@ pub struct Daemon {
     /// The `pmtui` every terminal this daemon launches names as `PMTUI_BIN`, resolved once by
     /// pmd at startup; `None` omits the variable.
     pmtui_bin: Option<PathBuf>,
+    /// The session list every terminal this daemon launches names as `PMTUI_REGISTRY`.
+    registry_path: Option<PathBuf>,
 }
 
 impl Daemon {
@@ -202,6 +206,14 @@ impl Daemon {
     /// pmd passes [`crate::tmux::pmtui_bin_for_current_process`], the `pmtui` beside it.
     pub fn with_pmtui_bin(mut self, bin: Option<PathBuf>) -> Self {
         self.pmtui_bin = bin;
+        self
+    }
+
+    /// Name `registry` as `PMTUI_REGISTRY` in every terminal this daemon launches (`None` omits
+    /// it). pmd passes its own `--registry`, so a session pmd relaunched can still find its own
+    /// fleet instead of the default path.
+    pub fn with_registry_path(mut self, registry: Option<PathBuf>) -> Self {
+        self.registry_path = registry;
         self
     }
 
@@ -353,7 +365,12 @@ impl Daemon {
             }
             self.runners.insert(
                 p.id.clone(),
-                Runner::build(p, self.supervisor_enabled, self.pmtui_bin.as_deref()),
+                Runner::build(
+                    p,
+                    self.supervisor_enabled,
+                    self.pmtui_bin.as_deref(),
+                    self.registry_path.as_deref(),
+                ),
             );
         }
 

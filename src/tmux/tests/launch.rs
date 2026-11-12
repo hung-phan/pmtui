@@ -25,6 +25,7 @@ fn vars_orders_session_state_dir_then_bin_and_omits_absent_bin() {
         session_id: "s1".into(),
         state_dir: PathBuf::from("/x/.project-state/sessions/s1-0a1b2c3d"),
         pmtui_bin: Some(PathBuf::from("/bin/pmtui")),
+        registry: None,
     };
     assert_eq!(
         env.vars(),

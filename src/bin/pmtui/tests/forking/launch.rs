@@ -48,6 +48,8 @@ fn a_fork_launches_the_child_terminal_with_the_childs_identity() {
                 session_id: "bot-fork".into(),
                 state_dir: ProjectPaths::for_session(&fixture.root, "bot-fork").state_dir(),
                 pmtui_bin: Some(PathBuf::from("/opt/am/pmtui")),
+                // A fork's terminal names the same fleet as every other launch of this dashboard.
+                registry: Some(fixture.app.registry_path.clone()),
             },
         )],
         "the child names itself, never its source"

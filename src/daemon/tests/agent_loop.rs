@@ -41,7 +41,7 @@ fn daemon_with_inflight_decider() -> (
     let mut daemon = Daemon::with_supervisor_enabled(true);
     daemon
         .runners
-        .insert(id.into(), Runner::build(&entry, Some(true), None));
+        .insert(id.into(), Runner::build(&entry, Some(true), None, None));
     let Driven::Job(scheduler) = &mut daemon.runners.get_mut(id).unwrap().driven;
     scheduler.set_decider_binary_available(true);
     daemon.sweep(&reg(vec![entry.clone()]), &driver, &clock, &notifier);
@@ -82,6 +82,7 @@ fn every_runner_launches_its_terminal_with_the_daemons_pmtui() {
                 session_id: "bot".into(),
                 state_dir: paths.state_dir(),
                 pmtui_bin: Some(PathBuf::from("/opt/am/pmtui")),
+                registry: None,
             }
         )]
     );

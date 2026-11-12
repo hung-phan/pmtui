@@ -20,6 +20,14 @@ pub const ENV_SESSION: &str = "PMTUI_SESSION";
 pub const ENV_STATE_DIR: &str = "PMTUI_STATE_DIR";
 /// The environment variable naming the canonical `pmtui` executable.
 pub const ENV_BIN: &str = "PMTUI_BIN";
+/// The environment variable naming the session list this dashboard owns.
+///
+/// THE ONE THING A MANAGED SESSION COULD NOT FIND. `pmtui message` needs a registry — an id only
+/// becomes a project root through one, and a tmux session name merely hashes that root — so without
+/// this it fell back to the default path. MEASURED: a child in a scratch dashboard listed the
+/// developer's real sessions, because that default was the only answer it had. One dashboard owns
+/// one registry/socket pair, so the session can simply be told which one it is in.
+pub const ENV_REGISTRY: &str = "PMTUI_REGISTRY";
 
 /// Who a managed terminal belongs to, handed to the agent inside it through its environment.
 ///
@@ -33,11 +41,14 @@ pub struct ManagedEnv {
     pub session_id: String,
     pub state_dir: PathBuf,
     pub pmtui_bin: Option<PathBuf>,
+    /// The session list this dashboard owns, so `pmtui message` resolves peers in the right fleet
+    /// rather than at the default path. `None` omits the variable, which leaves that default.
+    pub registry: Option<PathBuf>,
 }
 
 impl ManagedEnv {
     /// The `(KEY, VALUE)` pairs applied with `tmux new-session -e KEY=VALUE`, in this order:
-    /// PMTUI_SESSION, PMTUI_STATE_DIR, then PMTUI_BIN when `pmtui_bin` is Some.
+    /// PMTUI_SESSION, PMTUI_STATE_DIR, then PMTUI_BIN and PMTUI_REGISTRY when each is Some.
     pub fn vars(&self) -> Vec<(String, String)> {
         let mut vars = vec![
             (ENV_SESSION.to_string(), self.session_id.clone()),
@@ -48,6 +59,12 @@ impl ManagedEnv {
         ];
         if let Some(bin) = &self.pmtui_bin {
             vars.push((ENV_BIN.to_string(), bin.to_string_lossy().into_owned()));
+        }
+        if let Some(registry) = &self.registry {
+            vars.push((
+                ENV_REGISTRY.to_string(),
+                registry.to_string_lossy().into_owned(),
+            ));
         }
         vars
     }
