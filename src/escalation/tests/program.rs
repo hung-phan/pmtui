@@ -32,6 +32,20 @@ fn program_failure_detail_uses_the_first_nonempty_line_and_caps_unicode_safely()
     );
 }
 
+/// THE ONE RETRY IN THIS FILE, and it is about `exec`, not about the notifier.
+///
+/// This test WRITES an executable and then fork+execs it, which on Linux can lose a race no amount
+/// of care here can close: `ETXTBSY` means some process holds a write fd to the file being exec'd,
+/// and a `fork()` on ANOTHER test thread inside our write window duplicates our write fd into its
+/// child, where `CLOEXEC` only clears it at that child's own exec. Seen twice under a full
+/// `cargo test` (7 suites forking at once) and never reproducible alone — 0/14 for this module and
+/// 0/12 for the whole lib suite.
+///
+/// So the retry is for a FAILED LAUNCH ONLY: each attempt gets a fresh notifier, so a lost race
+/// never leaves a recorded failure behind, and the attempt that runs still has to satisfy every
+/// assertion below. The production path is untouched, deliberately — a notifier program that
+/// cannot be spawned is not transient, and latching the transport off after one warning is what it
+/// is supposed to do.
 #[test]
 fn program_delivery_passes_urgency_and_message_to_the_child() {
     let dir = tempfile::tempdir().unwrap();
@@ -42,22 +56,31 @@ fn program_delivery_passes_urgency_and_message_to_the_child() {
     permissions.set_mode(0o755);
     std::fs::set_permissions(&bin, permissions).unwrap();
 
-    let notifier =
-        ProgramNotifier::with_bin(bin.to_string_lossy(), Severity::Info, Wire::default());
     let escalation = Escalation {
         project: "proj".into(),
         title: "decision needed".into(),
         body: "line one\nline two".into(),
         severity: Severity::Urgent,
     };
-    notifier
-        .spawn_delivery(&escalation)
-        .unwrap()
-        .join()
-        .unwrap();
+
+    let mut ran = None;
+    for _ in 0..5 {
+        let notifier =
+            ProgramNotifier::with_bin(bin.to_string_lossy(), Severity::Info, Wire::default());
+        notifier
+            .spawn_delivery(&escalation)
+            .unwrap()
+            .join()
+            .unwrap();
+        if let Ok(recorded) = std::fs::read_to_string(&args) {
+            ran = Some((recorded, notifier));
+            break;
+        }
+    }
+    let (recorded, notifier) = ran.expect("the notifier program never ran");
 
     assert_eq!(
-        std::fs::read_to_string(args).unwrap(),
+        recorded,
         "-u\ncritical\npmd \u{b7} proj\ndecision needed\nline one\nline two\n"
     );
     assert_eq!(notifier.failure_count(), 0);
