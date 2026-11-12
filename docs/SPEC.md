@@ -309,8 +309,18 @@ The dashboard paces only how many requests it reads for one parent in one pass. 
 later pass reports that it is in progress. The product MUST NOT write anything that an agent must
 then act on.
 
-The limits that remain are outside the product: the rate limits of the agent engine, and a person
-who can see every child as a row.
+The product DOES bound how many children are alive at one time, across every parent together. Each
+child is a real agent process in its own terminal, so that number is what a person's machine feels.
+The bound counts the children that are live and the children already on their way, and not the rows:
+a row that belongs to a child which has ended must give its place back.
+
+Over the bound the product MUST NOT refuse the request. It leaves the request where it is, reports
+it as queued, and starts it when a child ends. The procedure already tells a worker to ask again
+under the same request id. The product MUST also say on screen that requests are waiting, because a
+person who can see the work is one of the two limits that remain.
+
+The other limits are outside the product: the rate limits of the agent engine, and a person who can
+see every child as a row.
 
 A session that was asked for used to be refused its own children. That rule let a worker give away
 work, but never give away the coordination of work, and the tree it produced was not the shape of
@@ -392,12 +402,22 @@ reach a terminal a person is attached to, MUST NOT answer a menu with its own wo
 while another input is being delivered. The product tells the sender which of these refused it, and whether
 asking again would help.
 
+A worker MUST be told which session list its own dashboard owns. A list maps an id to a project
+directory, and the name of a terminal only hides that directory in a hash, so a worker cannot find
+the list by itself. Without it a worker reads the list at the default place, which is another
+dashboard's fleet. A name the worker gives on the command line MUST outrank what it was told.
+
 A worker MAY ask which sessions it can reach. The product MUST tell it what each session is DOING, and
 MUST tell it apart from whether that terminal can take a message now. A session that works is reachable,
 and a session that waits for its person is reachable too. Where the product cannot know whether a worker
 is in a turn, it MUST say that it does not know. It MUST NOT report that as idle, because a worker
 reported as idle is read as finished. Every reading in that answer MUST come from the same projection the
 dashboard reads, so that two surfaces cannot give one field two answers.
+
+When a person removes the row of a child, the product MUST answer the worker that asked for it. It
+says the child was stopped, and that a person did it. This holds for both kinds of child. A child
+that reports no result is the case that matters most: its record says only that it came up, that
+record is kept for good, and a worker would otherwise read it as present forever.
 
 A delivered message becomes ONE ordinary turn of the other worker. The product MUST mark it as coming from
 another session, and MUST say which command answers it. Without that mark the other worker cannot tell a

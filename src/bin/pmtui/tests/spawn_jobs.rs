@@ -956,13 +956,57 @@ fn a_recorded_outcome_survives_a_later_removal() {
     );
 }
 
-/// A CHAT child's removal writes no receipt: nothing is waiting on one.
+/// A SESSION'S REMOVAL IS ANSWERED TOO, and this test used to assert the opposite.
+///
+/// "Nothing is waiting on one" was true while `LaunchKind::Chat` was unreachable: no agent could ask
+/// for a session, so no parent could be polling for it. `--session` made it reachable, and the
+/// receipt is a permanent tombstone — so a closed session read `ready` in `spawn --status` for good,
+/// while `message --list` correctly showed it gone. One child, two answers.
+///
+/// `ready` is what the parent was already told, with exit 0. This replaces it only once the session
+/// is gone, which is the honest later answer to the same question.
 #[test]
-fn removing_a_chat_child_writes_no_receipt() {
+fn removing_a_session_child_answers_the_parent_that_it_is_gone() {
     let fx = fixture(LaunchKind::Chat, "", None, None);
+    // The receipt a session child settles at: it came up, and that WAS the answer.
+    spawn::write_receipt(
+        &fx.parent_requests,
+        &spawn::SpawnReceipt {
+            schema_version: spawn::RECEIPT_SCHEMA_VERSION,
+            request_id: REQUEST.into(),
+            state: ReceiptState::Ready,
+            claimed_by: Some("pid:1".into()),
+            session: None,
+            launch_state: Some(agent_manager::registry::LaunchState::Started),
+            error: None,
+            next_action: None,
+            kind: LaunchKind::Chat,
+            args_hash: None,
+            result: None,
+            work: None,
+            updated_at: 0,
+        },
+    )
+    .expect("seed the ready receipt");
+
     let mut app = app_for(&fx, FakePane::live_quiet(&fx.child_session));
     app.remove_project("kid", &fx.child_session);
-    assert!(receipt(&fx).is_none());
+
+    let answered = receipt(&fx).expect("the parent is answered");
+    assert_eq!(
+        answered.state,
+        ReceiptState::Cancelled,
+        "a session a human closed is no longer `ready`"
+    );
+    let why = answered
+        .error
+        .as_ref()
+        .map(|error| error.message.clone())
+        .unwrap_or_default();
+    assert!(
+        why.contains("removed by a human"),
+        "and it says who ended it: {why}"
+    );
 }
 
 /// A RETIRED JOB LEAVES NOTHING BEHIND. Its state directory is a finished run's working copy, and what
@@ -1559,7 +1603,7 @@ fn a_cancellation_receipt_that_cannot_be_written_is_logged() {
     std::fs::write(&fx.parent_requests, "not a directory").expect("occupy the path");
 
     let mut app = app_for(&fx, FakePane::default());
-    app.cancel_job_receipt(&row);
+    app.cancel_child_receipt(&row);
 
     assert!(
         log_lines(&app)
@@ -1601,7 +1645,7 @@ fn a_row_without_a_launch_record_is_left_entirely_alone() {
         .expect("row");
     sweep(&mut app, &fx);
     // Each of the three questions the harvest asks about a launch, answered without one.
-    app.cancel_job_receipt(&row);
+    app.cancel_child_receipt(&row);
 
     assert!(
         rows(&fx).contains(&"kid".to_string()),

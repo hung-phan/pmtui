@@ -2731,3 +2731,57 @@ fn a_session_request_launches_an_interactive_child_that_is_never_retired() {
     );
     assert_eq!(b.pane.launches().len(), 1, "nothing relaunches it");
 }
+
+/// THE CEILING COUNTS LIVE CHILDREN, which is what its predecessor got wrong. A per-parent ROW cap
+/// let five corpses block a parent for good; this one bounds the engine processes actually running,
+/// and a slot frees whenever a child exits.
+///
+/// Over the ceiling a request is NOT refused. It stays durable and unclaimed, so the caller reads
+/// `queued` — ask again under the same id — and the dashboard says on screen why nothing started,
+/// because a human watching rows is one of the two guards left.
+#[test]
+fn requests_over_the_live_child_ceiling_wait_rather_than_fail() {
+    let mut b = broker();
+    // A fleet already at the ceiling, as the previous frame's views saw it.
+    b.app.projects = (0..spawn::MAX_LIVE_CHILDREN)
+        .map(|n| {
+            let mut view = crate::tests::view(&format!("kid-{n}"), Posture::Working, vec![]);
+            view.spawned_by = Some("service".into());
+            view.session_live = true;
+            view
+        })
+        .collect();
+
+    b.publish(REQ, args(MESSAGE));
+    b.discover();
+
+    assert!(
+        b.app.spawn.jobs.is_empty(),
+        "nothing is claimed while the fleet is full"
+    );
+    assert_eq!(
+        b.receipt(REQ),
+        None,
+        "and nothing is answered, so it is not refused"
+    );
+    assert!(
+        b.app.status.contains("waiting") && b.app.status.contains("already running"),
+        "the human is told why nothing started: {}",
+        b.app.status
+    );
+    assert!(
+        spawn::request_path(&b.requests(), REQ).exists(),
+        "the request stays durable, to be claimed when a child exits"
+    );
+
+    // A CHILD EXITS, and the slot frees on the next pass. That is the whole difference from a cap
+    // that counted rows, where a dead child's place was never given back.
+    b.app.projects.truncate(spawn::MAX_LIVE_CHILDREN - 1);
+    b.discover();
+    assert_eq!(
+        b.app.spawn.jobs.len(),
+        1,
+        "the freed slot is taken: {}",
+        b.app.status
+    );
+}

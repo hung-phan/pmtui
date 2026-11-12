@@ -1,16 +1,20 @@
-//! Every terminal the dashboard launches tells the agent inside it which managed session it
-//! is in: the stable id, that session's state directory, and this pmtui (`ManagedEnv`). A
-//! typed launch failure still reaches the human in the driver's own words.
+//! Every terminal the dashboard launches tells the agent inside it which managed session it is in:
+//! the stable id, that session's state directory, this pmtui, and the session list this dashboard
+//! owns (`ManagedEnv`). A typed launch failure still reaches the human in the driver's own words.
 
 use super::*;
 
 const PMTUI: &str = "/opt/am/pmtui";
 
-fn identity(id: &str, root: &Path, bin: Option<&str>) -> tmux::ManagedEnv {
+/// What a launch must carry. `registry` is THIS dashboard's list rather than `None`: without it a
+/// session fell back to the default path, so an agent under any other dashboard resolved peers in
+/// the wrong fleet — measured, a child in a scratch dashboard listed the developer's real sessions.
+fn identity(id: &str, root: &Path, bin: Option<&str>, registry: Option<&Path>) -> tmux::ManagedEnv {
     tmux::ManagedEnv {
         session_id: id.into(),
         state_dir: ProjectPaths::for_session(root, id).state_dir(),
         pmtui_bin: bin.map(PathBuf::from),
+        registry: registry.map(Path::to_path_buf),
     }
 }
 
@@ -18,11 +22,24 @@ fn identity(id: &str, root: &Path, bin: Option<&str>) -> tmux::ManagedEnv {
 fn managed_env_names_the_session_its_state_dir_and_this_pmtui() {
     let mut app = app_with(vec![], UiMode::Normal);
     let root = Path::new("/work/service");
-    assert_eq!(app.managed_env("bot", root), identity("bot", root, None));
+    let reg = app.registry_path.clone();
+    assert_eq!(
+        app.managed_env("bot", root),
+        identity("bot", root, None, Some(&reg))
+    );
     app.pmtui_bin = Some(PathBuf::from(PMTUI));
     assert_eq!(
         app.managed_env("bot", root),
-        identity("bot", root, Some(PMTUI))
+        identity("bot", root, Some(PMTUI), Some(&reg))
+    );
+    // AND IT REACHES THE PANE, not just the struct: the pairs are what `tmux new-session -e` sets.
+    let vars = app.managed_env("bot", root).vars();
+    assert!(
+        vars.contains(&(
+            tmux::ENV_REGISTRY.to_string(),
+            reg.to_string_lossy().into_owned()
+        )),
+        "the session list must be in the environment: {vars:?}"
     );
     let state_dir = app.managed_env("bot", root).state_dir;
     assert_eq!(
@@ -62,7 +79,7 @@ fn a_standard_create_launches_its_terminal_with_the_new_sessions_identity() {
             pane.launched_env(),
             vec![(
                 session_name(&created.id, &created.root),
-                identity(&created.id, &created.root, Some(PMTUI)),
+                identity(&created.id, &created.root, Some(PMTUI), Some(&reg_path)),
             )],
             "{engine:?}"
         );
@@ -90,7 +107,10 @@ fn a_launch_refused_before_tmux_reaches_the_human_in_the_drivers_words() {
         );
         assert_eq!(
             pane.launched_env(),
-            vec![(session, identity("bot", dir.path(), None))],
+            vec![(
+                session,
+                identity("bot", dir.path(), None, Some(&app.registry_path))
+            )],
             "{engine:?}"
         );
     }
@@ -125,7 +145,7 @@ fn enter_queues_every_chat_launch_with_the_sessions_identity() {
         };
         assert_eq!(
             env,
-            Some(identity("project", &project, Some(PMTUI))),
+            Some(identity("project", &project, Some(PMTUI), Some(&reg_path))),
             "{engine:?}: {}",
             app.status
         );
@@ -146,6 +166,6 @@ fn enter_queues_every_chat_launch_with_the_sessions_identity() {
 
     assert_eq!(
         app.pending_chat.as_ref().map(|req| req.env.clone()),
-        Some(identity("bot", &root, Some(PMTUI)))
+        Some(identity("bot", &root, Some(PMTUI), Some(&reg_path)))
     );
 }

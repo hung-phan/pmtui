@@ -173,6 +173,7 @@ fn chat_launches_ship_the_skill_before_the_terminal_starts() {
                 session_id: "bot".into(),
                 state_dir: paths.state_dir(),
                 pmtui_bin: Some(PathBuf::from(PMTUI)),
+                registry: None,
             },
         };
         // The launch fails, so the skill on disk can only have come from before it.
@@ -198,6 +199,7 @@ fn chat_launches_ship_the_skill_before_the_terminal_starts() {
             session_id: "created".into(),
             state_dir: paths.state_dir(),
             pmtui_bin: Some(PathBuf::from(PMTUI)),
+            registry: None,
         },
     };
     let pane = FakePane::default().with(|inner| inner.fail_launch = true);

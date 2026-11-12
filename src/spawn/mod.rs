@@ -35,6 +35,24 @@ pub const RECEIPT_SCHEMA_VERSION: u32 = 3;
 pub const REQUESTS_DIR: &str = "spawn-requests";
 /// The largest request (or receipt) file the dashboard reads.
 pub const MAX_REQUEST_BYTES: u64 = 64 * 1024;
+/// The most children of all parents that may be LIVE at once, across the whole dashboard.
+///
+/// THE ONLY REAL CEILING, and it counts the right thing. Its predecessor counted ROWS per parent,
+/// so a job that failed or was cancelled held a place for as long as its row did and five corpses
+/// could block a parent for good. [`MAX_UNFINISHED_PER_PARENT`] reads like a ceiling and is not
+/// one: a job leaves the queue the moment it has LAUNCHED, which frees window room at once.
+///
+/// This counts LIVE children plus the ones already on their way, so it bounds the processes
+/// actually running on the machine — which is what a human cares about, since each child is a real
+/// engine process in its own terminal. GLOBAL rather than per-parent, because depth is unbounded:
+/// a per-parent budget renewed at every level bounds nothing.
+///
+/// Over the ceiling the dashboard simply DOES NOT CLAIM the request. It stays durable and is
+/// claimed when a child exits, and the caller reads `queued` — exit 3, "ask again under the same
+/// request id", which is already in the skill. That is the whole difference from the cap that was
+/// removed: a slot here genuinely frees, so deferring is honest rather than a wait with no end.
+pub const MAX_LIVE_CHILDREN: usize = 16;
+
 /// The most unfinished requests the dashboard processes per parent directory at once.
 pub const MAX_UNFINISHED_PER_PARENT: usize = 16;
 /// The most receipts one `pmtui spawn --status` lists. Nothing caps how many children a parent asks

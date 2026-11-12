@@ -495,6 +495,9 @@ impl App {
             session_id: id.to_string(),
             state_dir: ProjectPaths::for_session(root, id).state_dir(),
             pmtui_bin: self.pmtui_bin.clone(),
+            // THIS dashboard's list, not the default path: one pmtui owns one registry/socket pair,
+            // and an agent that had to guess resolved peers in whichever fleet lives at the default.
+            registry: Some(self.registry_path.clone()),
         }
     }
 

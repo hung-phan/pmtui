@@ -367,25 +367,37 @@ impl App {
         }
     }
 
-    /// Answer a job's parent when a HUMAN removes the row with `d`: the job was stopped deliberately,
-    /// so its receipt goes `cancelled`.
+    /// Answer a spawned child's parent when a HUMAN removes the row with `d`: the child was stopped
+    /// deliberately, so its receipt goes `cancelled`.
     ///
-    /// Without this a parent polls `ready` for a child that no longer exists — the one way this feature
-    /// could leave an agent waiting forever. A no-op for a chat child and for a job whose own outcome is
-    /// already recorded.
-    pub(crate) fn cancel_job_receipt(&mut self, row: &ProjectEntry) {
+    /// Without this a parent polls `ready` for a child that no longer exists — the one way this
+    /// feature could leave an agent waiting forever. A no-op for a job whose own outcome is already
+    /// recorded; a SESSION's `ready` is replaced, because for that form `ready` only ever meant "it
+    /// is up" and it no longer is.
+    pub(crate) fn cancel_child_receipt(&mut self, row: &ProjectEntry) {
         self.write_cancel_receipt(
             row,
             &format!("{} was stopped and removed by a human", row.id),
         );
     }
 
-    /// Write a job's `cancelled` receipt, `reason` naming who stopped it. Shared by the human's `d` and
-    /// the parent's cancel marker, so both routes leave the same record.
+    /// Write a spawned child's `cancelled` receipt, `reason` naming who stopped it. Shared by the
+    /// human's `d` and the parent's cancel marker, so both routes leave the same record.
+    ///
+    /// ANY SPAWNED CHILD, job or session. The `is_job` guard here was correct while every brokered
+    /// row was a job, and became the defect the moment `--session` shipped: the removal path's own
+    /// comment says an agent would otherwise poll `ready` for a child that no longer exists, and
+    /// that is exactly what a closed session did. Its receipt is a permanent tombstone, so
+    /// `spawn --status` reported it `ready` for good while `message --list` correctly showed it
+    /// gone — one child, two answers, which is the drift `SessionSummary` exists to prevent
+    /// elsewhere.
+    ///
+    /// A SESSION'S `ready` IS NOT OVERWRITTEN WHILE IT LIVES, and nothing here can: the terminal
+    /// check below returns early for a job's real outcome, and only a row that is being removed
+    /// reaches this at all. `ready` was the answer the parent already got, with exit 0; this
+    /// replaces it once the session is gone, which is the honest later answer to the same
+    /// question.
     fn write_cancel_receipt(&mut self, row: &ProjectEntry, reason: &str) {
-        if !row.is_job() {
-            return;
-        }
         let Some(launch) = row.launch.as_ref() else {
             return;
         };

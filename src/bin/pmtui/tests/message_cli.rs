@@ -5,7 +5,7 @@
 //! grammar, the envelope, the hop bound, and every refusal that must not reach a pane.
 
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use agent_manager::clock::{Clock, Epoch};
 use agent_manager::registry::{Engine, Mode, ProjectEntry, Registry};
@@ -1106,4 +1106,107 @@ fn a_job_is_not_a_peer_so_it_is_unlisted_and_addressing_one_does_not_invite_a_re
     // It cost no hop: the guard runs before the ledger, so a refused job send spends no budget.
     let hops = fx.state.join("message-hops").join("kid.json");
     assert!(!hops.exists(), "a refused job send must not spend a hop");
+}
+
+/// THE REGISTRY HAS THREE ANSWERS, IN ONE ORDER, and the middle one is new. A managed session can
+/// now be TOLD its own fleet through `PMTUI_REGISTRY`, which is the one thing it could never infer:
+/// a registry maps an id to a project root, and a tmux session name merely hashes that root. Before
+/// this, the command fell through to the default path — measured, a child in a scratch dashboard
+/// listed the developer's real sessions, because the default was the only answer it had.
+///
+/// `--registry` still wins, because a human naming a file outranks an environment.
+#[test]
+fn the_session_list_comes_from_this_session_unless_a_human_names_another() {
+    let fx = Fx::new(&[("peer", "peer"), ("me", "mine")]);
+    let other = fx.dir.path().join("another-dashboard.json");
+    Registry {
+        projects: vec![ProjectEntry {
+            id: "elsewhere".into(),
+            display_name: None,
+            root: fx.dir.path().join("elsewhere"),
+            enabled: true,
+            mode: Mode::AgentLoop,
+            engine: Some(Engine::Claude),
+            worker_model: None,
+            initial_prompt: None,
+            task_title: None,
+            forked_from: None,
+            spawned_by: None,
+            launch: None,
+            conversation_id: None,
+            cadence_s: None,
+        }],
+    }
+    .save(&other)
+    .expect("a second dashboard's list");
+
+    let listing = |cli: &MessageCli, env_registry: Option<&Path>| {
+        let env_registry = env_registry.map(|path| path.to_string_lossy().into_owned());
+        let state = fx.state.clone();
+        let env = move |key: &str| match key {
+            "PMTUI_SESSION" => Some("me".to_string()),
+            "PMTUI_STATE_DIR" => Some(state.to_string_lossy().into_owned()),
+            "TMUX" => Some("/tmp/tmux-0/scratch,1,0".to_string()),
+            "PMTUI_REGISTRY" => env_registry.clone(),
+            _ => None,
+        };
+        run_list(
+            cli,
+            &MessageDeps {
+                env: &env,
+                clock: &At(10),
+                driver: &|_| Some(Box::new(FakePane::default()) as Box<dyn tmux::Driver>),
+                // A DEAD END on purpose: reaching this in a test would read the developer's own
+                // registry, which is exactly the bug this feature closes.
+                default_registry: &|| PathBuf::from("/nonexistent/pmtui-test/registry.json"),
+            },
+        )
+    };
+    let bare = MessageCli {
+        list: true,
+        to: None,
+        message: None,
+        registry: None,
+        json: false,
+    };
+
+    // The environment's list, with no flag.
+    let (path, peers) = listing(&bare, Some(&fx.registry)).expect("the session's own fleet");
+    assert_eq!(path, fx.registry);
+    assert!(
+        peers.iter().any(|peer| peer.summary.id == "peer"),
+        "{peers:?}"
+    );
+
+    // Another dashboard's list is a different fleet, and reading it is the environment's doing.
+    let (path, peers) = listing(&bare, Some(&other)).expect("the other fleet");
+    assert_eq!(path, other);
+    assert_eq!(
+        peers
+            .iter()
+            .map(|peer| peer.summary.id.as_str())
+            .collect::<Vec<_>>(),
+        ["elsewhere"],
+        "the environment decides which fleet, when no flag does"
+    );
+
+    // A HUMAN'S FLAG OUTRANKS THE ENVIRONMENT.
+    let flagged = MessageCli {
+        registry: Some(fx.registry.clone()),
+        ..bare.clone()
+    };
+    let (path, _) = listing(&flagged, Some(&other)).expect("the flag wins");
+    assert_eq!(path, fx.registry);
+
+    // A RELATIVE PATH IS IGNORED rather than resolved against whatever directory the agent
+    // happens to be in, so the default is used and the answer NAMES the file it read. (A missing
+    // registry loads as an empty one, which is why this is an `Ok` with no peers.)
+    let (path, peers) = listing(&bare, Some(Path::new("relative/registry.json")))
+        .expect("a missing registry reads as empty");
+    assert_eq!(path, PathBuf::from("/nonexistent/pmtui-test/registry.json"));
+    assert!(peers.is_empty(), "{peers:?}");
+
+    // And with no variable at all, the default is still the answer.
+    let (path, _) = listing(&bare, None).expect("the default");
+    assert_eq!(path, PathBuf::from("/nonexistent/pmtui-test/registry.json"));
 }

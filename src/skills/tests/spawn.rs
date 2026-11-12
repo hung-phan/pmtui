@@ -21,6 +21,7 @@ fn launch_env(bin: Option<&str>) -> ManagedEnv {
         session_id: "bot".into(),
         state_dir: PathBuf::from("/unused/.project-state/sessions/bot-00000000"),
         pmtui_bin: bin.map(PathBuf::from),
+        registry: None,
     }
 }
 

@@ -718,6 +718,7 @@ fn interactive_launch_passes_each_managed_var_with_dash_e_before_the_command() {
         session_id: "s1".into(),
         state_dir: PathBuf::from("/x/.project-state/sessions/s1-0a1b2c3d"),
         pmtui_bin: Some(PathBuf::from("/bin/pmtui")),
+        registry: None,
     };
     assert_eq!(
         fx.driver

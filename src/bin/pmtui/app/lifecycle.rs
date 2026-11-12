@@ -506,7 +506,7 @@ impl App {
         // A JOB's parent is waiting on a receipt. Removing the row by hand IS a cancellation, so say so
         // before the row is gone — otherwise an agent polls `ready` for a child that no longer exists.
         if let Some(row) = reg.projects.iter().find(|p| p.id == id).cloned() {
-            self.cancel_job_receipt(&row);
+            self.cancel_child_receipt(&row);
         }
         reg.projects.retain(|p| p.id != id);
         if reg.projects.len() == before {
