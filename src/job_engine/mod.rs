@@ -840,6 +840,19 @@ impl JobScheduler {
     }
 
     /// Record a session's terminal fate in `driver.json` (best-effort).
+    ///
+    /// A GONE SESSION IS NOT RECORDED. `write_atomic` does `create_dir_all`, so this write
+    /// RESURRECTS a state directory that a removal just purged — measured: a session removed
+    /// with `d` left `sessions/<seg>/` behind holding this one file, because pmd's reconcile
+    /// aborts the pruned runner after pmtui deleted the subtree. Nobody can ever read it: the
+    /// dashboard lists registry rows, and that row is gone. The same symptom was fixed once for
+    /// JOB rows by skipping them in `Daemon::reconcile`, which left every other form of removal
+    /// hitting it — so the guard belongs at the write, where it covers both.
+    ///
+    /// Absence of the DIRECTORY is the test, not of `driver.json`: a live session always has one
+    /// (its config and ledger live there), and only a purge takes it away. The `Running` handle
+    /// deliberately keeps creating it — a relaunch writes the handle before the ledger, and a
+    /// crash between the two must still be recoverable.
     fn write_driver_end(
         &self,
         seq: u64,
@@ -848,6 +861,9 @@ impl JobScheduler {
         exit_code: Option<i32>,
         now: Epoch,
     ) {
+        if !self.paths.state_dir().is_dir() {
+            return;
+        }
         let _ = state::write_driver(
             &self.paths,
             &DriverState {

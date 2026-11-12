@@ -384,6 +384,40 @@ fn abort_terminates_the_loop_session() {
     );
 }
 
+/// A REMOVED SESSION'S FOLDER STAYS REMOVED. `write_atomic` does `create_dir_all`, so the
+/// terminal fate `abort` records used to recreate the subtree the dashboard had just purged —
+/// measured on a real machine: `sessions/<seg>/` left behind holding one `driver.json` with
+/// `exit_reason: failed`, for a session whose row no longer existed. Nobody can read it, because
+/// the dashboard lists registry rows.
+#[test]
+fn abort_never_recreates_a_purged_state_directory() {
+    let mut fx = setup(Tier::Standard, Engine::Claude, Some(300));
+    let sess = loop_session(&fx);
+    fx.sched.tick(&fx.driver, &fx.clock).unwrap();
+    assert!(
+        fx.paths.driver().exists(),
+        "premise: a live session records"
+    );
+
+    // What `d` does, in the order it does it: the pane goes, then the subtree.
+    state::purge_session_state(&fx.paths).unwrap();
+    assert!(!fx.paths.state_dir().exists());
+
+    fx.sched.abort(&fx.driver, &fx.clock).unwrap();
+
+    assert!(
+        !fx.paths.state_dir().exists(),
+        "the dead session's state dir came back holding {:?}",
+        std::fs::read_dir(fx.paths.state_dir())
+            .map(|entries| entries.flatten().map(|e| e.file_name()).collect::<Vec<_>>())
+            .unwrap_or_default()
+    );
+    assert!(
+        !fx.driver.is_alive(&sess).unwrap(),
+        "and the pane is still terminated — the guard is on the WRITE, not on the abort"
+    );
+}
+
 #[test]
 fn abort_terminates_a_legacy_running_handle() {
     let mut fx = setup(Tier::Autopilot, Engine::Claude, Some(300));

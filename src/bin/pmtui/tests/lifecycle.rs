@@ -1138,3 +1138,34 @@ fn removing_a_human_session_takes_its_own_state_and_leaves_its_neighbour() {
     );
     assert!(root.is_dir(), "the source tree is untouched");
 }
+
+/// THE LAST SESSION TAKES THE FOLDER WITH IT. With the subtree gone, `.project-state/sessions/`
+/// and `.project-state/` were left behind as empty directories in a tree the human never asked
+/// us to write in. They go by `remove_dir`, which REFUSES a non-empty directory — so the test
+/// above (a sibling, and project-level state) keeps the folder without this needing to know what
+/// is in it. Deleting the whole folder on a confirm would take a sibling's state with it.
+#[test]
+fn removing_the_last_session_leaves_no_state_folder_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reg_path, root) = reg_with_agent_loop(dir.path(), "only");
+    let paths = ProjectPaths::for_session(&root, "only");
+    std::fs::create_dir_all(paths.state_dir()).unwrap();
+    std::fs::write(paths.brief(), "the goal").unwrap();
+    let state = root.join(agent_manager::state::STATE_DIR);
+    assert!(state.is_dir(), "premise: there is a folder to remove");
+
+    let mut app = app_with_driver(
+        vec![agent_loop_view("only")],
+        UiMode::Normal,
+        Box::new(FakePane::default()),
+    );
+    app.registry_path = reg_path;
+    app.remove_project("only", &session_name("only", &root));
+
+    assert!(
+        !state.exists(),
+        "{} outlived the only session in it",
+        state.display()
+    );
+    assert!(root.is_dir(), "the source tree is untouched");
+}
