@@ -122,6 +122,7 @@ the ones your shell already gives you:
 | `Ctrl+K` | delete to the end of the line |
 | `Ctrl+U` / `Ctrl+R` | undo / redo |
 | `Ctrl+X Ctrl+E` | open the buffer in `$EDITOR` — bash's own chord |
+| `Ctrl+X Ctrl+D` | empty the buffer — `Ctrl+U` undoes it, `Ctrl+Y` pastes it back |
 | `Esc` | close (the message keeps its draft; the goal and directive discard the edit) |
 
 `Shift+Enter` also opens a line *if* your terminal reports it as different from `Enter` — many do not

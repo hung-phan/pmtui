@@ -250,6 +250,30 @@ server and daemon when the test ends.
   `resize_window` flips tmux to `window-size manual` — measured, a window resized to 70 stayed 70
   under a 180-column client — so every attach path calls `set_window_size_auto` FIRST, and the run
   loop forgets the fit afterwards so the next frame re-fits.
+- A SESSION IS THREE LINES: its name, its state, and a blank. The identity line is the glyph plus
+  the name and NOTHING else, so a name is never shortened to make room; the state line hangs under
+  the name (`ROW_DETAIL_INDENT`, which is 4 because the identity line's spans sit behind the
+  2-column selection gutter and its own 2-column glyph) and carries the state word, the `[A]`/`[S]`
+  tag, the cadence, the engine, the `user` chip, and the age flush RIGHT; the blank separates one
+  session from the next and doubles as the gap before the next section header, so sections are
+  separated exactly once. `sessions_full_height` must agree item for item or the stacked tier sizes
+  the pane for a different list.
+  IT WAS ONE LINE OF FOUR FIXED FIELDS, and the measurement is why it is not: at the 52-column
+  sidebar that row stopped SIX columns short of the pane — a 36-column stamp floating in a
+  45-column field — so the right edge was never reached and the ages did not line up to be
+  compared, while a depth-2 child elided `autopilot-docs` to `autopilot-d…` with those columns
+  sitting empty two fields to its right. Only the age is admitted against the room left, and on
+  the STATE line: the state word and the tier tag are never shed, which is what gives that line a
+  floor (indent + word + tag) far under any sidebar the layout hands it. The engine yields its
+  columns to the age rather than the reverse, because the age changes every tick and the engine
+  never does, and the cadence is drawn ONLY for a row `pmd_drives_row` is true of — a heartbeat on
+  a Standard row promises a wake nothing will send.
+  THE SELECTED ROW'S BAND COVERS BOTH CONTENT LINES AND NOT THE BLANK. A band over one line of a
+  spaced list reads as a stripe with air on both sides; one that carried into the gap would touch
+  the next session.
+  CONSEQUENCE, accepted rather than fixed: in the stacked tier four sessions no longer fit at 24
+  rows and the list scrolls. What still holds is the rule the product is shaped around — an
+  attention row and the selection are never scrolled out of sight.
 - THE SESSIONS LIST IS GROUPED BY URGENCY AND INDENTED BY LINEAGE, and the two are not the same
   axis. `RowGroup` (`NeedsYou → Autopilot → Standard → Paused`) owns the sections; `arrange_lineage`
   then settles the order WITHIN one section so a parent is followed by its own descendants, and
@@ -274,6 +298,17 @@ server and daemon when the test ends.
   repaint the theme's pair over any rect a widget `Clear`s, and read an agent's own
   "default colour" as the theme's. No animated effects: a repaint happens because state
   changed.
+  ONE ROLE IS CHOSEN BY MEASUREMENT RATHER THAN BY NAME, and it is the only one: `selection_bg`
+  takes the theme's `bg.active` when that stands further off `bg.base` AND still carries
+  `text.primary` at 4.5:1, else its `bg.selection`. Across the 39 shipped themes `bg.selection`
+  alone is a faint band in many (1.06:1 against the page in `github-light`), `bg.active` is
+  stronger in 24 but WEAKER in 15 — so taking it unconditionally would dim the selection in
+  `dracula`, `ayu-dark` and `night-owl` — and nine of those 24 put row text under the readable
+  floor. Net: 18 stronger, 21 unchanged, none regressed, and a test walks every theme to keep it
+  that way. HUE CANNOT CARRY A SELECTION HERE: an accent as the FILL leaves text at 1.24:1 in
+  `catppuccin-mocha`, and an accent as the TEXT on the band fails 4.5:1 in 9 of the first 12
+  themes measured — a terminal row has no border or elevation to lean on, and every accent in
+  these palettes is a foreground-weight colour.
 - A Settings row is one `SettingKind` variant plus ONE `Gesture`; neither the renderer nor the key
   handler grows per setting. `Pick` opens the row's list; `Act` does the one thing the row's state
   leaves to do in a SINGLE keypress and carries no options at all, because a list holding one option
@@ -317,7 +352,20 @@ server and daemon when the test ends.
 - The three PROSE fields — Message, goal and directive — edit a `ratatui-textarea` buffer, seeded
   from what is already there. Route keys to it; do not reimplement motions, kills, wrapping or undo.
   `Enter` submits, so a newline is a chord, and `$EDITOR` is `^X^E` (which is what leaves `^E` free to
-  mean end-of-line). A one-line `Field` is for a scalar: an id, an interval, a query.
+  mean end-of-line). `^X^D` EMPTIES THE BUFFER and lives in the composer rather than in a surface,
+  for the same reason `^X^E` does: every prose buffer can be emptied, so a per-field copy would be
+  three copies of one library call. Through `select_all` + `cut`, the library's own idiom, which is
+  what makes the clear RECOVERABLE two ways — `cut` records history (`^u` undoes) and fills the yank
+  buffer (`^y` pastes it back). A clear that could not be taken back would be the one key in a
+  composer that can lose typing. Its keybar chip carries the HIGHEST rank in its scope, so when the
+  bar must drop a KEY it is the key that goes and never `Esc`, the only one that says how to leave.
+  THE WORDS GO FIRST THOUGH, for every chip at once: `KEYBAR_LABELS_W` is 100, so under that width
+  the bar is key-only and the fourth chip costs the composer its labels at 80 columns — which is
+  the rule every other bar on that screen already follows, and the `?` overlay still names each key.
+  A one-line `Field` is for a scalar: an id, an interval, a query.
+  AN OVERLAY'S KEY LINE IS SILENTLY DROPPED IF IT DOES NOT FIT ITS FRAME, so adding a chord to one
+  means re-measuring it: the autopilot-goal variant reached 69 columns with `^X^D clear` and
+  vanished whole, which is why it reads `esc = Standard` rather than `esc stays Standard`.
 - The create form's Directory row answers two questions from one cached `DirCompletion` — the ghost
   tail and the candidate list — keyed on the text it was computed from. `src/bin/pmtui/path_complete.rs`
   owns the rules and nothing reads a directory to draw a frame. The tail stays a GHOST until accepted,

@@ -50,10 +50,15 @@ fn laptop_ui_gallery_renders_real_main_interaction_states() {
         // idle. Waiting for the idle panes launched above to flip to `○` keeps every frame on
         // the settled fleet (and hands-on in the Pending lane) rather than a first-second
         // transient.
+        // ONLY ROWS THE VIEWPORT DRAWS CAN BE WAITED ON. A session is three lines now, so at 80x24
+        // the list shows four of the eleven and the rest are below the fold — a glyph that is never
+        // drawn never settles, and this gate hung for its whole budget before reporting a pane that
+        // was in fact correct. The rows that ARE visible at that size are the needy and the running
+        // ones, which have no idle state to settle into, so there is no transient to miss.
         g.await_pane("the settled fleet", |pane| {
             ["hands-on", "monitoring", "autopilot-docs"]
                 .iter()
-                .all(|id| pane.contains(&format!("\u{25cb} {id}")))
+                .all(|id| !pane.contains(id) || pane.contains(&format!("\u{25cb} {id}")))
         });
         g.frame("main");
 
@@ -116,9 +121,19 @@ fn laptop_ui_gallery_renders_real_main_interaction_states() {
         g.await_gone("Task lanes after closing detail", "preview");
 
         g.literal("l");
-        // `l` from Needs You selects the first Pending card, whose title then carries the `▸`
-        // gutter. Matched as `▸ <glyph> hands-on`, because side-by-side lanes put Release Gate's
-        // own `▸` on the same screen row as the unselected hands-on title.
+        // THE LANE'S OWN COUNT IS THE SETTLE SIGNAL, and it can only be read from inside the lane:
+        // `board_column` holds a confirmed-working session in WORKING, so the Pending lane gains
+        // `hands-on` only once its freshly launched pane is confirmed idle — and until then `l`
+        // selects whichever card is Pending's first member so far (measured: `pending-design`).
+        // The rail's glyphs cannot prove the settle (see "the settled fleet") and at 80x24 the
+        // window draws two lanes, so PENDING's header is off screen until the selection is in it.
+        g.await_text("the settled Pending lane", "PENDING 4");
+        // One `k` re-reads the settled member list and clamps to its first card: `l` may have
+        // landed on row 1 while `hands-on` was still in WORKING. A no-op when it did not.
+        g.literal("k");
+        // The selected card's title carries the `▸` gutter. Matched as `▸ <glyph> hands-on`,
+        // because side-by-side lanes put Release Gate's own `▸` on the same screen row as the
+        // unselected hands-on title.
         g.await_pane("tasks-pending", |pane| {
             pane.lines().any(|line| selected_card(line, "hands-on"))
         });
@@ -162,7 +177,10 @@ fn laptop_ui_gallery_renders_real_main_interaction_states() {
         g.select_session("hands-on");
         g.literal("s");
         // The ACTIVE composer's keybar: the dormant shelf already shows `Message · hands-on`.
-        g.await_text("the Message composer", "Keep draft");
+        // The composer's OWN KEY, not a label: `KEYBAR_LABELS_W` is 100, so at 80 columns every bar
+        // in this product is key-only and `Esc Keep draft` has no words to match. `^X^E` is bound in
+        // no other scope that is open here, and it outranks `^X^D`, so it is the last chip to shed.
+        g.await_text("the Message composer", "^X^E");
         let long_message = format!(
             "{}End of the long message.",
             "Review the laptop layout while this deliberately long message wraps across several rows without truncating or drawing more than one caret. ".repeat(5)
@@ -183,7 +201,7 @@ fn laptop_ui_gallery_renders_real_main_interaction_states() {
         g.frame("message-long");
         // Keep the draft and return to the dashboard, the state `stop_dashboard` quits from.
         g.key("Escape");
-        g.await_gone("the Session view after keeping the draft", "Keep draft");
+        g.await_gone("the Session view after keeping the draft", "^X^E");
 
         // THE GOAL BUFFER (`g`), on a session pmd drives — the same editor as the Message field, which
         // is the whole claim of this change and the one a unit test cannot make: the chord has to reach

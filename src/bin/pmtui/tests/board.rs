@@ -106,11 +106,16 @@ fn task_board_theme_uses_semantic_lanes_metadata_and_selection_surface() {
             Some(cells[start..start + "Choose the release".len()].to_vec())
         })
         .expect("selected task title");
+    // THE SELECTION ROLE, not the raised-surface one. This asserted `surface_bg()` and passed only
+    // because Catppuccin Mocha ships `bg.elevated` and `bg.selection` as the same bytes — so it was
+    // checking a coincidence, and said nothing about the board using the right role. It came apart
+    // the moment `selection_bg` started choosing the stronger of the theme's two selection
+    // backgrounds.
     assert!(
         selected_row
             .iter()
-            .all(|cell| cell.bg == agent_manager::theme::surface_bg()),
-        "selected task did not use the raised theme surface"
+            .all(|cell| cell.bg == agent_manager::theme::selection_bg()),
+        "selected task did not use the theme's selection background"
     );
 }
 

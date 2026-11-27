@@ -151,12 +151,12 @@ pub(crate) fn render_goal_field(
             // the first version of this line (with "empty keeps this goal") was 83 columns against a
             // 72-column frame — so it silently vanished, which a test caught only because it
             // asserted on the rendered screen.
-            "enter = autopilot ON \u{b7} ^X^E $EDITOR \u{b7} esc stays Standard",
+            "enter = autopilot ON \u{b7} ^X^E $EDITOR \u{b7} ^X^D clear \u{b7} esc = Standard",
         )
     } else {
         (
             format!("Goal \u{b7} {}", truncate(id, 24)),
-            "enter save \u{b7} ^J newline \u{b7} ^X^E $EDITOR \u{b7} esc cancel",
+            "enter save \u{b7} ^J newline \u{b7} ^X^E $EDITOR \u{b7} ^X^D clear \u{b7} esc cancel",
         )
     };
     let inner = draw_overlay_frame(
@@ -226,7 +226,8 @@ pub(crate) fn render_directive_field(f: &mut Frame, area: Rect, id: &str, input:
     // SHORT ENOUGH to survive a 72-column frame (`draw_overlay_frame` drops a hint it cannot draw
     // whole). `^J` newline is the one key this line has no room for; the note below names the
     // outcomes instead, and `?` documents the readline map once for all three prose fields.
-    let keys = "enter save \u{b7} ^X^E $EDITOR \u{b7} ^X^R rescind \u{b7} esc cancel";
+    let keys =
+        "enter save \u{b7} ^X^E $EDITOR \u{b7} ^X^D clear \u{b7} ^X^R rescind \u{b7} esc cancel";
     let inner = draw_overlay_frame(
         f,
         area,

@@ -9,18 +9,9 @@ use crate::*;
 /// Columns a SESSIONS row must have before it can afford the age column, measured on
 /// the LIST PANE's inner width (not the frame's — that is the width a row actually gets).
 ///
-/// The arithmetic: the row's fixed part is exactly 36 columns (2 glyph + 16 id + 14
-/// posture + 4 tier chip) and the age adds 4, so 40 is the point at which the age can
-/// be shown at all. It is the first thing dropped, because it is context while everything else
-/// on the row is either identity or a call to action.
-///
-/// This was 44 while the severity badge was a TRAILING item reserving four columns of its own.
-/// The badge was folded into the label, then removed outright at the user's request, so those
-/// four columns came back and the age now survives four columns further down.
-///
-/// Consequence worth knowing rather than mistaking for a bug: [`render_body`]'s WIDE tier gives
-/// the list a 44–52 column sidebar ([`sessions_width`]), so the age appears part-way up that
-/// range rather than only at its cap.
+/// The arithmetic: the identity line's fixed part is 2 columns (the glyph) and the age adds 4, so
+/// 6 is the point at which the age can be shown beside a name of any width at all. It is the first
+/// thing dropped, because it is context while everything else on the line is identity.
 ///
 /// DERIVED from its parts rather than typed as a literal, and the row does not compare against
 /// it directly: `project_row_line` admits each trailing item against the room actually left.
@@ -29,17 +20,37 @@ use crate::*;
 #[cfg(test)]
 pub(crate) const ROW_AGE_W: u16 = ROW_FIXED_W + ROW_AGE_COL_W;
 
-/// The SESSIONS row's FIXED head, in columns: `"{glyph} "` 2 + the label padded to 16
-/// terminal cells ([`pad_cols`]) + `" {:<13}"` 14 + `" [{}]"` 4. Every row draws all of
-/// it at every width; optional age and human-attached fields are admitted only when the
-/// remaining width permits.
-pub(crate) const ROW_FIXED_W: u16 = 36;
+/// The identity line's FIXED head, in columns: `"{glyph} "` — and that is all.
+///
+/// IT WAS 36 (2 glyph + 16 name + 14 status word + 4 tier tag), a stamp that drew every field at
+/// every width. Measured against a real 52-column sidebar, that left the row six columns short of
+/// the pane while a depth-2 child elided its own name. The status word, the tier tag, the cadence
+/// and the engine now live on the row's SECOND line ([`project_row_detail`]), so the identity line
+/// is the glyph, the name, and the age — one fixed field, one flexible, one trailing.
+pub(crate) const ROW_FIXED_W: u16 = 2;
 
-/// `" {:>3}"` — the age column.
+/// `" {:>3}"` — the age column, the identity line's one trailing item.
 pub(crate) const ROW_AGE_COL_W: u16 = 4;
 
-/// `" chat"` — the live-chat chip.
+/// `" user"` — the human-attached chip, on the STATE line.
 pub(crate) const ROW_CHAT_W: u16 = 5;
+
+/// The state line's indent, in columns: it hangs under the NAME rather than under the glyph, so
+/// the two lines read as one block and the state words still align down the list.
+///
+/// FOUR, measured on a real pane: the identity line's spans are preceded by the 2-column selection
+/// gutter that `render_sessions` pushes, then its own 2-column glyph, so the name starts four
+/// columns into the row. An indent of 2 put the state words under the GLYPH, two columns left of
+/// the name, and read as a misaligned second line.
+pub(crate) const ROW_DETAIL_INDENT: u16 = 4;
+
+/// The selection gutter `render_sessions` pushes ahead of the identity line's spans — the `▸ ` mark
+/// on the selected row, two spaces on every other.
+///
+/// The state line carries no gutter (its own indent replaces it), so it is handed
+/// `content_w + ROW_GUTTER_W` as its budget. Without that it was two columns shorter than the line
+/// above it and the right-aligned age stopped two columns inside the pane edge.
+pub(crate) const ROW_GUTTER_W: u16 = 2;
 
 /// How many lineage levels a row may be indented by.
 ///
@@ -318,12 +329,7 @@ fn tier_style(tier: Option<Tier>) -> Style {
 /// `content_w` is the LIST pane's inner width (see [`ROW_AGE_W`]); `now` is passed in
 /// rather than read from the clock here so the row stays a pure function of its inputs
 /// and the age is unit-testable without a fake clock.
-pub(crate) fn project_row_line(
-    v: &ProjectView,
-    content_w: u16,
-    now: Epoch,
-    depth: usize,
-) -> Line<'static> {
+pub(crate) fn project_row_line(v: &ProjectView, content_w: u16, depth: usize) -> Line<'static> {
     let offline = row_offline(v);
     let (glyph, gcolor) = if offline {
         ("○", agent_manager::theme::hard())
@@ -356,7 +362,26 @@ pub(crate) fn project_row_line(
     // color for the autopilot text. just keey it normal"*).
     // Sized in terminal cells: a display name is user text, and a CJK or emoji label padded by
     // chars pushed the status label and tier tag past the pane edge.
-    let id_field = pad_cols(v.label(), 16 - depth * ROW_INDENT_W);
+    //
+    // THE NAME IS THE FLEX FIELD, and now it is the only thing competing with the age. Measured at
+    // both ends of the width band while four fields shared this line: at the 52-column cap the row
+    // stopped SIX columns short of the pane, because every field was fixed — so the row was a
+    // 36-column stamp floating in a 45-column field, the right edge was never reached, and the ages
+    // did not line up down the list to be compared. Giving the slack to the name pins the age
+    // against the right edge BY CONSTRUCTION (`2 + name + 4 == content_w`) rather than by a second
+    // alignment rule that could disagree with the admission below.
+    //
+    // It also buys back what the row was short of. The name was capped at 16 columns for the
+    // narrowest sidebar, and the lineage indent is paid OUT of it, so a depth-2 child elided
+    // `autopilot-docs` to `autopilot-d…`. With the state words on their own line it gets the whole
+    // width, and a name no longer has to be short to be read.
+    // THE WHOLE LINE IS THE NAME. Nothing else is on it — the age went down to the state line with
+    // the rest of the facts, so this line answers exactly one question and the name is never
+    // shortened for anything.
+    let id_field = pad_cols(
+        v.label(),
+        usize::from(content_w.saturating_sub(ROW_FIXED_W)).saturating_sub(depth * ROW_INDENT_W),
+    );
     let id_color = attention::text();
     spans.push(Span::styled(
         id_field,
@@ -366,19 +391,39 @@ pub(crate) fn project_row_line(
             Style::default().fg(id_color)
         },
     ));
-    // Secondary label: interactive projects are human-driven, so show tmux
-    // liveness + engine, NOT the autonomous posture (which may be stale).
+    Line::from(spans)
+}
+
+/// The row's SECOND line: what this session is doing, what drives it, how often, and on which
+/// engine — the state cluster, dim, hanging under the name.
+///
+/// WHY IT IS A LINE AND NOT A COLUMN. These four facts shared the identity line as fixed fields, in
+/// a 39–45 column sidebar, against a name that had 16. The state word and the tier tag are the two
+/// the project's design record pins as always-visible, so they could not be shed to make room — the
+/// only way to stop them competing with the thing that says WHICH session this is was to give them
+/// a line of their own. That line already existed: every row owns a blank beneath it for spacing,
+/// and the selected row's band already covers both.
+///
+/// `v.enabled == false` dims the whole row at the caller, so this builds no dim-specific style.
+pub(crate) fn project_row_detail(
+    v: &ProjectView,
+    content_w: u16,
+    depth: usize,
+    now: Epoch,
+) -> Line<'static> {
+    let offline = row_offline(v);
+    let indent =
+        ROW_DETAIL_INDENT + u16::try_from(depth.min(ROW_MAX_INDENT) * ROW_INDENT_W).unwrap_or(0);
+    let mut spans: Vec<Span<'static>> = vec![Span::raw(" ".repeat(usize::from(indent)))];
+    let mut left = content_w.saturating_sub(indent);
+
+    // THE STATE WORD IS NEVER SHED. It is the only place a paused, offline or starting row says so
+    // — the real-tmux suite once caught a `(paused)` badge that no human would ever have seen,
+    // because it sat where the width ran out. A staged spawn is disabled too, but nothing paused
+    // it: the broker is launching it.
     //
-    // PAUSED and OFFLINE outrank a stale routine posture for accuracy. A stopped or missing
-    // process cannot currently be "working" even if that is the last posture in its ledger.
-    //
-    // This is also the only place the state can be SEEN. The trailing position (where the badge
-    // used to live) is empty at the widths that matter: between 80 and ~125 terminal columns the
-    // item width is exactly `ROW_FIXED_W`, so nothing after the tier tag is drawn at all — the
-    // real-tmux suite caught a "(paused)" badge that no human would ever have seen. The label is
-    // inside the fixed head, always drawn, and it costs zero extra columns.
-    //
-    // A staged spawn is disabled too, but nothing paused it: the spawn broker is launching it.
+    // PAUSED and OFFLINE outrank a stale routine posture for accuracy: a stopped or missing process
+    // cannot currently be "working" even if that is the last posture in its ledger.
     let word = if v.spawn_staged {
         "starting…"
     } else if !v.enabled {
@@ -388,54 +433,23 @@ pub(crate) fn project_row_line(
     } else {
         primary_status_label(v)
     };
-    // Semantic foregrounds carry state without turning routine rows into filled banners. The
-    // field remains exactly 14 columns, preserving every width and shedding threshold below.
-    let label_text = format!(" {:<13}", truncate(word, 13));
-    spans.push(Span::styled(label_text, status_style(v)));
-    spans.push(Span::styled(
-        format!(" [{}]", tier_tag(v.tier)),
-        tier_style(v.tier),
-    ));
-    // How long since this session last did anything (`ProjectView::last_activity`: the
-    // driver's `observed_at`, or the agent-loop ledger's `updated_at`). It was already
-    // loaded and thrown away, and it answers the question the posture cannot — "working"
-    // for 3 seconds and "working" for 3 hours are very different rows. Right-aligned to
-    // 3 columns so the ages line up down the list and the badges after them do too.
-    // The TRAILING chips are built FIRST so the age can be shed against them, even
-    // though they are pushed last.
-    //
-    // This ordering is load-bearing, and getting it wrong shipped a regression: the row is
-    // a `Vec<Span>` rendered with no wrap, so ratatui's `LineTruncator` cuts the TAIL.
-    // With the age pushed ahead of these chips, an overflowing row kept the age and
-    // dropped `chat` — i.e. it spent the last columns on a nice-to-have and discarded "a
-    // human is holding this conversation, which is why nothing is advancing". That chip
-    // exists because exactly that state once wedged a session and cost a live debugging
-    // session to explain, so it outranks the age. Caught by
-    // `chat_chip_says_the_poll_is_parked` (tests/integration/), which no unit test saw.
-    //
-    // ADMISSION, NOT TRUNCATION. Each trailing item is measured and either taken WHOLE
-    // or left out, so neither the age nor the human-attached signal is half-drawn.
-    //
-    // Priority `chat > age`; display order `age, chat`. `chat` first because a live chat REPL
-    // is the reason nothing is advancing — exactly that state once wedged a session and cost a
-    // live debugging session to explain — while the age is context.
-    //
-    let room = content_w.saturating_sub(ROW_FIXED_W);
-    let mut left = room;
-    let show_attached = v.human_attached && left >= ROW_CHAT_W;
-    if show_attached {
+    let word = truncate(word, usize::from(left).max(1));
+    left = left.saturating_sub(u16::try_from(text_cols(&word)).unwrap_or(0));
+    spans.push(Span::styled(word, status_style(v)));
+
+    // THE TIER TAG IS NEVER SHED EITHER, and it is a pinned invariant rather than a judgement: it
+    // stays visible in every group, because two of the four groups (NEEDS YOU, PAUSED/OFFLINE) mix
+    // driven and human-driven rows and the section header cannot say which a row is.
+    let tag = format!(" [{}]", tier_tag(v.tier));
+    left = left.saturating_sub(u16::try_from(text_cols(&tag)).unwrap_or(0));
+    spans.push(Span::styled(tag, tier_style(v.tier)));
+
+    // From here everything is ADMITTED against the room left, in priority order. A live chat REPL
+    // holds this session's conversation, which PARKS pmd's poll (`chat_lock::is_active`) — it is the
+    // reason nothing is advancing, so it outranks both facts below. Not a posture change: the row's
+    // posture is still whatever the ledger says.
+    if v.human_attached && left >= ROW_CHAT_W {
         left -= ROW_CHAT_W;
-    }
-    if left >= ROW_AGE_COL_W {
-        spans.push(Span::styled(
-            format!(" {:>3}", age_label(v.last_activity, now)),
-            attention::text_dim(),
-        ));
-    }
-    // A live chat REPL holds this session's conversation, which PARKS pmd's poll (see
-    // `chat_lock::is_active`). Its own chip, NOT a posture change: the row's posture is
-    // still whatever the ledger says, and this is the reason nothing is advancing it.
-    if show_attached {
         spans.push(Span::styled(
             " user",
             Style::default()
@@ -443,10 +457,43 @@ pub(crate) fn project_row_line(
                 .add_modifier(Modifier::BOLD),
         ));
     }
-    // (A trailing " (disabled)" badge lived here until m36. Two things were wrong with it: it was
-    // pushed with no admission check, so at 37–40 columns ratatui's tail truncator could leave
-    // " (pau" — the exact half-draw the block above forbids for the severity badge — and at the
-    // common width it was not drawn at all. The label says it now.)
+    // THE CADENCE, ONLY FOR A ROW SOMETHING DRIVES. On a Standard row pmd never nudges, so a
+    // heartbeat here would promise a wake nothing will send — the same rule the preview head keeps.
+    // From the ledger first, which is the value `job_engine` consults.
+    if agent_manager::daemon::pmd_drives_row(v.mode, v.tier) {
+        let cadence = format!(
+            " \u{b7} every {}",
+            job_engine::human_cadence(v.cadence_s.unwrap_or(job_engine::DEFAULT_CADENCE_S))
+        );
+        if left >= u16::try_from(text_cols(&cadence)).unwrap_or(u16::MAX) {
+            left -= u16::try_from(text_cols(&cadence)).unwrap_or(0);
+            spans.push(Span::styled(cadence, attention::text_dim()));
+        }
+    }
+    // The ENGINE last of the left cluster: it changes least and matters least, so it is the one
+    // that goes when the sidebar is narrow.
+    if let Some(engine) = v.engine {
+        let label = format!(" \u{b7} {}", engine.label());
+        if left >= u16::try_from(text_cols(&label)).unwrap_or(u16::MAX) + ROW_AGE_COL_W {
+            left -= u16::try_from(text_cols(&label)).unwrap_or(0);
+            spans.push(Span::styled(label, attention::text_dim()));
+        }
+    }
+    // HOW LONG SINCE THIS SESSION DID ANYTHING (`ProjectView::last_activity`: the driver's
+    // `observed_at`, or the agent-loop ledger's `updated_at`). It answers what the state word
+    // cannot — "working" for 3 seconds and "working" for 3 hours are very different rows.
+    //
+    // RIGHT-ALIGNED TO THE PANE EDGE, which is the whole reason it is worth a position of its own:
+    // the ages then form a column you can read down and compare, instead of ending wherever the
+    // cluster before them happened to stop. The engine above yields its columns to it rather than
+    // the other way round, because the age changes every tick and the engine never does.
+    if left >= ROW_AGE_COL_W {
+        spans.push(Span::raw(" ".repeat(usize::from(left - ROW_AGE_COL_W))));
+        spans.push(Span::styled(
+            format!(" {:>3}", age_label(v.last_activity, now)),
+            attention::text_dim(),
+        ));
+    }
     Line::from(spans)
 }
 
@@ -455,33 +502,55 @@ pub(crate) fn project_row_line(
 #[cfg(test)]
 pub(crate) const ROW_TEST_NOW: Epoch = 100;
 
-/// Plain-text flattening of [`project_row_line`] (tested for content, so what's
-/// shown is what's asserted), at a width wide enough for every optional chip.
+/// WHAT THE ROW SAYS — both of its lines, joined by a newline, at a width wide enough for every
+/// optional field. A row is two lines now, so a content assertion is about the pair; a test that
+/// cares WHICH line a field is on reads [`project_row_line`] or [`project_row_detail`] directly.
 #[cfg(test)]
 pub(crate) fn project_row_text(v: &ProjectView) -> String {
-    project_row_text_at(v, 200, ROW_TEST_NOW)
+    format!(
+        "{}\n{}",
+        project_row_text_at(v, 200),
+        flatten(&project_row_detail(v, 200, 0, ROW_TEST_NOW))
+    )
 }
 
-/// [`project_row_text`] at an explicit pane width and clock — the seam the age-column
-/// width tier is tested through.
+/// The IDENTITY line only, at an explicit pane width and clock — the seam the age-column width
+/// tier is tested through.
 #[cfg(test)]
-pub(crate) fn project_row_text_at(v: &ProjectView, content_w: u16, now: Epoch) -> String {
-    project_row_line(v, content_w, now, 0)
-        .spans
-        .iter()
-        .map(|s| s.content.as_ref())
-        .collect()
+pub(crate) fn project_row_text_at(v: &ProjectView, content_w: u16) -> String {
+    flatten(&project_row_line(v, content_w, 0))
 }
 
+/// The STATE line only, at an explicit pane width and lineage depth.
+#[cfg(test)]
+pub(crate) fn project_row_detail_text_at(
+    v: &ProjectView,
+    content_w: u16,
+    depth: usize,
+    now: Epoch,
+) -> String {
+    flatten(&project_row_detail(v, content_w, depth, now))
+}
+
+#[cfg(test)]
+fn flatten(line: &Line<'static>) -> String {
+    line.spans.iter().map(|s| s.content.as_ref()).collect()
+}
+
+/// Every list item the SESSIONS pane would draw, plus its two borders — what the stacked tier asks
+/// the pane for.
+///
+/// IT MUST AGREE WITH [`render_sessions`] ITEM FOR ITEM, or the stacked layout sizes the pane for a
+/// list of a different length and the last rows fall off a pane that had room. The items are one
+/// header per non-empty group plus THREE per project — the identity line, the state line under it,
+/// and the blank that separates it from the next session (which is also the gap before the next
+/// section's header).
 pub(crate) fn sessions_full_height(projects: &[ProjectView]) -> u16 {
     let groups = ROW_GROUPS
         .iter()
         .filter(|group| projects.iter().any(|view| row_group(view) == **group))
         .count();
-    let items = projects
-        .len()
-        .saturating_add(groups)
-        .saturating_add(groups.saturating_sub(1));
+    let items = projects.len().saturating_mul(3).saturating_add(groups);
     u16::try_from(items).unwrap_or(u16::MAX).saturating_add(2)
 }
 
@@ -531,7 +600,6 @@ pub(crate) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
     // click-to-select (see `app.row_hits`).
     let mut item_to_proj: Vec<Option<usize>> = Vec::with_capacity(items.capacity());
     let mut sel_item = None;
-    let mut drawn_a_group = false;
     for group in ROW_GROUPS {
         let members: Vec<usize> = (0..app.projects.len())
             .filter(|i| row_group(&app.projects[*i]) == group)
@@ -539,14 +607,12 @@ pub(crate) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
         if members.is_empty() {
             continue;
         }
-        // A blank line BETWEEN sections (not before the first) so the list breathes instead of
-        // stacking one section's header straight onto the previous section's rows (user: *"we can be
-        // a bit nicer in spacing on our UI so it doesn't feel cram"*). A spacer is not selectable.
-        if drawn_a_group {
-            items.push(ListItem::new(Line::raw("")));
-            item_to_proj.push(None);
-        }
-        drawn_a_group = true;
+        // NO SEPARATE SECTION BLANK. Every row owns the blank line under it (below), so the gap
+        // before a header is the previous section's last row's own spacer — one blank, exactly as
+        // when this was a rule of its own (user: *"we can be a bit nicer in spacing on our UI so it
+        // doesn't feel cram"*). Folding the two rules into one is what makes the SELECTION uniform:
+        // a spacer only some rows had gave the last row of each section a one-line band where every
+        // other row had two.
         items.push(ListItem::new(group.header(members.len(), content_w)));
         item_to_proj.push(None); // a header is not selectable
         for &i in &members {
@@ -573,7 +639,7 @@ pub(crate) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
             // `members`, so a child whose parent sits in another section is drawn flush — and keeps
             // its `from <parent>` cue in the preview head, where lineage has always been a cue.
             spans.extend(
-                project_row_line(v, content_w, now, row_depth(&app.projects, &members, i)).spans,
+                project_row_line(v, content_w, row_depth(&app.projects, &members, i)).spans,
             );
             let mut item = ListItem::new(Line::from(spans));
             if !v.enabled {
@@ -582,6 +648,39 @@ pub(crate) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
             }
             items.push(item);
             item_to_proj.push(Some(i));
+            // EVERY ROW OWNS THE LINE UNDER IT, which carries its state cluster
+            // ([`project_row_detail`]). `List` has no item spacing, so this second line is its own
+            // `ListItem`, and it maps to `None` — not selectable, not clickable, and `j`/`k` never
+            // land on it. Uniform rather than between-rows-only, which is what makes every
+            // selection the same height and doubles as the gap before the next section header.
+            let mut spacer = ListItem::new(project_row_detail(
+                v,
+                content_w + ROW_GUTTER_W,
+                row_depth(&app.projects, &members, i),
+                now,
+            ));
+            // THE SELECTED ROW'S BAND INCLUDES ITS GAP. Spaced rows turned the selection into a
+            // thin stripe with air on both sides; carrying the fill one row down makes it one block
+            // with room in it.
+            if i == app.selected {
+                let mut style = attention::selection();
+                if !v.enabled {
+                    // A dim row's band is dim too, or the fill reads brighter than the row on it.
+                    style = style.add_modifier(Modifier::DIM);
+                }
+                spacer = spacer.style(style);
+            }
+            items.push(spacer);
+            item_to_proj.push(None);
+            // AND A BLANK BETWEEN SESSIONS. The state line is the row's own second line, not air,
+            // so without this the next row's name sits directly under the previous row's state and
+            // the list reads as one block of text (user: *"space between rows too. It is too cramp
+            // together"*). Deliberately OUTSIDE the selection band below: the band is the row's two
+            // content lines, and a fill that carried into this blank would touch the next row.
+            // It also serves as the gap before the next section's header, so the sections are
+            // separated exactly once.
+            items.push(ListItem::new(Line::raw("")));
+            item_to_proj.push(None);
         }
     }
     if items.is_empty() {
@@ -596,6 +695,12 @@ pub(crate) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
         items.push(ListItem::new(Line::styled(hint, attention::text_dim())));
         item_to_proj.push(None);
     }
+    // THE LIST STAYS TOP-ALIGNED. It was briefly centered in the pane, which is not what more room
+    // per row was for: a list that starts at a different line depending on how many sessions exist
+    // gives the eye nothing fixed to come back to, and `j` from the top row then begins in a
+    // different place each time (user: *"why does it put everything in the center. i don't want
+    // that"*).
+    let inner_h = usize::from(area.height.saturating_sub(2));
     let list = List::new(items)
         .block(
             Block::bordered()
@@ -628,8 +733,9 @@ pub(crate) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
     // `ls.offset()` is the first VISIBLE item after the render decided its scroll, so visible row `k`
     // shows item `offset + k` at screen row `area.y + 1 + k` — one item per row, offset by 1 for the
     // top border (the pane has horizontal padding only, no top padding). Header/blank items map to
-    // nothing, so a click on a section header selects nothing. `inner_h` drops 2 for the borders.
-    let inner_h = usize::from(area.height.saturating_sub(2));
+    // nothing, so a click on a section header selects nothing — and neither does one on a row
+    // spacer or on the centering pad, which are `None` for the same reason. `inner_h` (hoisted
+    // above, where the pad is measured against it) drops 2 for the borders.
     let offset = ls.offset();
     let mut hits: Vec<(u16, usize)> = Vec::with_capacity(inner_h);
     for k in 0..inner_h {

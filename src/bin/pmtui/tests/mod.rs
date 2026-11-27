@@ -675,6 +675,7 @@ fn view(id: &str, posture: Posture, stops: Vec<Stop>) -> ProjectView {
         // waiting-age line is therefore off by default and opted into explicitly.
         oldest_stop_since: None,
         stops,
+        cadence_s: None,
         mode: Mode::AgentLoop,
         engine: None,
         session_live: false,

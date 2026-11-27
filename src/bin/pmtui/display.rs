@@ -226,7 +226,14 @@ pub(crate) fn truncate(s: &str, n: usize) -> String {
     if text_cols(s) <= n {
         return s.to_string();
     }
-    let budget = n.saturating_sub(1);
+    // A ZERO BUDGET TAKES NOTHING, not an ellipsis. The `…` is one column wide, so returning it
+    // here made every caller one column wider than the budget it asked for — measured on the
+    // session row, whose name field reaches zero on an absurdly narrow pane and then pushed the
+    // line past its own border.
+    if n == 0 {
+        return String::new();
+    }
+    let budget = n - 1;
     let mut used = 0;
     let mut t = String::new();
     for grapheme in s.graphemes(true) {

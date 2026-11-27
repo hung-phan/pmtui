@@ -27,7 +27,7 @@ fn row_text_has_icon_id_posture_and_tier() {
 fn mode_tags_remain_visible_and_semantically_distinct() {
     let mut v = view("session", Posture::Working, vec![]);
     v.tier = Some(Tier::Autopilot);
-    let autopilot = project_row_line(&v, ROW_FIXED_W, 1_000, 0);
+    let autopilot = project_row_detail(&v, 40, 0, ROW_TEST_NOW);
     let tag = autopilot
         .spans
         .iter()
@@ -37,7 +37,7 @@ fn mode_tags_remain_visible_and_semantically_distinct() {
     assert!(tag.style.add_modifier.contains(Modifier::BOLD));
 
     v.tier = Some(Tier::Standard);
-    let standard = project_row_line(&v, ROW_FIXED_W, 1_000, 0);
+    let standard = project_row_detail(&v, 40, 0, ROW_TEST_NOW);
     let tag = standard
         .spans
         .iter()
@@ -105,86 +105,112 @@ fn fmt_clock_is_a_fixed_wall_clock_not_a_ticking_age() {
 
 #[test]
 fn row_shows_a_compact_age_and_sheds_it_first_on_a_narrow_pane() {
-    // `last_activity` was already loaded and thrown away; the row surfaces it. And it
-    // is the FIRST thing shed when the LIST PANE runs out of columns, because the age
-    // is context while identity, status, and mode are required.
+    // `last_activity` was already loaded and thrown away; the row surfaces it. And it is the FIRST
+    // thing shed when the LIST PANE runs out of columns, because the age is context while the NAME
+    // is what says which session this is.
     let mut v = view("auth-rewrite", Posture::NeedsYou, vec![]);
     v.last_activity = Some(1_000_000);
     let now = 1_000_000 + 2 * 3_600; // 2h ago
 
-    let wide = project_row_text_at(&v, 80, now);
-    assert!(wide.contains("2h"), "no age on a roomy row: {wide}");
+    // The age is on the STATE line, right-aligned to the pane edge so the ages form a column.
+    let wide = project_row_detail_text_at(&v, 80, 0, now);
+    assert!(wide.contains("2h"), "no age on a roomy state line: {wide}");
+    assert!(
+        wide.ends_with(" 2h"),
+        "the age is not flush right: {wide:?}"
+    );
 
-    // Exactly at the threshold it is still shown, one column below it is gone —
-    // and everything that is NOT the age survives either way.
-    assert!(project_row_text_at(&v, ROW_AGE_W, now).contains("2h"));
-    let narrow = project_row_text_at(&v, ROW_AGE_W - 1, now);
+    // It is shed only when the line cannot hold it at all, which no real sidebar width reaches.
+    let narrow = project_row_detail_text_at(&v, ROW_AGE_COL_W + ROW_DETAIL_INDENT, 0, now);
     assert!(
         !narrow.contains("2h"),
-        "age not shed on a narrow pane: {narrow}"
+        "age not shed on a pane with no room: {narrow}"
     );
-    for keep in ["auth-rewrite", "needs you", "[A]"] {
-        assert!(narrow.contains(keep), "{keep:?} shed instead: {narrow}");
+
+    // THE IDENTITY LINE IS THE NAME, and nothing competes with it.
+    let identity = project_row_text_at(&v, 39);
+    assert!(identity.contains("auth-rewrite"), "{identity}");
+    assert!(
+        !identity.contains("2h"),
+        "the age belongs below: {identity}"
+    );
+
+    // The state words are never shed.
+    let detail = project_row_detail_text_at(&v, 39, 0, now);
+    for keep in ["needs you", "[A]"] {
+        assert!(detail.contains(keep), "{keep:?} is missing: {detail}");
     }
 }
 
-/// THE AGE MUST NEVER EVICT THE `chat` CHIP. The row is rendered with no wrap, so
-/// ratatui cuts the TAIL — and the age was originally pushed AHEAD of the trailing
-/// chips, so an overflowing row kept a nice-to-have and dropped the one chip that
-/// explains why a session is not advancing. That shipped, and only the real-tmux
-/// `chat_chip_says_the_poll_is_parked` caught it; no unit test did. This is that unit
-/// test: at a width that fits the chip but not chip-plus-age, the AGE is what goes.
+/// THE `user` CHIP CAN NO LONGER BE EVICTED BY THE AGE. The two used to share the identity line,
+/// the row is rendered with no wrap so ratatui cuts the TAIL, and the age was pushed first — so an
+/// overflowing row kept a nice-to-have and dropped the one chip that explains why a session is not
+/// advancing. That shipped, and only the real-tmux `chat_chip_says_the_poll_is_parked` caught it.
+/// They are now on DIFFERENT LINES, so the hazard is structural rather than a priority rule, and
+/// this test pins that: the chip is on the state line, the age is on the identity line, and no
+/// width makes one cost the other.
 #[test]
-fn the_age_column_is_shed_before_the_chat_chip_not_after() {
+fn the_age_and_the_chat_chip_no_longer_compete_for_the_same_columns() {
     let mut v = view("auth-rewrite", Posture::Monitoring, vec![]);
     v.last_activity = Some(1_000_000);
     v.human_attached = true;
     let now = 1_000_000 + 2 * 3_600; // 2h ago
 
-    // Roomy: both fit.
-    let wide = project_row_text_at(&v, 200, now);
-    assert!(
-        wide.contains("user") && wide.contains("2h"),
-        "a roomy row shows both: {wide}"
-    );
-
-    // A width that fits the CHIP but not chip-plus-age. Anchored on the chip's own cost
-    // rather than on `ROW_AGE_W`: the chip wins, and the age is bought only if it does not
-    // evict it.
-    let tight = project_row_text_at(&v, ROW_FIXED_W + ROW_CHAT_W, now);
-    assert!(
-        tight.contains("user"),
-        "the human-attached chip must survive: {tight}"
-    );
-    assert!(
-        !tight.contains("2h"),
-        "the AGE is what sheds when the chip needs the columns: {tight}"
-    );
-
-    // And the row still fits the pane it was given, chip included.
-    let row = project_row_line(&v, ROW_AGE_W, now, 0);
-    assert!(
-        row.width() <= usize::from(ROW_AGE_W),
-        "row is {} cols wide at a {ROW_AGE_W}-col pane",
-        row.width()
-    );
+    for content_w in [39, 45, 80] {
+        let identity = project_row_text_at(&v, content_w);
+        let detail = project_row_detail_text_at(&v, content_w, 0, now);
+        assert!(
+            detail.contains("user"),
+            "the human-attached chip must survive at {content_w}: {detail}"
+        );
+        assert!(
+            detail.contains("2h"),
+            "and so must the age, on the same line: {detail}"
+        );
+        assert!(
+            !identity.contains("user") && !identity.contains("2h"),
+            "the identity line carries neither: {identity}"
+        );
+    }
 }
 
 #[test]
 fn row_age_never_widens_the_row_past_its_pane() {
-    // The threshold's arithmetic, asserted rather than trusted: with the age shown,
-    // an attention row still fits `ROW_AGE_W` columns.
+    // NEITHER LINE EVER OVERFLOWS ITS PANE, at any width down to nothing — the identity line pads
+    // or elides the name to fit, and the state line admits each field against the room left.
     let mut v = view("sixteen-char-idx", Posture::Stuck, vec![]);
     v.last_activity = Some(0);
     v.stops = vec![stop("s1", "publish", RiskClass::Hard)];
-    let row = project_row_line(&v, ROW_AGE_W, 51 * 7 * 86_400, 0); // widest age: `51w`
+    let widest_age = 51 * 7 * 86_400; // `51w`
+    // The IDENTITY line fits any pane that can hold its glyph at all.
+    for w in ROW_FIXED_W..=48u16 {
+        let identity = project_row_line(&v, w, 0);
+        assert!(
+            identity.width() <= usize::from(w),
+            "the identity line is {} wide at {w}: {identity:?}",
+            identity.width()
+        );
+    }
+    // The STATE line has a floor, and it is a consequence of the invariant rather than an
+    // oversight: the state word and the tier tag are never shed, so below indent + word + tag it
+    // cannot fit. That floor is far under the 36-column inner width of the narrowest sidebar the
+    // layout ever hands it, so no real pane reaches it.
+    for w in 36..=48u16 {
+        let state = project_row_detail(&v, w, 0, widest_age);
+        assert!(
+            state.width() <= usize::from(w),
+            "the state line is {} wide at {w}: {state:?}",
+            state.width()
+        );
+    }
+    // At a real sidebar width the widest age is still drawn whole.
+    let text = project_row_detail_text_at(&v, 41, 0, widest_age);
+    assert!(text.contains("51w"), "{text}");
+    // The state word is on the row's OTHER line, where no width sheds it.
     assert!(
-        row.width() <= usize::from(ROW_AGE_W),
-        "row is {} wide: {row:?}",
-        row.width()
+        project_row_detail_text_at(&v, 41, 0, ROW_TEST_NOW).contains("stuck"),
+        "the state line must still say stuck"
     );
-    let text: String = row.spans.iter().map(|s| s.content.as_ref()).collect();
-    assert!(text.contains("51w") && text.contains("stuck"), "{text}");
 }
 
 #[test]
@@ -208,11 +234,15 @@ fn rendered_rows_shed_the_age_when_the_list_pane_narrows() {
     let roomy = screen_text(&terminal);
     assert!(roomy.contains('—'), "no age column at 49 cols: {roomy}");
 
-    // 43 cols: 39 inner, below the threshold — the age goes, the row does not.
+    // 43 cols: THE AGE NOW SURVIVES HERE, and that is the point of the two-line row. It used to
+    // be shed at this width because the status word and the tier tag were fixed fields on the same
+    // line; with them moved down, the only thing the age competes with is the name.
     let mut terminal = Terminal::new(TestBackend::new(43, 12)).unwrap();
     terminal.draw(|f| render(f, &app)).expect("render 43");
     let tight = screen_text(&terminal);
-    assert!(!tight.contains('—'), "age not shed at 43 cols: {tight}");
+    assert!(tight.contains('—'), "the age was shed at 43 cols: {tight}");
+    // Both of the row's lines are on screen: the name on the identity line, the state word on the
+    // one under it.
     assert!(
         tight.contains("auth-rewrite") && tight.contains("working"),
         "the row itself was shed instead: {tight}"
@@ -273,7 +303,7 @@ fn attention_row_uses_a_semantic_foreground_without_a_fill() {
     }
     // The id is ORDINARY TEXT, and attention must not turn it into a filled state label: which
     // session is shouting has to be readable without depending on a hue.
-    let id = project_row_line(&asking, 80, 1_000, 0)
+    let id = project_row_line(&asking, 80, 0)
         .spans
         .into_iter()
         .find(|span| span.content.contains("asking"))
@@ -290,7 +320,7 @@ fn attention_row_uses_a_semantic_foreground_without_a_fill() {
 
 #[test]
 fn every_secondary_label_keeps_the_same_left_aligned_field() {
-    let attention = project_row_line(&view("x", Posture::NeedsYou, vec![]), 80, 1_000, 0)
+    let attention = project_row_detail(&view("x", Posture::NeedsYou, vec![]), 80, 0, ROW_TEST_NOW)
         .spans
         .into_iter()
         .find(|s| s.content.contains("needs you"))
@@ -301,20 +331,20 @@ fn every_secondary_label_keeps_the_same_left_aligned_field() {
     );
     assert_eq!(
         attention.content.as_ref(),
-        format!(" {:<13}", "needs you"),
-        "attention must keep the fixed 14-column status field"
+        "needs you",
+        "the state word is the line's own first field, not a padded column"
     );
 
     let mut calm_view = view("y", Posture::Monitoring, vec![]);
     calm_view.session_live = true;
-    let calm = project_row_line(&calm_view, 80, 1_000, 0)
+    let calm = project_row_detail(&calm_view, 80, 0, ROW_TEST_NOW)
         .spans
         .into_iter()
         .find(|s| s.content.contains("monitoring"))
         .expect("the calm label span");
     assert!(!calm.style.add_modifier.contains(Modifier::REVERSED));
     assert!(
-        calm.content.starts_with(' ') && !calm.content.starts_with("  "),
+        !calm.content.starts_with(' '),
         "a calm label should stay left-aligned: {:?}",
         calm.content
     );
@@ -322,30 +352,32 @@ fn every_secondary_label_keeps_the_same_left_aligned_field() {
 
 #[test]
 fn hard_and_soft_rows_use_restrained_semantic_text() {
-    let mut app = app_with(
-        vec![
-            view("asking", Posture::NeedsYou, vec![]),
-            view("wedged", Posture::Stuck, vec![]),
-        ],
-        UiMode::Normal,
-    );
-    app.selected = 0;
-    let mut terminal = Terminal::new(TestBackend::new(120, 12)).unwrap();
-    terminal.draw(|f| render(f, &app)).expect("render");
-    let hard = styles_under_row(&terminal, "wedged", "stuck").expect("no stuck row");
-    assert!(
-        hard.iter()
-            .all(|(fg, m)| *fg == agent_manager::theme::hard()
-                && m.contains(Modifier::BOLD)
-                && !m.contains(Modifier::REVERSED))
-    );
-    let soft = styles_under_row(&terminal, "asking", "needs you").expect("no needs-you row");
-    assert!(
-        soft.iter()
-            .all(|(fg, m)| *fg == agent_manager::theme::soft()
-                && m.contains(Modifier::BOLD)
-                && !m.contains(Modifier::REVERSED))
-    );
+    // ON THE BUILT LINES, not the screen. The state word's own span carries the style, and a screen
+    // lookup cannot be scoped to the sidebar: the PREVIEW pane's title names the selected session
+    // and its head repeats the state word, both on screen rows the sidebar shares — so a search by
+    // text read the preview's styling and reported it as the row's.
+    let hard = project_row_detail(&view("wedged", Posture::Stuck, vec![]), 41, 0, ROW_TEST_NOW)
+        .spans
+        .into_iter()
+        .find(|s| s.content.contains("stuck"))
+        .expect("no stuck word");
+    assert_eq!(hard.style.fg, Some(agent_manager::theme::hard()));
+    assert!(hard.style.add_modifier.contains(Modifier::BOLD));
+    assert!(!hard.style.add_modifier.contains(Modifier::REVERSED));
+
+    let soft = project_row_detail(
+        &view("asking", Posture::NeedsYou, vec![]),
+        41,
+        0,
+        ROW_TEST_NOW,
+    )
+    .spans
+    .into_iter()
+    .find(|s| s.content.contains("needs you"))
+    .expect("no needs-you word");
+    assert_eq!(soft.style.fg, Some(agent_manager::theme::soft()));
+    assert!(soft.style.add_modifier.contains(Modifier::BOLD));
+    assert!(!soft.style.add_modifier.contains(Modifier::REVERSED));
 }
 
 #[test]
@@ -361,7 +393,7 @@ fn semantic_states_do_not_change_the_fixed_row_width() {
     ];
     for v in states {
         for w in 24u16..=64 {
-            let row = project_row_line(&v, w, 1_000, 0);
+            let row = project_row_line(&v, w, 0);
             assert!(
                 row.width() <= usize::from(w).max(usize::from(ROW_FIXED_W)),
                 "{} overflows at {w}: {} cols",
@@ -378,7 +410,7 @@ fn wide_display_names_keep_the_status_and_tier_on_the_floor_width_row() {
     // row exactly its fixed head. A display name is measured in terminal cells, not chars, so
     // CJK and emoji names cannot push the status label or tier tag past the pane edge.
     let content_w = sessions_width(100).saturating_sub(8);
-    assert_eq!(content_w, ROW_FIXED_W);
+    assert_eq!(content_w, 36, "the 44-column sidebar's inner width");
     for name in [
         "发布协调工作流程",
         "发布协调工作流程发布协调工作流程",
@@ -391,11 +423,12 @@ fn wide_display_names_keep_the_status_and_tier_on_the_floor_width_row() {
             v.display_name = Some(name.into());
             v.tier = Some(tier);
             v.session_live = true;
-            let row = project_row_line(&v, content_w, 1_000, 0);
+            let row = project_row_line(&v, content_w, 0);
             let text: String = row.spans.iter().map(|span| span.content.as_ref()).collect();
-            assert_eq!(row.width(), usize::from(ROW_FIXED_W), "{text}");
-            assert!(text.contains(" needs you "), "{text}");
-            assert!(text.ends_with(tag), "{text}");
+            assert_eq!(row.width(), usize::from(content_w), "{text}");
+            let detail = project_row_detail_text_at(&v, content_w, 0, ROW_TEST_NOW);
+            assert!(detail.starts_with("    needs you"), "{detail}");
+            assert!(detail.contains(tag), "{detail}");
         }
     }
 
@@ -407,11 +440,15 @@ fn wide_display_names_keep_the_status_and_tier_on_the_floor_width_row() {
     app.projects[0].session_live = true;
     let rows = session_rows(&app, 100, 20);
     // The test buffer reads a wide glyph's trailing cell back as a blank, so match one glyph.
-    let row = rows
+    let at = rows
         .iter()
-        .find(|row| row.contains('发'))
+        .position(|row| row.contains('发'))
         .unwrap_or_else(|| panic!("wide name never rendered: {rows:#?}"));
-    assert!(row.contains("needs you") && row.contains("[A]"), "{row}");
+    let detail = &rows[at + 1];
+    assert!(
+        detail.contains("needs you") && detail.contains("[A]"),
+        "{detail}"
+    );
 }
 
 #[test]
@@ -419,8 +456,8 @@ fn a_driven_row_wears_no_special_colour_on_its_id() {
     let mut v = view("driven", Posture::Working, vec![]);
     v.tier = Some(Tier::Autopilot);
     v.session_live = true;
-    let first = project_row_line(&v, 80, 1_000, 0);
-    let second = project_row_line(&v, 80, 1_000, 0);
+    let first = project_row_line(&v, 80, 0);
+    let second = project_row_line(&v, 80, 0);
     assert_eq!(
         first, second,
         "row styling must not depend on wall-clock phase"
@@ -433,7 +470,7 @@ fn a_driven_row_wears_no_special_colour_on_its_id() {
     // Cyan here used to seed a TachyonFX hue sweep. The sweep is gone, so an autopilot id reads
     // exactly like a standard one — the lane, the `[A]` tag and `control pmd` carry that fact.
     let standard = view("plain", Posture::Working, vec![]);
-    let plain = project_row_line(&standard, 80, 1_000, 0);
+    let plain = project_row_line(&standard, 80, 0);
     let plain_id = plain
         .spans
         .iter()
@@ -629,18 +666,32 @@ fn the_list_is_sectioned_by_attention_mode_and_availability() {
     }
 }
 
+/// WHAT THE STACKED TIER STILL GUARANTEES. Every row is three lines now (identity, state, gap), so
+/// four sessions want 18 rows where this tier allots 15 — "every section row visible" is no longer
+/// achievable at this boundary and the list scrolls, which is what `j`/`k` are for.
+///
+/// What MUST still hold is the rule the product is shaped around: a row a human has to act on is
+/// never one they must go looking for. So the NEEDS YOU rows and the selection are visible, and
+/// the sections stay in their order.
 #[test]
-fn stacked_layout_keeps_every_section_row_visible_at_its_width_boundary() {
-    let app = live_sectioned_app();
+fn the_stacked_tier_keeps_attention_and_the_selection_visible_at_its_width_boundary() {
+    let mut app = live_sectioned_app();
+    app.selected = app
+        .projects
+        .iter()
+        .position(|v| v.id == "driven")
+        .expect("the fixture's autopilot row");
     let mut terminal = Terminal::new(TestBackend::new(NARROW_W, 24)).unwrap();
     terminal.draw(|frame| render(frame, &app)).unwrap();
     let screen = screen_text(&terminal);
-    for id in ["asking", "driven", "mine", "stopped"] {
-        assert!(
-            screen.contains(id),
-            "{id:?} hidden at {NARROW_W}x24: {screen}"
-        );
-    }
+    assert!(
+        screen.contains("NEEDS YOU") && screen.contains("asking"),
+        "an attention row must never be scrolled out of sight: {screen}"
+    );
+    assert!(
+        screen.contains("driven"),
+        "the selected row must be on screen: {screen}"
+    );
 }
 
 #[test]
@@ -666,12 +717,7 @@ fn row_groups_keep_attention_first_and_put_dead_terminals_offline() {
         v.tier = Some(tier);
         v.posture = Posture::Working;
         assert_eq!(row_group(&v), RowGroup::Paused, "{tag} offline row");
-        let offline = project_row_line(&v, ROW_FIXED_W, 1_000, 0);
-        let text: String = offline
-            .spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect();
+        let text = project_row_detail_text_at(&v, 39, 0, ROW_TEST_NOW);
         assert!(text.contains("offline") && text.contains(tag), "{text}");
     }
     v.tier = Some(Tier::Autopilot);
@@ -684,7 +730,7 @@ fn row_groups_keep_attention_first_and_put_dead_terminals_offline() {
         .position(|row| row.contains("PAUSED / OFFLINE (1)"))
         .unwrap_or_else(|| panic!("offline row not grouped: {rows:#?}"));
     assert!(
-        rows[header + 1].contains("gone") && rows[header + 1].contains("offline"),
+        rows[header + 1].contains("gone") && rows[header + 2].contains("offline"),
         "{rows:#?}"
     );
     assert!(
@@ -743,6 +789,133 @@ fn the_gutter_lands_on_the_selected_row_not_a_header() {
             marked[0]
         );
     }
+}
+
+/// EVERY ROW IS TWO LINES, AND THE SECOND ONE IS THE SEPARATOR. The blank line this started as
+/// (user: *"i want the row have more space"*) now carries the row's state cluster, so a section's
+/// rows never touch and the gap before the next header is the last row's own state line.
+#[test]
+fn every_row_is_followed_by_its_own_state_line() {
+    let app = live_sectioned_app();
+    let rows = session_rows(&app, 100, 40);
+    let ids: Vec<String> = app.projects.iter().map(|v| v.id.clone()).collect();
+    let is_row = |line: &String| ids.iter().any(|id| line.contains(id.as_str()));
+
+    // No two identity lines are adjacent: each is followed by its own state line.
+    for pair in rows.windows(2) {
+        let [first, second] = pair else { continue };
+        if is_row(first) && is_row(second) {
+            panic!("two rows with no state line between: {first:?} then {second:?}");
+        }
+    }
+    // A header is preceded by exactly ONE line that is not an identity line — the previous
+    // section's last state line — so the sections are separated once, not twice.
+    for (i, row) in rows.iter().enumerate() {
+        if i > 0
+            && (row.contains("AUTOPILOT") || row.contains("STANDARD") || row.contains("PAUSED"))
+        {
+            assert!(
+                !is_row(&rows[i - 1]),
+                "a header sits straight on a row: {row:?}"
+            );
+            assert!(
+                i < 2 || !rows[i - 2].trim().is_empty(),
+                "the gap above {row:?} is two lines"
+            );
+        }
+    }
+}
+
+/// THE ROW FILLS THE WIDTH IT IS GIVEN, and the name is the field that absorbs the slack.
+///
+/// MEASURED before this: at the 52-column sidebar the row stopped six columns short of the pane,
+/// because every field was fixed — so the right edge was never reached, the ages did not line up
+/// down the list, and a depth-2 child elided `autopilot-docs` to `autopilot-d…` while those six
+/// columns sat empty two fields to its right.
+#[test]
+fn the_row_spends_every_spare_column_on_the_name_and_ends_at_the_right_edge() {
+    let mut v = view("autopilot-docs", Posture::Monitoring, vec![]);
+    v.session_live = true;
+    v.last_activity = Some(ROW_TEST_NOW - 60);
+
+    // The whole row is exactly the width it was handed, at every width in the band…
+    for content_w in 36..=46 {
+        let text = project_row_text_at(&v, content_w);
+        assert_eq!(
+            text_cols(&text),
+            usize::from(content_w),
+            "a {content_w}-column row drew {:?}",
+            text
+        );
+    }
+
+    // …and the slack goes to the NAME, which is what stops an indented child from eliding.
+    let narrow = project_row_line(&v, 39, 2);
+    let wide = project_row_line(&v, 45, 2);
+    let name_of = |line: &Line<'static>| -> String {
+        line.spans
+            .iter()
+            .find(|s| s.content.contains("autopilot"))
+            .map(|s| s.content.to_string())
+            .expect("the name span")
+    };
+    assert!(
+        text_cols(&name_of(&wide)) > text_cols(&name_of(&narrow)),
+        "the extra width did not reach the name: {:?} vs {:?}",
+        name_of(&narrow),
+        name_of(&wide)
+    );
+    assert!(
+        name_of(&wide).contains("autopilot-docs"),
+        "a depth-2 child still elides at the cap: {:?}",
+        name_of(&wide)
+    );
+
+    // THE STATE LINE ENDS WITH THE AGE, flush to the pane edge, which is what makes the ages a
+    // column you can read down.
+    let state = project_row_detail_text_at(&v, 41, 0, ROW_TEST_NOW);
+    assert!(state.ends_with(" 1m"), "{state:?}");
+}
+
+/// THE SELECTED ROW'S BAND INCLUDES ITS GAP. Spaced rows turned the selection into a thin stripe
+/// with air on both sides; the fill carries one row down so it reads as one block. The two lines
+/// must cover the SAME columns, or the band looks like a misdrawn rectangle.
+#[test]
+fn the_selected_rows_band_covers_its_own_gap_to_the_same_width() {
+    let app = live_sectioned_app();
+    let selected = app.projects[app.selected].id.clone();
+    let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
+    terminal.draw(|f| render(f, &app)).expect("render");
+    let buf = terminal.backend().buffer();
+    let sel_bg = agent_manager::theme::selection_bg();
+    let filled = |y: u16| -> Vec<u16> {
+        (buf.area.left()..buf.area.right())
+            .filter(|x| buf.cell((*x, y)).is_some_and(|c| c.bg == sel_bg))
+            .collect()
+    };
+    // BY THE GUTTER AND the id: the preview pane's own title names the selected session too, and
+    // matching on the id alone found that border row and reported an empty band.
+    let row_y = (buf.area.top()..buf.area.bottom())
+        .find(|y| {
+            let text: String = (buf.area.left()..buf.area.right())
+                .map(|x| buf.cell((x, *y)).map_or(" ", |c| c.symbol()).to_string())
+                .collect();
+            text.contains(attention::GUTTER) && text.contains(&selected)
+        })
+        .expect("the selected row is on screen");
+
+    let row = filled(row_y);
+    let band = filled(row_y + 1);
+    assert!(!row.is_empty(), "the selected row carries no fill");
+    assert_eq!(
+        row, band,
+        "the band under the selected row must cover the same columns as the row"
+    );
+    // And it stops there: the row ABOVE the selection is not part of the band.
+    assert!(
+        filled(row_y - 1).is_empty(),
+        "the fill leaked onto the line above the selected row"
+    );
 }
 
 #[test]
@@ -853,15 +1026,15 @@ fn the_chat_chip_survives_beside_a_hard_stop() {
     );
     v.human_attached = true;
     v.last_activity = Some(0);
-    let tight = project_row_text_at(&v, 44, 1_000);
+    let tight = project_row_detail_text_at(&v, 44, 0, ROW_TEST_NOW);
     assert!(tight.contains("user"), "the chip was evicted: {tight:?}");
     assert!(
         tight.contains("needs you"),
         "the label must survive at 44 columns: {tight:?}"
     );
     // …and the row still fits the pane it was given.
-    assert!(project_row_line(&v, 44, 1_000, 0).width() <= 44);
-    let line = project_row_line(&v, 44, 1_000, 0);
+    assert!(project_row_line(&v, 44, 0).width() <= 44);
+    let line = project_row_detail(&v, 44, 0, ROW_TEST_NOW);
     let attached = line
         .spans
         .iter()
@@ -870,7 +1043,7 @@ fn the_chat_chip_survives_beside_a_hard_stop() {
     assert_eq!(attached.style.fg, Some(agent_manager::theme::accent()));
     assert!(attached.style.add_modifier.contains(Modifier::BOLD));
     // Roomier: unchanged.
-    let wide = project_row_text_at(&v, 60, 1_000);
+    let wide = project_row_detail_text_at(&v, 60, 0, ROW_TEST_NOW);
     assert!(
         wide.contains("user") && wide.contains("needs you"),
         "{wide:?}"
@@ -881,7 +1054,7 @@ fn the_chat_chip_survives_beside_a_hard_stop() {
 fn a_disabled_attention_row_recedes_as_paused() {
     let mut v = view("x", Posture::NeedsYou, vec![]);
     v.enabled = false;
-    let line = project_row_line(&v, 80, 1_000, 0);
+    let line = project_row_detail(&v, 80, 0, ROW_TEST_NOW);
     let label = line
         .spans
         .iter()
@@ -904,7 +1077,7 @@ fn a_hard_stop_paints_the_row_red_even_when_the_agent_declared_it_low() {
         vec![stop("s1", "publish", RiskClass::Low)],
     );
     assert_eq!(attention::level(&v), attention::Level::Hard);
-    let label = project_row_line(&v, 80, 1_000, 0)
+    let label = project_row_detail(&v, 80, 0, ROW_TEST_NOW)
         .spans
         .into_iter()
         .find(|s| s.content.contains("needs you"))
@@ -930,7 +1103,7 @@ fn disabled_project_is_marked() {
     // inside `ROW_FIXED_W`, so it survives the narrow widths where a trailing badge is not
     // drawn at all. Asserted at the real-tmux suite's own content width, which is what caught
     // the trailing version.
-    assert!(project_row_text_at(&v, ROW_FIXED_W, 1_000).contains("paused"));
+    assert!(project_row_detail_text_at(&v, 39, 0, ROW_TEST_NOW).contains("paused"));
     // …and it replaces the posture rather than sitting next to it: a paused row has no agent,
     // so "working" would be a claim about a process that is not running.
     assert!(!project_row_text(&v).contains("working"));
@@ -978,11 +1151,11 @@ fn a_staged_row_reads_starting_in_rows_and_board() {
 
     app.mode = UiMode::Normal;
     let rows = session_rows(&app, 100, 20);
-    assert!(
-        rows.iter()
-            .any(|row| row.contains("kid") && row.contains("starting…")),
-        "{rows:#?}"
-    );
+    let at = rows
+        .iter()
+        .position(|row| row.contains("kid"))
+        .unwrap_or_else(|| panic!("{rows:#?}"));
+    assert!(rows[at + 1].contains("starting…"), "{rows:#?}");
 }
 
 #[test]
@@ -1031,7 +1204,7 @@ fn session_row_head_width_is_unchanged_for_spawned_rows() {
     // row exactly its fixed head. Lineage has no slot there, and `starting…` fits the status
     // field `paused` fills.
     let content_w = sessions_width(100).saturating_sub(8);
-    assert_eq!(content_w, ROW_FIXED_W);
+    assert_eq!(content_w, 36, "the 44-column sidebar's inner width");
 
     let mut plain = agent_loop_view("child");
     plain.session_live = true;
@@ -1039,29 +1212,37 @@ fn session_row_head_width_is_unchanged_for_spawned_rows() {
     spawned.spawned_by = Some("parent-with-a-very-long-session-id".into());
     spawned.spawned_by_label = Some("發布協調工作流程 parent label that is far too long".into());
     assert_eq!(
-        project_row_line(&spawned, content_w, 1_000, 0),
-        project_row_line(&plain, content_w, 1_000, 0),
+        project_row_line(&spawned, content_w, 0),
+        project_row_line(&plain, content_w, 0),
         "spawn lineage must not change the Session row"
     );
 
     let mut paused = agent_loop_view("child");
     paused.enabled = false;
     for v in [&spawned, &staged_view("child"), &paused] {
-        let row = project_row_line(v, content_w, 1_000, 0);
-        assert_eq!(row.width(), usize::from(ROW_FIXED_W), "{row:?}");
+        let row = project_row_line(v, content_w, 0);
+        assert_eq!(row.width(), usize::from(content_w), "{row:?}");
     }
 
     let app = app_with(vec![spawned, staged_view("kid")], UiMode::Normal);
     let rows = session_rows(&app, 100, 20);
-    let child = rows.iter().find(|row| row.contains("child")).unwrap();
-    let kid = rows.iter().find(|row| row.contains("kid")).unwrap();
+    let at = |needle: &str| {
+        rows.iter()
+            .position(|row| row.contains(needle))
+            .unwrap_or_else(|| panic!("{needle} missing: {rows:#?}"))
+    };
+    let (child, kid) = (at("child"), at("kid"));
     assert!(!rows.iter().any(|row| row.contains("parent")), "{rows:#?}");
-    assert!(child.trim_end().ends_with("[S]"), "{child}");
-    assert!(kid.trim_end().ends_with("[S]"), "{kid}");
+    // The mode tag is on each row's STATE line, and a staged row's reads `starting…` where a
+    // paused one reads `paused` — neither costs the identity line a column.
+    assert!(rows[child + 1].contains("[S]"), "{:?}", rows[child + 1]);
+    assert!(rows[kid + 1].contains("[S]"), "{:?}", rows[kid + 1]);
+    // Built rather than scraped: `session_rows` trims each line, which removes exactly the name
+    // padding that makes two identity lines the same width.
     assert_eq!(
-        text_cols(child.trim_end()),
-        text_cols(kid.trim_end()),
-        "{rows:#?}"
+        project_row_line(&app.projects[0], content_w, 0).width(),
+        project_row_line(&app.projects[1], content_w, 0).width(),
+        "the IDENTITY lines must be the same width whatever lineage a row carries: {rows:#?}"
     );
 }
 
@@ -1197,9 +1378,9 @@ fn the_tie_costs_name_columns_and_never_row_columns() {
     v.tier = Some(Tier::Autopilot);
     v.session_live = true;
 
-    let flush = project_row_line(&v, ROW_FIXED_W, 1_000, 0);
+    let flush = project_row_line(&v, 39, 0);
     for depth in 1..=ROW_MAX_INDENT {
-        let tied = project_row_line(&v, ROW_FIXED_W, 1_000, depth);
+        let tied = project_row_line(&v, 39, depth);
         assert_eq!(
             tied.width(),
             flush.width(),
@@ -1213,19 +1394,23 @@ fn the_tie_costs_name_columns_and_never_row_columns() {
             )),
             "the tie leads the row at depth {depth}: {text:?}"
         );
+        // The tag lives on the STATE line, which carries the same indent so the two lines stay
+        // one block.
+        let detail = project_row_detail_text_at(&v, 39, depth, ROW_TEST_NOW);
+        assert!(detail.contains("[A]"), "{detail:?}");
         assert!(
-            text.contains("[A]"),
-            "the tier tag still lands inside the fixed head at depth {depth}: {text:?}"
+            detail.starts_with(&" ".repeat(ROW_DETAIL_INDENT as usize + depth * ROW_INDENT_W)),
+            "the state line hangs under the name at depth {depth}: {detail:?}"
         );
     }
 
     // Deeper than the cap draws the cap, rather than eating more of the name.
-    let capped: String = project_row_line(&v, ROW_FIXED_W, 1_000, 9)
+    let capped: String = project_row_line(&v, ROW_FIXED_W, 9)
         .spans
         .iter()
         .map(|s| s.content.as_ref())
         .collect();
-    let at_cap: String = project_row_line(&v, ROW_FIXED_W, 1_000, ROW_MAX_INDENT)
+    let at_cap: String = project_row_line(&v, ROW_FIXED_W, ROW_MAX_INDENT)
         .spans
         .iter()
         .map(|s| s.content.as_ref())

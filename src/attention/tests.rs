@@ -37,6 +37,7 @@ fn view(posture: Posture) -> ProjectView {
         last_activity: None,
         stops: Vec::new(),
         oldest_stop_since: None,
+        cadence_s: None,
         mode: Mode::AgentLoop,
         engine: None,
         session_live: false,

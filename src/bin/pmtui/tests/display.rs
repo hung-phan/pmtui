@@ -90,7 +90,10 @@ fn glyphs_use_shape_and_colour_for_each_status_bucket() {
 fn truncation_and_text_width_count_terminal_columns() {
     assert_eq!(truncate("short", 8), "short");
     assert_eq!(truncate("abcdef", 4), "abc…");
-    assert_eq!(truncate("abcdef", 0), "…");
+    // A ZERO BUDGET TAKES NOTHING. It used to answer `…`, which is one column wide — so every
+    // caller that asked for no columns got one, and the session row's name field pushed its line
+    // past its own border at the narrowest pane.
+    assert_eq!(truncate("abcdef", 0), "");
     assert_eq!(truncate("a→b", 3), "a→b");
     assert_eq!(text_cols("a→b"), 3);
 
