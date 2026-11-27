@@ -896,10 +896,23 @@ fn renders_model_picker_at_tiny_sizes_without_panicking() {
 
 /// Per-row text of the rendered buffer — the model picker draws one choice per row, so this lets a
 /// test assert WHICH row carries the `●` current glyph vs the `▸` cursor glyph.
+/// The picker's own rows, with the SESSIONS sidebar that shares each screen line stripped off.
+///
+/// SCOPED TO THE PANE on purpose: this used to return whole screen lines, so the sidebar's selected
+/// row supplied a `▸` to a line the picker had drawn `(default)` on, and `!row.contains(GLYPH_CURSOR)`
+/// failed for a frame that was correct. It passed only because the two panes happened not to line
+/// up; the sidebar's vertical centering moved them onto the same row.
 fn picker_rows(terminal: &Terminal<TestBackend>) -> Vec<String> {
     screen_rows_styled(terminal)
         .into_iter()
-        .map(|(t, _)| t)
+        .map(|(t, _)| {
+            // The overlay is drawn over the body, so its card is the SECOND column region on the
+            // line: drop everything up to the first pane border after the sidebar.
+            match t.char_indices().filter(|(_, c)| *c == '│').nth(1) {
+                Some((at, _)) => t[at..].to_string(),
+                None => t,
+            }
+        })
         .collect()
 }
 

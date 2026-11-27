@@ -105,11 +105,18 @@ fn every_role_resolves_to_the_token_it_documents() {
         ("rule", rule(), t::BORDER_UNFOCUSED),
         ("base_bg", base_bg(), t::BG_BASE),
         ("surface_bg", surface_bg(), t::BG_ELEVATED),
-        ("selection_bg", selection_bg(), t::BG_SELECTION),
         ("text", text(), t::TEXT_PRIMARY),
     ] {
         assert_eq!(hue, token(name), "{role} does not resolve to {name}");
     }
+
+    // `selection_bg` is deliberately NOT in that table: it is the one role chosen by measurement
+    // rather than by name, so it is one of the theme's two background tokens and which one is
+    // pinned by `every_theme_selection_band_is_no_weaker_and_no_less_readable`.
+    assert!(
+        [token(t::BG_SELECTION), token(t::BG_ACTIVE)].contains(&selection_bg()),
+        "the selection band must come from the theme, not from a literal"
+    );
 
     // The severities must stay TELLABLE APART, whatever the theme does: they are the one place where
     // hue carries meaning rather than decoration.
@@ -152,4 +159,53 @@ fn a_fill_is_reverse_video_in_one_hue() {
             .add_modifier
             .contains(Modifier::REVERSED | Modifier::BOLD)
     );
+}
+
+/// THE SELECTION BAND IS CHOSEN BY MEASUREMENT, so the measurement is the test: across EVERY
+/// shipped theme the band must stand at least as far off the page as the theme's own
+/// `bg.selection` did, and must still carry body text at 4.5:1 whenever `bg.selection` did.
+///
+/// Both halves matter. Without the first, a rule that picked `bg.active` unconditionally would
+/// make the selection fainter in `dracula`, `ayu-dark` and `night-owl`. Without the second, it
+/// would strengthen nine themes by putting their row text under the readable floor.
+#[test]
+fn every_theme_selection_band_is_no_weaker_and_no_less_readable() {
+    for theme in available() {
+        apply(&theme.id).unwrap();
+        let page = base_bg();
+        let text = text();
+        let declared = color(opaline::names::tokens::BG_SELECTION);
+        let chosen = selection_bg();
+
+        assert!(
+            contrast(chosen, page) >= contrast(declared, page) - f32::EPSILON,
+            "{}: the band got fainter ({:.2} -> {:.2})",
+            theme.id,
+            contrast(declared, page),
+            contrast(chosen, page)
+        );
+        if contrast(text, declared) >= 4.5 {
+            assert!(
+                contrast(text, chosen) >= 4.5,
+                "{}: the stronger band put row text under 4.5:1 ({:.2})",
+                theme.id,
+                contrast(text, chosen)
+            );
+        }
+    }
+    apply(DEFAULT_THEME).unwrap();
+}
+
+/// The ratio itself, against hand-computed values — so a sign or channel-weight slip in the
+/// formula cannot pass by agreeing with itself.
+#[test]
+fn contrast_is_the_wcag_ratio() {
+    let black = Color::Rgb(0, 0, 0);
+    let white = Color::Rgb(255, 255, 255);
+    assert!((contrast(black, white) - 21.0).abs() < 0.01);
+    assert!((contrast(white, white) - 1.0).abs() < 0.01);
+    // Catppuccin Mocha's text on its own page background, 11.34:1 computed by hand.
+    assert!((contrast(Color::Rgb(205, 214, 244), Color::Rgb(30, 30, 46)) - 11.34).abs() < 0.01);
+    // A non-RGB colour has no luminance, so it can never win a comparison.
+    assert!((contrast(Color::Reset, white) - 1.0).abs() < 0.01);
 }

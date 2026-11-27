@@ -475,6 +475,20 @@ them, then the sessions the supervisor drives, then the sessions they drive, the
 are stopped. Inside one group the list reads as the tree of the work: a session is followed by the
 sessions it asked for, each one step further in.
 
+Each session in the list takes two lines of text and one blank line. The first line gives the name of
+the session and nothing else, so the product MUST NOT shorten a name to show something else beside
+it. The second line gives the state, the mode, the heartbeat, the engine and the age of the last
+activity. The age is at the right edge of the line, so that the ages of all sessions make one column
+to read down. The blank line separates one session from the next.
+
+The state and the mode MUST stay visible at every width. The product sheds the age, then the engine,
+if the line is too narrow for all of them. It gives the heartbeat only for a session that the
+supervisor drives, because a heartbeat on a session that nothing drives promises a wake that nothing
+sends.
+
+The selection covers the two lines of text of one session. It MUST NOT cover the blank line, because
+the selection would then touch the next session.
+
 The tree MUST NOT become the outer grouping. A session that waits for a person belongs at the top of
 the list, and not folded under a parent that waits for nothing: a row a person must go looking for is
 a row the product failed to show them. So a session whose parent is in another group is drawn at the
@@ -632,6 +646,12 @@ default of the theme. A colour that the agent selected passes through.
 
 The product MUST show severity with a symbol, a word, a badge and a colour together. One colour with low contrast MUST NOT carry the
 meaning alone. The author of the theme owns the contrast.
+
+The background of the selection is one exception, and the product measures it. A theme can give two
+backgrounds for an item that is current. The product takes the one that stands further off the page
+background, but only while the body text on it stays readable. Otherwise it keeps the background that
+the theme gives for a selection. The product MUST NOT make the selection stronger at the cost of
+reading the row.
 
 The Settings view is a table of settings. Each row has the name of the setting, the value in force, and one
 phrase that says what the setting controls. The product offers only the values that it can apply.

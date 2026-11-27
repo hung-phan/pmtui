@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use agent_manager::job::AgentLoopState;
 use agent_manager::registry::Engine;
@@ -10,7 +10,7 @@ use agent_manager::state::ProjectPaths;
 use agent_manager::tmux::session_name;
 use tempfile::TempDir;
 
-use crate::probe::{TmuxSocket, tmux_available};
+use crate::probe::{TmuxSocket, tmux_available, wait_until};
 
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -73,6 +73,21 @@ fn start_session(socket: &str, name: &str) {
         output.status.success(),
         "failed to start {name}: {}",
         String::from_utf8_lossy(&output.stderr)
+    );
+    // AND WAIT FOR THE EXEC TO LAND. tmux runs the command string through a shell, so
+    // `#{pane_current_command}` reports `bash` — or `tmux`, while the server is still starting —
+    // until `exec` replaces it with `sleep`. This test's whole point is that two snapshots of that
+    // field are identical, so a pane caught mid-handover makes doctor look like it changed a
+    // terminal it never touched. Measured on a CI runner, green on every local run.
+    assert!(
+        wait_until(Duration::from_secs(10), || {
+            let panes = tmux(
+                socket,
+                &["list-panes", "-t", name, "-F", "#{pane_current_command}"],
+            );
+            panes.status.success() && String::from_utf8_lossy(&panes.stdout).trim() == "sleep"
+        }),
+        "{name} never reached its `sleep` command"
     );
 }
 

@@ -113,6 +113,11 @@ pub struct ProjectView {
     /// looked identical for one stop and for five.
     pub oldest_stop_since: Option<Epoch>,
     /// The run mode (from the registry, set by the caller) — always [`Mode::AgentLoop`].
+    /// The heartbeat the ledger carries, for the row's state line. `None` means the ledger did not
+    /// name one, which the row reads as the harness default exactly as the preview head does —
+    /// `job_engine::DEFAULT_CADENCE_S` — and shows only for a row something drives, because a
+    /// cadence on an undriven row promises a nudge nothing will send.
+    pub cadence_s: Option<u64>,
     pub mode: Mode,
     /// Which CLI it runs.
     pub engine: Option<Engine>,

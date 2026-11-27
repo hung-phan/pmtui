@@ -73,6 +73,60 @@ fn the_editor_is_ctrl_x_ctrl_e_and_bare_ctrl_e_ends_the_line() {
     assert_eq!(c.cursor(), (0, 0));
 }
 
+/// `^X^D` EMPTIES THE BUFFER, and the clear is RECOVERABLE: it goes through the library's own
+/// `select_all` + `cut`, so the history records it (`^u` undoes) and the yank buffer holds it
+/// (`^y` pastes it back). A clear that could not be taken back would be the one key in a composer
+/// that can lose typing.
+#[test]
+fn ctrl_x_ctrl_d_empties_the_buffer_and_it_can_be_taken_back() {
+    let mut c = Composer::from_text("first line\nsecond line".into());
+    c.key(KeyCode::Char('x'), KeyModifiers::CONTROL);
+
+    assert_eq!(
+        c.key(KeyCode::Char('d'), KeyModifiers::CONTROL),
+        Edit::Consumed,
+        "the clear is the composer's own, so no caller has to know the chord"
+    );
+    assert_eq!(c.text(), "");
+    assert!(
+        c.is_empty(),
+        "an emptied buffer shows its placeholder again"
+    );
+    assert_eq!(c.cursor(), (0, 0));
+
+    // `^u` is the library's undo.
+    assert_eq!(
+        c.key(KeyCode::Char('u'), KeyModifiers::CONTROL),
+        Edit::Consumed
+    );
+    assert_eq!(c.text(), "first line\nsecond line", "undo restores it");
+
+    // …and the cut text is still in the yank buffer, so `^y` is the other way back.
+    let mut c = Composer::from_text("gone".into());
+    c.key(KeyCode::Char('x'), KeyModifiers::CONTROL);
+    c.key(KeyCode::Char('d'), KeyModifiers::CONTROL);
+    assert_eq!(
+        c.key(KeyCode::Char('y'), KeyModifiers::CONTROL),
+        Edit::Consumed
+    );
+    assert_eq!(c.text(), "gone", "the yank buffer holds what was cleared");
+
+    // UPPERCASE reaches it too, like every other chord: the letter is lowercased.
+    let mut c = Composer::from_text("bye".into());
+    c.key(KeyCode::Char('x'), KeyModifiers::CONTROL);
+    c.key(KeyCode::Char('D'), KeyModifiers::CONTROL);
+    assert_eq!(c.text(), "");
+
+    // And BARE `^D` is still the library's — a chord is a chord, not a modifier on one key.
+    let mut c = Composer::from_text("keep".into());
+    c.set_cursor(0, 0);
+    assert_eq!(
+        c.key(KeyCode::Char('d'), KeyModifiers::CONTROL),
+        Edit::Consumed
+    );
+    assert_eq!(c.text(), "eep", "bare ^D deletes one character forward");
+}
+
 /// A PREFIX WAITS EXACTLY ONE KEY. A mistyped chord costs a keystroke, not the key after it.
 #[test]
 fn a_dangling_ctrl_x_is_dropped_by_the_next_key() {
@@ -111,7 +165,11 @@ fn a_repeated_prefix_still_reaches_the_chord() {
         Edit::Chord('r'),
         "the directive field's rescind"
     );
-    assert_eq!(c.text(), "x", "no chord may edit the buffer");
+    assert_eq!(
+        c.text(),
+        "x",
+        "a chord the surface owns never edits the buffer"
+    );
 }
 
 /// A `^X` chord the surface does not know is REPORTED, not acted on: `Chord` carries the letter so the

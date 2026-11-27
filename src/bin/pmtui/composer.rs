@@ -67,6 +67,8 @@ pub(crate) enum Edit {
     Cancel,
     /// `^X^E` — hand the buffer to `$EDITOR`.
     Editor,
+    // `^X^D` — empty the buffer. NOT a variant: it is handled inside [`Composer::key`], because
+    // clearing is a library call on this buffer and no caller has anything to decide about it.
     /// Some OTHER `^X^<letter>` chord, carrying the lowercased letter.
     ///
     /// The composer knows `^X^E` because every buffer has an `$EDITOR`; what else a `^X` chord may
@@ -223,10 +225,21 @@ impl Composer {
             && c.is_ascii_alphabetic()
         {
             let c = c.to_ascii_lowercase();
-            return if c == 'e' {
-                Edit::Editor
-            } else {
-                Edit::Chord(c)
+            return match c {
+                'e' => Edit::Editor,
+                // `^X^D` EMPTIES THE BUFFER, and it belongs here rather than to a surface for the
+                // same reason `^X^E` does: every prose buffer can be emptied, so a per-field copy
+                // would be three copies of one library call. Through `select_all` + `cut`, which is
+                // the library's own documented idiom and is why the clear is RECOVERABLE two ways —
+                // `cut` records history (`^u` undoes it) and fills the yank buffer (`^y` pastes it
+                // back). A clear that could not be taken back would be the one key in a composer
+                // that can lose typing.
+                'd' => {
+                    self.area.select_all();
+                    self.area.cut();
+                    Edit::Consumed
+                }
+                _ => Edit::Chord(c),
             };
         }
 

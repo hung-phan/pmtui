@@ -144,6 +144,9 @@ impl ProjectView {
                 .filter(|_| !stops.is_empty()),
             stops,
             // Registry-sourced fields; the caller (pmtui) fills these in.
+            // Straight off the ledger, like `run` and `open_stops` above: the row's state line
+            // shows the same heartbeat `job_engine` consults and the preview head prints.
+            cadence_s: ledger.as_ref().and_then(|l| l.cadence_s),
             mode: Mode::AgentLoop,
             engine: None,
             session_live: false,

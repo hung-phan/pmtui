@@ -804,6 +804,19 @@ pub(crate) const BINDINGS: &[Binding] = &[
         applies: Applies::Always,
         rank: 3,
     },
+    // ON THE BAR, at the HIGHEST rank in this scope. Chips shed highest-rank-first, so this is the
+    // one that goes when the bar runs out of columns — which is what keeps `Esc Keep draft`, the
+    // only key that says how to LEAVE the composer, from being the chip that drops.
+    Binding {
+        key: "^X^D",
+        label: "Clear",
+        help: "Message, goal and directive: empty the buffer. Recoverable — ^u undoes it and ^y pastes \
+               the cleared text back",
+        group: KeyGroup::Overlays,
+        scope: Scope::Send,
+        applies: Applies::Always,
+        rank: 5,
+    },
     Binding {
         key: "Esc",
         label: "Keep draft",
